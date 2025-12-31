@@ -6,6 +6,8 @@
 let settings = {
   buttonPosition: "top-right",
   downloadFolder: "imgDownloader_Files",
+  showSaveAs: false,
+  minWidth: 50,
 };
 
 // SVG Icon for the download button
@@ -24,6 +26,8 @@ function init() {
     {
       buttonPosition: "top-right",
       downloadFolder: "imgDownloader_Files",
+      showSaveAs: false,
+      minWidth: 50,
     },
     (items) => {
       settings = items;
@@ -43,6 +47,12 @@ function init() {
       }
       if (changes.downloadFolder) {
         settings.downloadFolder = changes.downloadFolder.newValue;
+      }
+      if (changes.showSaveAs) {
+        settings.showSaveAs = changes.showSaveAs.newValue;
+      }
+      if (changes.minWidth) {
+        settings.minWidth = changes.minWidth.newValue;
       }
     }
   });
@@ -124,8 +134,9 @@ function getPositionClass(pos) {
  * Check if image is suitable for a download button.
  */
 function isValidImage(img) {
-  // Ignore small icons/tracking pixels
-  if (img.width < 50 || img.height < 50) return false;
+  // Ignore small icons/tracking pixels based on setting
+  if (img.width < settings.minWidth || img.height < settings.minWidth)
+    return false;
   // Ignore if already has a button (check sibling)
   if (img.dataset.imdProcessed) return false;
   return true;
@@ -218,6 +229,7 @@ function downloadImage(img) {
     action: "download",
     url: src,
     folder: settings.downloadFolder,
+    saveAs: settings.showSaveAs,
   });
 }
 

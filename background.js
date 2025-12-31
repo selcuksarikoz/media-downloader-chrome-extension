@@ -5,11 +5,11 @@
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "download" && message.url) {
-    downloadImage(message.url, message.folder);
+    downloadImage(message.url, message.folder, message.saveAs);
   }
 });
 
-function downloadImage(url, folder) {
+function downloadImage(url, folder, saveAs) {
   let filename = getFilenameFromUrl(url);
 
   // Ensure the folder path.
@@ -17,14 +17,17 @@ function downloadImage(url, folder) {
   // Remove leading/trailing slashes from folder name just in case.
   if (folder) {
     folder = folder.replace(/^[\/\\]+|[\/\\]+$/g, "");
-    filename = `${folder}/${filename}`;
+    if (folder.length > 0) {
+      // Check length after trim
+      filename = `${folder}/${filename}`;
+    }
   }
 
   chrome.downloads.download(
     {
       url: url,
       filename: filename,
-      saveAs: false,
+      saveAs: !!saveAs, // Force boolean
       conflictAction: "uniquify",
     },
     (downloadId) => {

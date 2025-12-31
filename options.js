@@ -2,11 +2,15 @@
 function saveOptions() {
   const position = document.getElementById("position").value;
   const folder = document.getElementById("folder").value;
+  const saveAs = document.getElementById("saveAs").checked;
+  const minWidth = document.getElementById("minWidth").value;
 
   chrome.storage.sync.set(
     {
       buttonPosition: position,
       downloadFolder: folder,
+      showSaveAs: saveAs,
+      minWidth: parseInt(minWidth, 10) || 150,
     },
     () => {
       // Update status to let user know options were saved.
@@ -25,10 +29,14 @@ function restoreOptions() {
     {
       buttonPosition: "top-right", // Default value
       downloadFolder: "imgDownloader_Files", // Default value
+      showSaveAs: false, // Default value
+      minWidth: 50, // Default value
     },
     (items) => {
       document.getElementById("position").value = items.buttonPosition;
       document.getElementById("folder").value = items.downloadFolder;
+      document.getElementById("saveAs").checked = items.showSaveAs;
+      document.getElementById("minWidth").value = items.minWidth;
     }
   );
 }
