@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>imgDownloader Settings</title>
+    <link rel="stylesheet" href="styles.scss" />
+  </head>
+  <body class="options-page">
+    <div class="options-container">
+      <div class="options-header">
+        <h1>imgDownloader Settings</h1>
+      </div>
+
+      <div class="form-group">
+        <label for="position">Button Position</label>
+        <select id="position" class="form-control">
+          <option value="top-right">Top-Right (Default)</option>
+          <option value="top-left">Top-Left</option>
+          <option value="bottom-right">Bottom-Right</option>
+          <option value="bottom-left">Bottom-Left</option>
+          <option value="center">Center</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="folder">Download Sub-folder</label>
+        <input
+          type="text"
+          id="folder"
+          class="form-control"
+          placeholder="e.g. imgDownloader_Files"
+        />
+        <small
+          style="
+            color: #666;
+            font-size: 0.8rem;
+            margin-top: 4px;
+            display: block;
+          "
+        >
+          Files will be saved in your default Downloads directory under this
+          folder.
+        </small>
+      </div>
+
+      <button id="save" class="btn-save">Save Settings</button>
+      <div id="status"></div>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,153 @@
+/* =========================================
+   Global/Reset (Scoped mostly to Options)
+   ========================================= */
+body.options-page {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f4f4f9;
+  color: #333;
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.options-container {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 400px;
+  max-width: 90%;
+}
+
+.options-header {
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.options-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #2c3e50;
+}
+
+.form-group {
+  margin-bottom: 1.2rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.form-control {
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box; /* Important for padding */
+}
+
+.form-control:focus {
+  border-color: #3498db;
+  outline: none;
+}
+
+.btn-save {
+  width: 100%;
+  padding: 0.8rem;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-save:hover {
+  background-color: #2980b9;
+}
+
+#status {
+  margin-top: 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+  min-height: 1.2em;
+  color: #27ae60;
+}
+
+/* =========================================
+   Injected Content Button Styles
+   ========================================= */
+/* The button container */
+.imd-down-btn {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  background-color: rgba(30, 30, 30, 0.85); /* Dark semi-transparent */
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 2147483647; /* Max z-index */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+  opacity: 0; /* Hidden by default until hover */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  pointer-events: auto; /* Ensure it captures clicks */
+}
+
+/* Show button on specific conditions handled by JS or sibling hover */
+/* Note: We will handle showing via JS 'visible' class or sibling hover if possible.
+   However, reliable 'sibling hover' across all DOM structures is hard.
+   We will rely on the content script to toggle a class or just rely on the button itself being hovered.
+   Actually, the best UX is: show when mouse is over the image.
+   We'll use a class '.imd-show' added by JS mouseover events on the image. */
+.imd-down-btn.imd-show,
+.imd-down-btn:hover {
+  opacity: 1;
+}
+
+.imd-down-btn:active {
+  transform: scale(0.95);
+}
+
+/* Icon (SVG) styling */
+.imd-down-btn svg {
+  width: 24px;
+  height: 24px;
+  fill: #ffffff;
+  pointer-events: none; /* Let clicks pass to button */
+}
+
+/* Positioning Classes */
+/* We will likely set top/left/right/bottom inline in JS for precise positioning relative to image rect,
+   OR we can use these if we use a relative container wrapper.
+   Given the "no wrapper" preference to avoid layout break, we'll likely use absolute positioning
+   calculated in JS. But I'll provide these valid potential helper classes just in case. */
+.imd-pos-tl {
+  top: 10px;
+  left: 10px;
+}
+.imd-pos-tr {
+  top: 10px;
+  right: 10px;
+}
+.imd-pos-bl {
+  bottom: 10px;
+  left: 10px;
+}
+.imd-pos-br {
+  bottom: 10px;
+  right: 10px;
+}
+.imd-pos-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}

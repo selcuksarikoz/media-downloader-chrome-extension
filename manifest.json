@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "imgDownloader",
+  "version": "1.0",
+  "description": "Download images from any website easily with an overlay button.",
+  "permissions": ["storage", "downloads", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}
