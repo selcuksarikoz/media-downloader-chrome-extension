@@ -7,7 +7,7 @@ let settings = {
   buttonPosition: "top-right",
   downloadFolder: "imgDownloader_Files",
   showSaveAs: false,
-  minWidth: 50,
+  minWidth: 150,
 };
 
 // SVG Icon for the download button
@@ -27,7 +27,7 @@ function init() {
       buttonPosition: "top-right",
       downloadFolder: "imgDownloader_Files",
       showSaveAs: false,
-      minWidth: 50,
+      minWidth: 150,
     },
     (items) => {
       settings = items;

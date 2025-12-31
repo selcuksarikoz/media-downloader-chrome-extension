@@ -30,7 +30,7 @@ function restoreOptions() {
       buttonPosition: "top-right", // Default value
       downloadFolder: "imgDownloader_Files", // Default value
       showSaveAs: false, // Default value
-      minWidth: 50, // Default value
+      minWidth: 150, // Default value
     },
     (items) => {
       document.getElementById("position").value = items.buttonPosition;
