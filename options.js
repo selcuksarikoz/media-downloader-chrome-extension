@@ -4,6 +4,7 @@ const DEFAULTS = {
   showSaveAs: false,
   showPreviewButton: true,
   showVideoControls: true,
+  captureType: "jpg",
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };
@@ -20,6 +21,7 @@ function saveOptions() {
       showSaveAs: get("saveAs").checked,
       showPreviewButton: get("showPreview").checked,
       showVideoControls: get("showVideoControls").checked,
+      captureType: get("captureType").value,
       minWidth: parseInt(get("minWidth").value, 10) || DEFAULTS.minWidth,
       maxConcurrentDownloads: Math.min(
         10,
@@ -47,6 +49,11 @@ function restoreOptions() {
     get("saveAs").checked = items.showSaveAs;
     get("showPreview").checked = items.showPreviewButton;
     get("showVideoControls").checked = items.showVideoControls;
+    get("captureType").value = ["jpg", "png", "webp"].includes(
+      items.captureType
+    )
+      ? items.captureType
+      : DEFAULTS.captureType;
     get("minWidth").value = items.minWidth;
     get("maxConcurrent").value = items.maxConcurrentDownloads;
     if (folder !== items.downloadFolder) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Media Downloader",
-  "version": "1.9.0",
+  "version": "1.9.5",
   "description": "Download images and videos with overlay controls.",
   "permissions": ["storage", "downloads", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],

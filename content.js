@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   showSaveAs: false,
   showPreviewButton: true,
   showVideoControls: true,
+  captureType: "jpg",
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };
@@ -50,16 +51,18 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
   const video = capturedVideos.get(videoId);
-  const button = video
-    ? mediaControls.get(video)?.querySelector(".imd-down-btn")
-    : null;
+  const buttons = video
+    ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn")
+    : [];
 
-  if (button) {
+  if (buttons?.length) {
     const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
-    button.title = isActive ? "Video download in progress" : "Download Video";
-    button.setAttribute("aria-label", button.title);
-    button.classList.toggle("imd-recording", isActive);
-    button.disabled = isActive;
+    buttons.forEach((button) => {
+      button.title = isActive ? "Video download in progress" : "Download Video";
+      button.setAttribute("aria-label", button.title);
+      button.classList.toggle("imd-recording", isActive);
+      button.disabled = isActive;
+    });
   }
 
   updateBlobDownloadPanel(videoId, status, message, progress);
@@ -167,6 +170,12 @@ const DOWNLOAD_ICON = `
 const PREVIEW_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M12 4.5C7 4.5 2.7 7.6 1 12c1.7 4.4 6 7.5 11 7.5s9.3-3.1 11-7.5c-1.7-4.4-6-7.5-11-7.5zm0 12.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+</svg>
+`;
+
+const CAPTURE_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M17 7h-1.2l-1.1-2H9.3L8.2 7H7a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-6a3 3 0 0 0-3-3zm-5 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/>
 </svg>
 `;
 
@@ -332,9 +341,17 @@ function processMedia(media) {
     `Preview ${isImage ? "highest-resolution image" : "video"}`,
     PREVIEW_ICON
   );
+  const captureBtn = isImage
+    ? null
+      : createActionButton(
+        "imd-capture-btn",
+        "Capture Frame",
+        CAPTURE_ICON
+      );
   const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
   previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
   actionGroup.append(downloadBtn, previewBtn);
+  if (captureBtn) actionGroup.append(captureBtn);
 
   downloadBtn.addEventListener("click", (e) => {
     e.preventDefault();
@@ -348,9 +365,17 @@ function processMedia(media) {
     previewMedia(media);
   });
 
+  captureBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    captureVideoFrame(media).catch((error) => {
+      console.error("Video frame capture failed:", error);
+    });
+  });
+
   const showButtons = () => {
     if (
-      !lastPointerPosition ||
+      lastPointerPosition &&
       findTopMediaAtPoint(lastPointerPosition.x, lastPointerPosition.y) === media
     ) {
       showActionGroup(actionGroup, media);
@@ -391,6 +416,10 @@ function showActionGroup(group, media) {
     hideActionGroup(group);
     return;
   }
+
+  mediaControls.forEach((otherGroup, otherMedia) => {
+    if (otherMedia !== media) hideActionGroup(otherGroup);
+  });
 
   if (!group.isConnected && document.body) {
     document.body.appendChild(group);
@@ -535,38 +564,101 @@ function reconcileControlsAtPoint(x, y) {
 
 function findTopMediaAtPoint(x, y) {
   const stack = document.elementsFromPoint(x, y);
+  const { hasModal, modal } = getModalAtPoint(x, y, stack);
+  if (hasModal && !modal) return null;
   let bestMedia = null;
   let bestStackIndex = Infinity;
 
   mediaControls.forEach((group, media) => {
-    if (!media.isConnected || !visibleMedia.has(media)) return;
+    if (
+      !media.isConnected ||
+      !visibleMedia.has(media) ||
+      !isMediaActuallyVisible(media)
+    ) {
+      return;
+    }
+    if (modal && !modal.contains(media)) return;
     const rect = media.getBoundingClientRect();
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
       return;
     }
 
-    for (let index = 0; index < stack.length; index += 1) {
-      let element = stack[index];
-      if (group.contains(element)) {
-        bestMedia = media;
-        bestStackIndex = -1;
-        return;
-      }
+    const targets = getMediaHoverTargets(media);
+    const isRelated = (element) =>
+      group.contains(element) ||
+      targets.some((target) => target === element || target.contains(element));
+    const stackIndex = stack.findIndex(isRelated);
+    if (stackIndex === -1 || stackIndex >= bestStackIndex) return;
 
-      for (let depth = 0; element && depth < 5; depth += 1) {
-        if (element === media || element.contains(media)) {
-          if (index < bestStackIndex) {
-            bestMedia = media;
-            bestStackIndex = index;
-          }
-          return;
-        }
-        element = element.parentElement;
-      }
-    }
+    const blocked = stack
+      .slice(0, stackIndex)
+      .some((element) => !isRelated(element));
+    if (blocked) return;
+
+    bestMedia = media;
+    bestStackIndex = stackIndex;
   });
 
   return bestMedia;
+}
+
+function isMediaActuallyVisible(media) {
+  if (
+    typeof media.checkVisibility === "function" &&
+    !media.checkVisibility({
+      checkOpacity: true,
+      checkVisibilityCSS: true,
+    })
+  ) {
+    return false;
+  }
+
+  for (let element = media; element; element = element.parentElement) {
+    if (
+      element.hidden ||
+      element.inert ||
+      element.getAttribute("aria-hidden") === "true"
+    ) {
+      return false;
+    }
+    const style = getComputedStyle(element);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getModalAtPoint(x, y, stack) {
+  const modals = Array.from(
+    document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]')
+  ).filter((modal) => {
+    const style = getComputedStyle(modal);
+    const rect = modal.getBoundingClientRect();
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      Number(style.opacity) > 0 &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  });
+  if (!modals.length) return { hasModal: false, modal: null };
+
+  const modal = stack
+    .map((element) => modals.find((candidate) => candidate.contains(element)))
+    .find(Boolean);
+  if (modal) return { hasModal: true, modal };
+
+  const containsPoint = modals.find((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  });
+  return { hasModal: true, modal: containsPoint || null };
 }
 
 function createActionButton(className, title, icon) {
@@ -754,6 +846,49 @@ function streamBlobVideo(video, url) {
       detail,
     })
   );
+}
+
+async function captureVideoFrame(video) {
+  if (!video.videoWidth || !video.videoHeight) {
+    throw new Error("Video frame is not ready.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is unavailable.");
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const captureFormats = {
+    jpg: { mimeType: "image/jpeg", extension: "jpg", quality: 0.92 },
+    png: { mimeType: "image/png", extension: "png" },
+    webp: { mimeType: "image/webp", extension: "webp", quality: 0.92 },
+  };
+  const format = captureFormats[settings.captureType] ?? captureFormats.jpg;
+  const blob = await new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(
+        (result) =>
+          result ? resolve(result) : reject(new Error("Frame encoding failed.")),
+        format.mimeType,
+        format.quality
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+  const url = URL.createObjectURL(blob);
+  const filename = getSuggestedVideoName(video).replace(
+    /\.[^.]+$/,
+    `-frame-${Math.round(video.currentTime * 1000)}ms.${format.extension}`
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.documentElement.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function getSuggestedVideoName(video) {
