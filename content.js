@@ -308,7 +308,7 @@ function parseSrcset(srcset) {
  * Send download request to background script.
  */
 function downloadImage(img) {
-  const src = img.currentSrc || img.src;
+  const src = getHighestResolutionUrl(img);
   if (!src) {
     console.error("Image has no source.");
     return;
