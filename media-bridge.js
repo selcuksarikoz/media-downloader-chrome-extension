@@ -8,6 +8,43 @@ const queuedVideoIds = new Set();
 let maxConcurrentJobs = 5;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
+const protectedVideos = new WeakSet();
+
+const nativePause = HTMLMediaElement.prototype.pause;
+HTMLMediaElement.prototype.pause = function () {
+  if (!protectedVideos.has(this)) return nativePause.call(this);
+};
+const nativeLoad = HTMLMediaElement.prototype.load;
+HTMLMediaElement.prototype.load = function () {
+  if (!protectedVideos.has(this)) return nativeLoad.call(this);
+};
+
+for (const property of ["src", "srcObject", "currentTime"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLMediaElement.prototype,
+    property
+  );
+  if (!descriptor?.set) continue;
+  Object.defineProperty(HTMLMediaElement.prototype, property, {
+    ...descriptor,
+    set(value) {
+      if (!protectedVideos.has(this)) descriptor.set.call(this, value);
+    },
+  });
+}
+
+const nativeSetAttribute = Element.prototype.setAttribute;
+Element.prototype.setAttribute = function (name, value) {
+  if (!(protectedVideos.has(this) && name.toLowerCase() === "src")) {
+    return nativeSetAttribute.call(this, name, value);
+  }
+};
+const nativeRemoveAttribute = Element.prototype.removeAttribute;
+Element.prototype.removeAttribute = function (name) {
+  if (!(protectedVideos.has(this) && name.toLowerCase() === "src")) {
+    return nativeRemoveAttribute.call(this, name);
+  }
+};
 
 if (window.MediaSource && window.SourceBuffer) {
   const nativeAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
@@ -150,6 +187,7 @@ async function downloadKnownBlob(url, filename, videoId) {
   const response = await fetch(url);
   const blob = await response.blob();
   if (!blob.size) throw new Error("The Blob video contains no data.");
+  await validateVideoBlob(blob);
   const downloadUrl = nativeCreateObjectURL(blob);
   triggerDownload(downloadUrl, filename);
   setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
@@ -187,6 +225,7 @@ async function downloadCapturedMediaSource(
     if (!blob.size) {
       throw new Error("No MediaSource segments were captured.");
     }
+    await validateVideoBlob(blob);
 
     const downloadUrl = nativeCreateObjectURL(blob);
     triggerDownload(downloadUrl, replaceExtension(filename, extension));
@@ -277,7 +316,8 @@ async function recordMediaSource(video, videoId, filename) {
   const wasPaused = video.paused;
   const wasLooping = video.loop;
   const chunks = [];
-  let stopTimer;
+  let safetyTimer;
+  let reachedEndAt = null;
   let releasePlaybackLock = () => {};
   const reportProgress = () => {
     const progress =
@@ -311,13 +351,21 @@ async function recordMediaSource(video, videoId, filename) {
     releasePlaybackLock = keepVideoPlaying(video);
     recorder.start(1000);
     await video.play();
-    if (Number.isFinite(video.duration) && video.duration > 0) {
-      stopTimer = setTimeout(
-        stop,
-        Math.ceil((video.duration / Math.max(video.playbackRate, 0.1)) * 1000) +
-          2000
-      );
-    }
+    const recordingStartedAt = performance.now();
+    safetyTimer = setInterval(() => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+      if (video.currentTime >= video.duration - 0.15) {
+        reachedEndAt ??= performance.now();
+        if (performance.now() - reachedEndAt >= 250) stop();
+        return;
+      }
+      reachedEndAt = null;
+      const expectedDuration =
+        (video.duration / Math.max(video.playbackRate, 0.1)) * 1000;
+      if (performance.now() - recordingStartedAt > expectedDuration + 15_000) {
+        stop();
+      }
+    }, 250);
     emitStatus(videoId, "recording", "Recording video stream…", 0);
     video.addEventListener("timeupdate", reportProgress);
     await completion;
@@ -325,12 +373,13 @@ async function recordMediaSource(video, videoId, filename) {
     if (!recordedBlob.size) {
       throw new Error("No video data was captured; no file was created.");
     }
+    await validateVideoBlob(recordedBlob);
     const downloadUrl = nativeCreateObjectURL(recordedBlob);
     triggerDownload(downloadUrl, outputName);
     setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
     emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
   } finally {
-    clearTimeout(stopTimer);
+    clearInterval(safetyTimer);
     releasePlaybackLock();
     activeRecordings.delete(videoId);
     video.removeEventListener("ended", stop);
@@ -345,11 +394,15 @@ function keepVideoPlaying(video) {
   let disposed = false;
   let resumePending = false;
   const previousPreload = video.preload;
-  const releaseRenderHost = keepVideoRendered(video);
+  protectedVideos.add(video);
+  const releaseRenderHost = hostVideoForCapture(video);
+  const releaseFramePump = keepVideoFramesDecoded(video);
   video.preload = "auto";
 
   const resume = () => {
-    if (disposed || resumePending || video.ended || video.error) return;
+    if (disposed || resumePending) return;
+    if (!video.isConnected) getCaptureRenderHost().appendChild(video);
+    if (video.ended || video.error) return;
     resumePending = true;
     queueMicrotask(() => {
       resumePending = false;
@@ -368,7 +421,9 @@ function keepVideoPlaying(video) {
     disposed = true;
     clearInterval(watchdog);
     video.removeEventListener("pause", resume);
+    protectedVideos.delete(video);
     video.preload = previousPreload;
+    releaseFramePump();
     releaseRenderHost();
   };
 }
@@ -379,78 +434,87 @@ function getCaptureRenderHost() {
   captureRenderHost = document.createElement("div");
   captureRenderHost.setAttribute("aria-hidden", "true");
   captureRenderHost.style.cssText =
-    "position:fixed;top:0;left:0;width:2px;height:2px;overflow:hidden;" +
-    "opacity:.01;pointer-events:none;z-index:2147483646";
+    "position:fixed;top:0;left:0;height:90px;display:flex;overflow:hidden;" +
+    "opacity:.01;pointer-events:none;z-index:2147483646;transform:translateZ(0)";
   document.documentElement.appendChild(captureRenderHost);
   return captureRenderHost;
 }
 
-function keepVideoRendered(video) {
+function hostVideoForCapture(video) {
   const originalParent = video.parentNode;
   const originalNextSibling = video.nextSibling;
   const originalStyle = video.getAttribute("style");
-  let placeholder;
-  let hosted = false;
-  let disposed = false;
+  if (!originalParent) return () => {};
 
-  const restoreVideo = () => {
-    if (!hosted) return;
-    const targetParent = placeholder?.isConnected
+  const rect = video.getBoundingClientRect();
+  const placeholder = document.createElement("canvas");
+  placeholder.width = video.videoWidth || Math.max(1, Math.round(rect.width));
+  placeholder.height = video.videoHeight || Math.max(1, Math.round(rect.height));
+  placeholder.setAttribute("aria-hidden", "true");
+  placeholder.style.cssText =
+    `display:${getComputedStyle(video).display};width:${rect.width}px;` +
+    `height:${rect.height}px;object-fit:cover`;
+  try {
+    placeholder
+      .getContext("2d")
+      .drawImage(video, 0, 0, placeholder.width, placeholder.height);
+  } catch {}
+
+  originalParent.insertBefore(placeholder, video);
+  getCaptureRenderHost().appendChild(video);
+  video.style.cssText =
+    "position:relative;display:block;flex:0 0 160px;width:160px;height:90px;" +
+    "min-width:160px;min-height:90px;opacity:1;pointer-events:none;" +
+    "transform:translateZ(0);will-change:transform";
+
+  return () => {
+    const targetParent = placeholder.isConnected
       ? placeholder.parentNode
-      : originalParent?.isConnected
+      : originalParent.isConnected
         ? originalParent
         : null;
     if (targetParent) {
-      targetParent.insertBefore(
-        video,
-        placeholder?.isConnected
-          ? placeholder
-          : originalNextSibling?.parentNode === targetParent
-            ? originalNextSibling
-            : null
-      );
+      const anchor = placeholder.isConnected
+        ? placeholder
+        : originalNextSibling?.parentNode === targetParent
+          ? originalNextSibling
+          : null;
+      targetParent.insertBefore(video, anchor);
+    } else {
+      video.remove();
     }
-    placeholder?.remove();
-    placeholder = undefined;
+    placeholder.remove();
     if (originalStyle === null) video.removeAttribute("style");
     else video.setAttribute("style", originalStyle);
-    hosted = false;
+  };
+}
+
+function keepVideoFramesDecoded(video) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 16;
+  canvas.height = 9;
+  const context = canvas.getContext("2d", { alpha: false });
+  let stopped = false;
+  let callbackId;
+  let intervalId;
+  const draw = () => {
+    if (stopped) return;
+    try {
+      context?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    } catch {}
+    callbackId = video.requestVideoFrameCallback?.(draw);
   };
 
-  const hostVideo = () => {
-    if (hosted || disposed || !video.parentNode) return;
-    const rect = video.getBoundingClientRect();
-    placeholder = document.createElement("span");
-    placeholder.setAttribute("aria-hidden", "true");
-    placeholder.style.cssText = `display:block;width:${rect.width}px;height:${rect.height}px`;
-    video.parentNode.insertBefore(placeholder, video);
-    getCaptureRenderHost().appendChild(video);
-    video.style.cssText =
-      "position:absolute;inset:0;width:2px;height:2px;min-width:2px;" +
-      "min-height:2px;opacity:1;pointer-events:none";
-    hosted = true;
-    observer.disconnect();
-    observer.observe(placeholder);
-  };
-
-  const observer = new IntersectionObserver((entries) => {
-    const entry = entries[entries.length - 1];
-    if (!entry || disposed) return;
-    if (entry.target === video && !entry.isIntersecting) {
-      hostVideo();
-    } else if (entry.target === placeholder && entry.isIntersecting) {
-      observer.disconnect();
-      restoreVideo();
-      observer.observe(video);
-    }
-  });
-  observer.observe(video);
+  if (typeof video.requestVideoFrameCallback === "function") {
+    callbackId = video.requestVideoFrameCallback(draw);
+  } else {
+    intervalId = setInterval(draw, 100);
+  }
 
   return () => {
-    disposed = true;
-    observer.disconnect();
-    restoreVideo();
-    if (!video.isConnected && !originalParent?.isConnected) video.remove();
+    stopped = true;
+    clearInterval(intervalId);
+    if (callbackId !== undefined) video.cancelVideoFrameCallback?.(callbackId);
   };
 }
 
@@ -460,6 +524,48 @@ function getRecorderMimeType() {
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4",
   ].find((type) => MediaRecorder.isTypeSupported(type));
+}
+
+function validateVideoBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const probe = document.createElement("video");
+    const url = nativeCreateObjectURL(blob);
+    let settled = false;
+    const timeout = setTimeout(
+      () => finish(new Error("Generated video could not be validated.")),
+      8000
+    );
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      probe.removeAttribute("src");
+      probe.load();
+      nativeRevokeObjectURL(url);
+      if (error) reject(error);
+      else resolve();
+    };
+    probe.preload = "metadata";
+    probe.addEventListener(
+      "loadedmetadata",
+      () => {
+        const hasVideo = probe.videoWidth > 0 && probe.videoHeight > 0;
+        const hasDuration = probe.duration > 0 || probe.duration === Infinity;
+        finish(
+          hasVideo && hasDuration
+            ? null
+            : new Error("Generated file does not contain playable video.")
+        );
+      },
+      { once: true }
+    );
+    probe.addEventListener(
+      "error",
+      () => finish(new Error("Generated file is not a playable video.")),
+      { once: true }
+    );
+    probe.src = url;
+  });
 }
 
 function getRecordingBitrate(video) {
