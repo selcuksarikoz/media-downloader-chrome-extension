@@ -16,7 +16,7 @@ function downloadMedia({ url, folder, saveAs, mediaType }) {
       url,
       filename,
       saveAs: saveAs === true,
-      conflictAction: "uniquify",
+      conflictAction: "overwrite",
     },
     () => {
       if (chrome.runtime.lastError) {
