@@ -14,9 +14,35 @@ let settings = {
 const mediaControls = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
+const visibleMedia = new WeakSet();
+const mediaIntersectionObserver = new IntersectionObserver(
+  (entries) => {
+    entries.forEach((entry) => {
+      const media = entry.target;
+      if (entry.isIntersecting && entry.intersectionRatio > 0) {
+        visibleMedia.add(media);
+        processMedia(media);
+        return;
+      }
+
+      visibleMedia.delete(media);
+      const group = mediaControls.get(media);
+      if (group) hideActionGroup(group);
+    });
+  },
+  { root: null, threshold: [0, 0.01] }
+);
 const mediaResizeObserver = new ResizeObserver((entries) => {
   entries.forEach(({ target }) => {
-    if (!target.dataset.imdProcessed) processMedia(target);
+    if (!visibleMedia.has(target)) return;
+    if (!target.dataset.imdProcessed) {
+      processMedia(target);
+      return;
+    }
+    const group = mediaControls.get(target);
+    if (group?.classList.contains("imd-show")) {
+      positionActionGroup(group, target);
+    }
   });
 });
 
@@ -118,7 +144,7 @@ function processAllMedia() {
 
 function trackMedia(media) {
   mediaResizeObserver.observe(media);
-  processMedia(media);
+  mediaIntersectionObserver.observe(media);
 }
 
 /**
@@ -126,6 +152,7 @@ function trackMedia(media) {
  */
 function startObserver() {
   const observer = new MutationObserver((mutations) => {
+    const removedMedia = new Set();
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === 1) {
@@ -137,6 +164,18 @@ function startObserver() {
           }
         }
       });
+      mutation.removedNodes.forEach((node) => {
+        if (node.nodeType !== 1) return;
+        if (node.matches("img, video")) removedMedia.add(node);
+        node.querySelectorAll("img, video").forEach((media) =>
+          removedMedia.add(media)
+        );
+      });
+    });
+    queueMicrotask(() => {
+      removedMedia.forEach((media) => {
+        if (!media.isConnected) cleanupMedia(media);
+      });
     });
     schedulePointerReconciliation();
   });
@@ -145,6 +184,17 @@ function startObserver() {
     childList: true,
     subtree: true,
   });
+}
+
+function cleanupMedia(media) {
+  const group = mediaControls.get(media);
+  if (group) group.remove();
+  mediaControls.delete(media);
+  visibleMedia.delete(media);
+  mediaIntersectionObserver.unobserve(media);
+  mediaResizeObserver.unobserve(media);
+  delete media.dataset.imdProcessed;
+  delete media.dataset.imdWaiting;
 }
 
 /**
@@ -182,6 +232,7 @@ function isValidMedia(media) {
  * Create and inject controls for an image or video.
  */
 function processMedia(media) {
+  if (!visibleMedia.has(media) || !media.isConnected) return;
   const isImage = media.tagName === "IMG";
   const isLoaded = isImage ? media.complete : true;
   if (!isLoaded) {
@@ -202,7 +253,6 @@ function processMedia(media) {
     return;
   }
 
-  mediaResizeObserver.unobserve(media);
   delete media.dataset.imdWaiting;
   media.dataset.imdProcessed = "true";
   if (!isImage && !media.dataset.imdCaptureId) {
@@ -280,8 +330,11 @@ function processMedia(media) {
 
 function showActionGroup(group, media) {
   if (!media.isConnected) {
-    group.remove();
-    mediaControls.delete(media);
+    cleanupMedia(media);
+    return;
+  }
+  if (!visibleMedia.has(media)) {
+    hideActionGroup(group);
     return;
   }
 
@@ -375,11 +428,12 @@ function positionActionGroup(group, media) {
 function repositionOpenControls() {
   mediaControls.forEach((group, media) => {
     if (!media.isConnected) {
-      group.remove();
-      mediaControls.delete(media);
+      cleanupMedia(media);
       return;
     }
-    if (group.classList.contains("imd-show")) {
+    if (!visibleMedia.has(media)) {
+      hideActionGroup(group);
+    } else if (group.classList.contains("imd-show")) {
       positionActionGroup(group, media);
     }
   });
@@ -413,12 +467,11 @@ function reconcileControlsAtPoint(x, y) {
   const topMedia = findTopMediaAtPoint(x, y);
   mediaControls.forEach((group, media) => {
     if (!media.isConnected) {
-      group.remove();
-      mediaControls.delete(media);
+      cleanupMedia(media);
       return;
     }
 
-    if (media === topMedia) {
+    if (visibleMedia.has(media) && media === topMedia) {
       showActionGroup(group, media);
     } else if (!group.matches(":hover")) {
       hideActionGroup(group);
@@ -432,7 +485,7 @@ function findTopMediaAtPoint(x, y) {
   let bestStackIndex = Infinity;
 
   mediaControls.forEach((group, media) => {
-    if (!media.isConnected) return;
+    if (!media.isConnected || !visibleMedia.has(media)) return;
     const rect = media.getBoundingClientRect();
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
       return;

@@ -8,14 +8,49 @@ const DOWNLOAD_EVENT = "imd:download-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const blobKinds = new Map();
 const activeRecordings = new Map();
+const mediaSourceRecords = new WeakMap();
+const sourceBufferRecords = new WeakMap();
+
+if (window.MediaSource && window.SourceBuffer) {
+  const nativeAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
+  MediaSource.prototype.addSourceBuffer = function (mimeType) {
+    const sourceBuffer = nativeAddSourceBuffer.call(this, mimeType);
+    let record = mediaSourceRecords.get(this);
+    if (!record) {
+      record = { buffers: [] };
+      mediaSourceRecords.set(this, record);
+    }
+    const bufferRecord = { mimeType, chunks: [] };
+    record.buffers.push(bufferRecord);
+    sourceBufferRecords.set(sourceBuffer, bufferRecord);
+    return sourceBuffer;
+  };
+
+  const nativeAppendBuffer = SourceBuffer.prototype.appendBuffer;
+  SourceBuffer.prototype.appendBuffer = function (data) {
+    const record = sourceBufferRecords.get(this);
+    if (record && data) {
+      const bytes = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : new Uint8Array(data);
+      record.chunks.push(bytes.slice().buffer);
+    }
+    return nativeAppendBuffer.call(this, data);
+  };
+}
 
 const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
 URL.createObjectURL = (object) => {
   const url = nativeCreateObjectURL(object);
   if (object instanceof MediaSource) {
-    blobKinds.set(url, "media-source");
+    let record = mediaSourceRecords.get(object);
+    if (!record) {
+      record = { buffers: [] };
+      mediaSourceRecords.set(object, record);
+    }
+    blobKinds.set(url, { kind: "media-source", record });
   } else if (object instanceof Blob) {
-    blobKinds.set(url, "blob");
+    blobKinds.set(url, { kind: "blob" });
   }
   return url;
 };
@@ -40,11 +75,18 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
     return;
   }
 
-  const kind = blobKinds.get(url);
+  const source = blobKinds.get(url);
   const operation =
-    kind === "blob"
+    source?.kind === "blob"
       ? downloadKnownBlob(url, filename, videoId)
-      : recordMediaSource(video, videoId, filename);
+      : source?.kind === "media-source" && source.record.buffers.length === 1
+        ? downloadCapturedMediaSource(
+            video,
+            videoId,
+            filename,
+            source.record.buffers[0]
+          )
+        : recordMediaSource(video, videoId, filename);
 
   operation.catch((error) => {
     if (error && error.name === "AbortError") return;
@@ -60,6 +102,81 @@ async function downloadKnownBlob(url, filename, videoId) {
   triggerDownload(downloadUrl, filename);
   setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
   emitStatus(videoId, "complete", "Blob video downloaded.");
+}
+
+async function downloadCapturedMediaSource(
+  video,
+  videoId,
+  filename,
+  bufferRecord
+) {
+  const originalTime = video.currentTime;
+  const wasPaused = video.paused;
+  const wasLooping = video.loop;
+
+  try {
+    if (!isMediaFullyBuffered(video)) {
+      video.loop = false;
+      if (video.seekable.length && Number.isFinite(video.duration)) {
+        video.currentTime = 0;
+      }
+      emitStatus(
+        videoId,
+        "recording",
+        "Original media segments are being collected. Click again to finish early."
+      );
+      await waitForMediaCompletion(video, videoId);
+    }
+
+    const mimeType = bufferRecord.mimeType.split(";")[0] || "video/mp4";
+    const extension = mimeType.includes("webm") ? "webm" : "mp4";
+    const blob = new Blob(bufferRecord.chunks, { type: mimeType });
+    if (!blob.size) {
+      throw new Error("No MediaSource segments were captured.");
+    }
+
+    const downloadUrl = nativeCreateObjectURL(blob);
+    triggerDownload(downloadUrl, replaceExtension(filename, extension));
+    setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
+    emitStatus(videoId, "complete", "Original media segments downloaded.");
+  } finally {
+    activeRecordings.delete(videoId);
+    if (Number.isFinite(originalTime)) video.currentTime = originalTime;
+    video.loop = wasLooping;
+    if (wasPaused) video.pause();
+  }
+}
+
+function isMediaFullyBuffered(video) {
+  if (!Number.isFinite(video.duration) || !video.buffered.length) return false;
+  return (
+    video.buffered.start(0) <= 0.25 &&
+    video.buffered.end(video.buffered.length - 1) >= video.duration - 0.25
+  );
+}
+
+function waitForMediaCompletion(video, videoId) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
+      video.removeEventListener("ended", finish);
+      video.removeEventListener("error", fail);
+      resolve();
+    };
+    const fail = () => {
+      clearTimeout(timer);
+      reject(new Error("Video playback failed while collecting segments."));
+    };
+
+    activeRecordings.set(videoId, { stop: finish });
+    video.addEventListener("ended", finish, { once: true });
+    video.addEventListener("error", fail, { once: true });
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      timer = setTimeout(finish, Math.ceil(video.duration * 1000) + 5000);
+    }
+    video.play().catch(fail);
+  });
 }
 
 async function recordMediaSource(video, videoId, filename) {
