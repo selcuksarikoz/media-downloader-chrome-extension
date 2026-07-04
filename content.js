@@ -20,6 +20,7 @@ const positionedContainers = new WeakMap();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
+const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 const visibleMedia = new WeakSet();
 const mediaIntersectionObserver = new IntersectionObserver(
@@ -95,7 +96,7 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
     blobDownloadStack.appendChild(panel);
   }
   const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
-  const canFinish = status === "recording" || status === "progress";
+  const canSave = status === "recording" || status === "progress";
   const percent = Number.isFinite(progress)
     ? Math.max(0, Math.min(100, Math.round(progress)))
     : null;
@@ -107,7 +108,8 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
   fill.classList.toggle("imd-indeterminate", percent === null && isActive);
   panel.querySelector(".imd-download-percent").textContent =
     percent === null ? "" : `${percent}%`;
-  panel.querySelector(".imd-finish-download").hidden = !canFinish;
+  panel.querySelector(".imd-save-download").hidden = !canSave;
+  panel.querySelector(".imd-cancel-download").hidden = !isActive;
 
   if (typeof blobDownloadStack.showPopover === "function") {
     if (!blobDownloadStack.matches(":popover-open")) {
@@ -153,17 +155,26 @@ function createBlobDownloadPanel(videoId) {
     <div class="imd-download-footer">
       <span class="imd-download-percent"></span>
       <span>Keep this tab open</span>
-      <button type="button" class="imd-finish-download">Finish and save now</button>
+      <div class="imd-download-actions">
+        <button type="button" class="imd-save-download">Save Now</button>
+        <button type="button" class="imd-cancel-download">Cancel</button>
+      </div>
     </div>`;
-  panel.querySelector(".imd-finish-download").addEventListener("click", () => {
-    const request = blobDownloadRequests.get(videoId);
-    if (request) {
-      window.dispatchEvent(
-        new CustomEvent(BLOB_DOWNLOAD_EVENT, { detail: request })
-      );
-    }
+  panel.querySelector(".imd-save-download").addEventListener("click", () => {
+    dispatchBlobControl(videoId, "save");
+  });
+  panel.querySelector(".imd-cancel-download").addEventListener("click", () => {
+    dispatchBlobControl(videoId, "cancel");
   });
   return panel;
+}
+
+function dispatchBlobControl(videoId, action) {
+  window.dispatchEvent(
+    new CustomEvent(BLOB_CONTROL_EVENT, {
+      detail: { videoId, action },
+    })
+  );
 }
 
 const DOWNLOAD_ICON = `
@@ -373,6 +384,11 @@ function processMedia(media) {
 
   const actionGroup = document.createElement("div");
   actionGroup.className = "imd-action-group";
+  if (isInstagramVideoPlayerMedia(media)) {
+    actionGroup.classList.add("imd-video-portal");
+    actionGroup.popover = "manual";
+  }
+  isolateActionGroupEvents(actionGroup);
   const downloadBtn = createActionButton(
     "imd-down-btn",
     `Download ${isImage ? "Image" : "Video"}`,
@@ -449,7 +465,64 @@ function processMedia(media) {
   mediaControls.set(media, actionGroup);
 }
 
+function isInstagramVideoPlayerMedia(media) {
+  return Boolean(getAssociatedVideoPlayer(media));
+}
+
+function getAssociatedVideoPlayer(media) {
+  const selector = '[role="group"][aria-label="Video player"]';
+  const directPlayer = media.closest(selector);
+  if (directPlayer) return directPlayer;
+
+  const reelLink = media.closest('a[href*="/reel"], a[href*="/p/"]');
+  const linkedPlayer = reelLink?.querySelector(selector);
+  if (linkedPlayer) return linkedPlayer;
+
+  const mediaRect = media.getBoundingClientRect();
+  let ancestor = media.parentElement;
+  for (let depth = 0; ancestor && depth < 8; depth += 1) {
+    const player = ancestor.querySelector(selector);
+    if (player) {
+      const rect = player.getBoundingClientRect();
+      const overlaps =
+        rect.left < mediaRect.right &&
+        rect.right > mediaRect.left &&
+        rect.top < mediaRect.bottom &&
+        rect.bottom > mediaRect.top;
+      if (overlaps) return player;
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return null;
+}
+
+function isolateActionGroupEvents(group) {
+  const eventTypes = [
+    "pointerdown",
+    "pointerup",
+    "mousedown",
+    "mouseup",
+    "touchstart",
+    "touchend",
+    "click",
+    "dblclick",
+  ];
+  eventTypes.forEach((type) => {
+    group.addEventListener(
+      type,
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      },
+      { passive: false }
+    );
+  });
+}
+
 function getActionContainer(media) {
+  if (isInstagramVideoPlayerMedia(media)) return document.body;
+
   const mediaRect = media.getBoundingClientRect();
   let container = media.parentElement;
   let bestContainer = null;
@@ -487,6 +560,12 @@ function attachActionGroup(group, media) {
   if (currentContainer === container && group.parentElement === container) return;
   if (currentContainer) detachActionGroup(group);
 
+  if (group.classList.contains("imd-video-portal")) {
+    actionGroupContainers.set(group, document.body);
+    document.body.appendChild(group);
+    return;
+  }
+
   let state = positionedContainers.get(container);
   if (!state) {
     const needsPosition = getComputedStyle(container).position === "static";
@@ -507,6 +586,7 @@ function detachActionGroup(group) {
   const container = actionGroupContainers.get(group);
   group.remove();
   actionGroupContainers.delete(group);
+  if (group.classList.contains("imd-video-portal")) return;
   if (!container) return;
 
   const state = positionedContainers.get(container);
@@ -534,12 +614,34 @@ function showActionGroup(group, media) {
   });
 
   attachActionGroup(group, media);
+  if (
+    group.classList.contains("imd-video-portal") &&
+    typeof group.showPopover === "function" &&
+    !group.matches(":popover-open")
+  ) {
+    try {
+      group.showPopover();
+    } catch (error) {
+      if (error.name !== "InvalidStateError") throw error;
+    }
+  }
   group.classList.add("imd-show");
   positionActionGroup(group, media);
 }
 
 function hideActionGroup(group) {
   group.classList.remove("imd-show");
+  if (
+    group.classList.contains("imd-video-portal") &&
+    typeof group.hidePopover === "function" &&
+    group.matches(":popover-open")
+  ) {
+    try {
+      group.hidePopover();
+    } catch (error) {
+      if (error.name !== "InvalidStateError") throw error;
+    }
+  }
 }
 
 function getMediaHoverTargets(media) {
@@ -568,7 +670,6 @@ function positionActionGroup(group, media) {
   const container = actionGroupContainers.get(group);
   if (!container) return;
   const rect = media.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
   const width = group.offsetWidth || 86;
   const height = group.offsetHeight || 40;
   const gap = 10;
@@ -597,6 +698,13 @@ function positionActionGroup(group, media) {
       left = rect.right - width - gap;
   }
 
+  if (group.classList.contains("imd-video-portal")) {
+    group.style.top = `${Math.max(0, top)}px`;
+    group.style.left = `${Math.max(0, left)}px`;
+    return;
+  }
+
+  const containerRect = container.getBoundingClientRect();
   const localTop =
     top - containerRect.top + container.scrollTop - container.clientTop;
   const localLeft =

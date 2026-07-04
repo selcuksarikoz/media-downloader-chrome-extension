@@ -171,6 +171,10 @@ body.options-page {
   }
 }
 
+.imd-video-portal {
+  position: fixed;
+}
+
 .imd-action-btn {
   width: 40px;
   height: 40px;
@@ -287,8 +291,14 @@ body.options-page {
   }
 }
 
-.imd-finish-download {
+.imd-download-actions {
   margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.imd-save-download,
+.imd-cancel-download {
   padding: 4px 8px;
   border: 1px solid #52525b;
   border-radius: 6px;
@@ -296,6 +306,11 @@ body.options-page {
   color: #fff;
   cursor: pointer;
   font: inherit;
+}
+
+.imd-cancel-download {
+  border-color: #7f1d1d;
+  background: #450a0a;
 }
 
 @keyframes imd-progress-pulse {
