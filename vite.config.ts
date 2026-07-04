@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, "background.js"),
         content: resolve(__dirname, "content.js"),
+        "media-bridge": resolve(__dirname, "media-bridge.js"),
         options: resolve(__dirname, "options.html"),
         styles: resolve(__dirname, "styles.scss"),
       },

@@ -12,6 +12,28 @@ let settings = {
 };
 
 const mediaControls = new Map();
+const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
+const BLOB_STATUS_EVENT = "imd:blob-video-status";
+
+window.addEventListener(BLOB_STATUS_EVENT, (event) => {
+  const { videoId, status, message } = event.detail || {};
+  const video = Array.from(mediaControls.keys()).find(
+    (media) => media.dataset.imdCaptureId === videoId
+  );
+  const button = video
+    ? mediaControls.get(video)?.querySelector(".imd-down-btn")
+    : null;
+
+  if (button) {
+    button.title =
+      status === "recording" ? "Stop Video Recording" : "Download Video";
+    button.setAttribute("aria-label", button.title);
+    button.classList.toggle("imd-recording", status === "recording");
+  }
+
+  if (status === "error") console.error(message);
+  else console.info(message);
+});
 
 // SVG Icon for the download button
 const DOWNLOAD_ICON = `
@@ -124,9 +146,11 @@ function updateAllButtonPositions() {
 }
 
 function updatePreviewButtonVisibility() {
-  const previewButtons = document.querySelectorAll(".imd-preview-btn");
-  previewButtons.forEach((button) => {
-    button.hidden = !settings.showPreviewButton;
+  mediaControls.forEach((group, media) => {
+    const button = group.querySelector(".imd-preview-btn");
+    const isBlobVideo =
+      media.tagName === "VIDEO" && getVideoUrl(media).startsWith("blob:");
+    button.hidden = !settings.showPreviewButton || isBlobVideo;
   });
   repositionOpenControls();
 }
@@ -161,6 +185,9 @@ function processMedia(media) {
   if (!isValidMedia(media)) return;
 
   media.dataset.imdProcessed = "true";
+  if (!isImage && !media.dataset.imdCaptureId) {
+    media.dataset.imdCaptureId = crypto.randomUUID();
+  }
 
   const actionGroup = document.createElement("div");
   actionGroup.className = "imd-action-group";
@@ -175,7 +202,8 @@ function processMedia(media) {
     `Preview ${isImage ? "highest-resolution image" : "video"}`,
     PREVIEW_ICON
   );
-  previewBtn.hidden = !settings.showPreviewButton;
+  const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
+  previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
   actionGroup.append(downloadBtn, previewBtn);
 
   // Prevent clicks from bubbling to links
@@ -366,47 +394,16 @@ async function downloadMedia(media) {
   });
 }
 
-async function streamBlobVideo(video, url) {
-  const suggestedName = getSuggestedVideoName(video);
-
-  try {
-    if (typeof window.showSaveFilePicker !== "function") {
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = suggestedName;
-      link.click();
-      return;
-    }
-
-    // The picker must open before the first await to retain user activation.
-    const fileHandle = await window.showSaveFilePicker({
-      suggestedName,
-      types: [
-        {
-          description: "Video",
-          accept: {
-            "video/mp4": [".mp4"],
-            "video/webm": [".webm"],
-            "video/quicktime": [".mov"],
-            "video/x-matroska": [".mkv"],
-          },
-        },
-      ],
-    });
-    const response = await fetch(url);
-    if (!response.ok || !response.body) {
-      throw new Error(`Blob stream could not be read (${response.status}).`);
-    }
-
-    const writable = await fileHandle.createWritable();
-    await response.body.pipeTo(writable);
-  } catch (error) {
-    if (error && error.name === "AbortError") return;
-    console.error(
-      "Blob video download failed. MediaSource streams require segment capture and muxing.",
-      error
-    );
-  }
+function streamBlobVideo(video, url) {
+  window.dispatchEvent(
+    new CustomEvent(BLOB_DOWNLOAD_EVENT, {
+      detail: {
+        url,
+        filename: getSuggestedVideoName(video),
+        videoId: video.dataset.imdCaptureId,
+      },
+    })
+  );
 }
 
 function getSuggestedVideoName(video) {

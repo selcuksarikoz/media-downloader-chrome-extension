@@ -5,7 +5,8 @@ Media Downloader is a Chrome extension for downloading images and videos. It add
 ## Features
 
 - **One-Click Download:** Adds a download button to images and videos.
-- **Blob Video Streaming:** Streams readable `blob:` video sources directly to a user-selected file without buffering the full video in memory.
+- **Blob Video Streaming:** Streams readable `Blob` videos directly to disk without buffering the full file in memory.
+- **MediaSource Recording:** Records HLS/DASH-backed `MediaSource` playback to WebM in real time. Click download again to stop a live stream recording.
 - **Smart Positioning:** Choose where the button appears (Top-Right, Top-Left, etc.) via settings.
 - **Custom Save Location:** Save media to a specific sub-folder in your Downloads directory, or leave it empty to use Downloads directly.
 - **Size Filtering:** Automatically ignore small icons and thumbnails by setting a minimum width (default: 150px) to keep your interface clean.
@@ -58,7 +59,7 @@ Right-click the extension icon and select **Options** to configure:
 - **Always ask where to save:** Check this to trigger the "Save As" dialog for regular media downloads.
 - **Show preview button:** Show or hide the media preview control.
 
-Readable `Blob` URLs can be streamed directly. `MediaSource` URLs used by HLS/DASH players do not expose their appended segments through `fetch()`; downloading those streams requires a separate segment-capture and muxing pipeline.
+Readable `Blob` URLs are copied directly. HLS/DASH `MediaSource` playback is recorded in real time because its appended segments are not exposed through `fetch()`. DRM-protected media cannot be captured.
 
 ## License
 
