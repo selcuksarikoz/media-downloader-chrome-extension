@@ -8,6 +8,10 @@ const DOWNLOAD_EVENT = "imd:download-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const blobKinds = new Map();
 const activeRecordings = new Map();
+const activeJobs = new Set();
+const queuedJobs = [];
+const queuedVideoIds = new Set();
+let maxConcurrentJobs = 5;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
 
@@ -62,8 +66,13 @@ URL.revokeObjectURL = (url) => {
 };
 
 window.addEventListener(DOWNLOAD_EVENT, (event) => {
-  const { url, filename, videoId } = event.detail || {};
+  const { url, filename, videoId, maxConcurrent } = event.detail || {};
   if (!url || !videoId) return;
+
+  maxConcurrentJobs = Math.min(
+    10,
+    Math.max(1, Number.parseInt(maxConcurrent, 10) || 5)
+  );
 
   const video = document.querySelector(
     `video[data-imd-capture-id="${CSS.escape(videoId)}"]`
@@ -75,6 +84,23 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
     return;
   }
 
+  if (activeJobs.has(videoId) || queuedVideoIds.has(videoId)) return;
+
+  const job = { url, filename, videoId, video };
+  if (activeJobs.size >= maxConcurrentJobs) {
+    queuedJobs.push(job);
+    queuedVideoIds.add(videoId);
+    updateQueueStatuses();
+    return;
+  }
+
+  startJob(job);
+});
+
+function startJob(job) {
+  const { url, filename, videoId, video } = job;
+  activeJobs.add(videoId);
+  emitStatus(videoId, "recording", "Preparing video download…");
   const source = blobKinds.get(url);
   const operation =
     source?.kind === "blob"
@@ -88,11 +114,38 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
           )
         : recordMediaSource(video, videoId, filename);
 
-  operation.catch((error) => {
-    if (error && error.name === "AbortError") return;
-    emitStatus(videoId, "error", error.message || String(error));
+  operation
+    .catch((error) => {
+      if (error && error.name === "AbortError") return;
+      emitStatus(videoId, "error", error.message || String(error));
+    })
+    .finally(() => {
+      activeJobs.delete(videoId);
+      startQueuedJobs();
+    });
+}
+
+function startQueuedJobs() {
+  while (activeJobs.size < maxConcurrentJobs && queuedJobs.length) {
+    const job = queuedJobs.shift();
+    queuedVideoIds.delete(job.videoId);
+    if (job.video.isConnected) startJob(job);
+    else emitStatus(job.videoId, "error", "Queued video is no longer available.");
+  }
+  updateQueueStatuses();
+}
+
+function updateQueueStatuses() {
+  queuedJobs.forEach((job, index) => {
+    emitStatus(
+      job.videoId,
+      "queued",
+      `Waiting in queue · position ${index + 1}`,
+      0,
+      index + 1
+    );
   });
-});
+}
 
 async function downloadKnownBlob(url, filename, videoId) {
   const response = await fetch(url);
@@ -210,8 +263,15 @@ async function recordMediaSource(video, videoId, filename) {
   }
 
   const mimeType = getRecorderMimeType();
-  const webmName = replaceExtension(filename, "webm");
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+  if (!mimeType) {
+    throw new Error("This Chrome build cannot record MP4 video.");
+  }
+  const outputName = replaceExtension(filename, "mp4");
+  const recorder = new MediaRecorder(stream, {
+    mimeType,
+    videoBitsPerSecond: getRecordingBitrate(video),
+    audioBitsPerSecond: 256_000,
+  });
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
   const wasLooping = video.loop;
@@ -263,14 +323,12 @@ async function recordMediaSource(video, videoId, filename) {
     );
     video.addEventListener("timeupdate", reportProgress);
     await completion;
-    const recordedBlob = new Blob(chunks, {
-      type: recorder.mimeType || "video/webm",
-    });
+    const recordedBlob = new Blob(chunks, { type: recorder.mimeType });
     if (!recordedBlob.size) {
       throw new Error("No video data was captured; no file was created.");
     }
     const downloadUrl = nativeCreateObjectURL(recordedBlob);
-    triggerDownload(downloadUrl, webmName);
+    triggerDownload(downloadUrl, outputName);
     setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
     emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
   } catch (error) {
@@ -288,10 +346,18 @@ async function recordMediaSource(video, videoId, filename) {
 
 function getRecorderMimeType() {
   return [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
+    "video/mp4;codecs=avc1.64003E,mp4a.40.2",
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
   ].find((type) => MediaRecorder.isTypeSupported(type));
+}
+
+function getRecordingBitrate(video) {
+  const pixels = (video.videoWidth || 1920) * (video.videoHeight || 1080);
+  if (pixels >= 3840 * 2160) return 30_000_000;
+  if (pixels >= 2560 * 1440) return 20_000_000;
+  if (pixels >= 1920 * 1080) return 12_000_000;
+  return 8_000_000;
 }
 
 function replaceExtension(filename, extension) {
@@ -309,10 +375,10 @@ function triggerDownload(url, filename) {
   link.remove();
 }
 
-function emitStatus(videoId, status, message, progress) {
+function emitStatus(videoId, status, message, progress, queuePosition) {
   window.dispatchEvent(
     new CustomEvent(STATUS_EVENT, {
-      detail: { videoId, status, message, progress },
+      detail: { videoId, status, message, progress, queuePosition },
     })
   );
 }

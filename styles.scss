@@ -98,6 +98,11 @@ body.options-page {
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: auto;
+
+  &.imd-show,
+  &:hover {
+    opacity: 1;
+  }
 }
 
 .imd-action-btn {
@@ -114,104 +119,108 @@ body.options-page {
   transition: transform 0.1s ease, background-color 0.2s ease;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   appearance: none;
+
+  &:hover {
+    background-color: rgba(50, 50, 50, 0.95);
+  }
+
+  &.imd-recording {
+    background-color: rgba(190, 35, 35, 0.95);
+  }
+
+  &:disabled {
+    cursor: progress;
+    opacity: 0.75;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  svg {
+    width: 24px;
+    height: 24px;
+    fill: #ffffff;
+    pointer-events: none;
+  }
 }
 
-.imd-preview-btn[hidden] {
-  display: none;
+.imd-preview-btn {
+  &[hidden] {
+    display: none;
+  }
 }
 
-/* Show button on specific conditions handled by JS or sibling hover */
-/* Note: We will handle showing via JS 'visible' class or sibling hover if possible.
-   However, reliable 'sibling hover' across all DOM structures is hard.
-   We will rely on the content script to toggle a class or just rely on the button itself being hovered.
-   Actually, the best UX is: show when mouse is over the image.
-   We'll use a class '.imd-show' added by JS mouseover events on the image. */
-.imd-action-group.imd-show,
-.imd-action-group:hover {
-  opacity: 1;
-}
+.imd-download {
+  &-stack {
+    position: fixed;
+    inset: auto 20px 20px auto;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 10px;
+    max-height: calc(100vh - 40px);
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    border: 0;
+    background: transparent;
+    z-index: 2147483647;
+  }
 
-.imd-action-btn:hover {
-  background-color: rgba(50, 50, 50, 0.95);
-}
+  &-panel {
+    width: min(360px, calc(100vw - 40px));
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    border-radius: 12px;
+    background: rgba(24, 24, 27, 0.97);
+    color: #fff;
+    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.4);
+    font: 13px/1.4 system-ui, sans-serif;
+  }
 
-.imd-action-btn.imd-recording {
-  background-color: rgba(190, 35, 35, 0.95);
-}
+  &-title {
+    margin-bottom: 4px;
+    font-size: 14px;
+    font-weight: 700;
+  }
 
-.imd-action-btn:disabled {
-  cursor: progress;
-  opacity: 0.75;
-}
+  &-message {
+    margin-bottom: 10px;
+    color: #d4d4d8;
+  }
 
-.imd-action-btn:active {
-  transform: scale(0.95);
-}
+  &-progress {
+    height: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #3f3f46;
 
-/* Icon (SVG) styling */
-.imd-action-btn svg {
-  width: 24px;
-  height: 24px;
-  fill: #ffffff;
-  pointer-events: none; /* Let clicks pass to button */
-}
+    &-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: #3498db;
+      transition: width 0.25s ease;
 
-.imd-download-panel {
-  position: fixed;
-  inset: auto 20px 20px auto;
-  width: min(360px, calc(100vw - 40px));
-  margin: 0;
-  padding: 16px;
-  border: 0;
-  border-radius: 12px;
-  background: rgba(24, 24, 27, 0.97);
-  color: #fff;
-  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.4);
-  font: 13px/1.4 system-ui, sans-serif;
-  z-index: 2147483647;
-}
+      &.imd-indeterminate {
+        animation: imd-progress-pulse 1.2s ease-in-out infinite alternate;
+      }
+    }
+  }
 
-.imd-download-title {
-  margin-bottom: 4px;
-  font-size: 14px;
-  font-weight: 700;
-}
+  &-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 9px;
+    color: #a1a1aa;
+    font-size: 11px;
+  }
 
-.imd-download-message {
-  margin-bottom: 10px;
-  color: #d4d4d8;
-}
-
-.imd-download-progress {
-  height: 7px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #3f3f46;
-}
-
-.imd-download-progress-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: #3498db;
-  transition: width 0.25s ease;
-}
-
-.imd-download-progress-fill.imd-indeterminate {
-  animation: imd-progress-pulse 1.2s ease-in-out infinite alternate;
-}
-
-.imd-download-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 9px;
-  color: #a1a1aa;
-  font-size: 11px;
-}
-
-.imd-download-percent {
-  color: #fff;
-  font-weight: 700;
+  &-percent {
+    color: #fff;
+    font-weight: 700;
+  }
 }
 
 .imd-finish-download {
@@ -226,6 +235,10 @@ body.options-page {
 }
 
 @keyframes imd-progress-pulse {
-  from { width: 15%; }
-  to { width: 75%; }
+  from {
+    width: 15%;
+  }
+  to {
+    width: 75%;
+  }
 }

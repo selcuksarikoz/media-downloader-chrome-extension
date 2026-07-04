@@ -8,7 +8,9 @@ let settings = {
   downloadFolder: "",
   showSaveAs: false,
   showPreviewButton: true,
+  showVideoControls: true,
   minWidth: 150,
+  maxConcurrentDownloads: 5,
 };
 
 const mediaControls = new Map();
@@ -57,7 +59,8 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     : null;
 
   if (button) {
-    const isActive = status === "recording" || status === "progress";
+    const isActive =
+      status === "queued" || status === "recording" || status === "progress";
     button.title = isActive ? "Video download in progress" : "Download Video";
     button.setAttribute("aria-label", button.title);
     button.classList.toggle("imd-recording", isActive);
@@ -70,7 +73,8 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   else console.info(message);
 });
 
-let blobDownloadPanel;
+let blobDownloadStack;
+const blobDownloadPanels = new Map();
 window.addEventListener("beforeunload", (event) => {
   if (!blobDownloadRequests.size) return;
   event.preventDefault();
@@ -78,46 +82,66 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 function updateBlobDownloadPanel(videoId, status, message, progress) {
-  if (!blobDownloadPanel) blobDownloadPanel = createBlobDownloadPanel();
-  if (!blobDownloadPanel.isConnected) document.body.appendChild(blobDownloadPanel);
-  const isActive = status === "recording" || status === "progress";
+  if (!blobDownloadStack) blobDownloadStack = createBlobDownloadStack();
+  if (!blobDownloadStack.isConnected) document.body.appendChild(blobDownloadStack);
+  let panel = blobDownloadPanels.get(videoId);
+  if (!panel) {
+    panel = createBlobDownloadPanel(videoId);
+    blobDownloadPanels.set(videoId, panel);
+    blobDownloadStack.appendChild(panel);
+  }
+  const isActive =
+    status === "queued" || status === "recording" || status === "progress";
+  const canFinish = status === "recording" || status === "progress";
   const percent = Number.isFinite(progress)
     ? Math.max(0, Math.min(100, Math.round(progress)))
     : null;
 
-  blobDownloadPanel.dataset.videoId = videoId || "";
-  blobDownloadPanel.querySelector(".imd-download-message").textContent =
+  panel.querySelector(".imd-download-message").textContent =
     message || "Preparing video download…";
-  const fill = blobDownloadPanel.querySelector(".imd-download-progress-fill");
+  const fill = panel.querySelector(".imd-download-progress-fill");
   fill.style.width = `${percent ?? (isActive ? 15 : 100)}%`;
   fill.classList.toggle("imd-indeterminate", percent === null && isActive);
-  blobDownloadPanel.querySelector(".imd-download-percent").textContent =
+  panel.querySelector(".imd-download-percent").textContent =
     percent === null ? "" : `${percent}%`;
-  blobDownloadPanel.querySelector(".imd-finish-download").hidden = !isActive;
+  panel.querySelector(".imd-finish-download").hidden = !canFinish;
 
-  if (typeof blobDownloadPanel.showPopover === "function") {
-    if (!blobDownloadPanel.matches(":popover-open")) {
-      blobDownloadPanel.showPopover();
+  if (typeof blobDownloadStack.showPopover === "function") {
+    if (!blobDownloadStack.matches(":popover-open")) {
+      blobDownloadStack.showPopover();
     }
   }
 
   if (!isActive) {
     blobDownloadRequests.delete(videoId);
     setTimeout(() => {
+      const currentPanel = blobDownloadPanels.get(videoId);
+      if (currentPanel === panel) {
+        currentPanel.remove();
+        blobDownloadPanels.delete(videoId);
+      }
       if (
-        blobDownloadPanel.matches(":popover-open") &&
-        blobDownloadPanel.dataset.videoId === videoId
+        blobDownloadPanels.size === 0 &&
+        blobDownloadStack.matches(":popover-open")
       ) {
-        blobDownloadPanel.hidePopover();
+        blobDownloadStack.hidePopover();
       }
     }, status === "error" ? 6000 : 2500);
   }
 }
 
-function createBlobDownloadPanel() {
-  const panel = document.createElement("div");
+function createBlobDownloadStack() {
+  const stack = document.createElement("div");
+  stack.className = "imd-download-stack";
+  stack.popover = "manual";
+  document.body.appendChild(stack);
+  return stack;
+}
+
+function createBlobDownloadPanel(videoId) {
+  const panel = document.createElement("section");
   panel.className = "imd-download-panel";
-  panel.popover = "manual";
+  panel.dataset.videoId = videoId;
   panel.innerHTML = `
     <div class="imd-download-title">Video download</div>
     <div class="imd-download-message"></div>
@@ -130,12 +154,11 @@ function createBlobDownloadPanel() {
       <button type="button" class="imd-finish-download">Finish and save now</button>
     </div>`;
   panel.querySelector(".imd-finish-download").addEventListener("click", () => {
-    const request = blobDownloadRequests.get(panel.dataset.videoId);
+    const request = blobDownloadRequests.get(videoId);
     if (request) {
       window.dispatchEvent(new CustomEvent(BLOB_DOWNLOAD_EVENT, { detail: request }));
     }
   });
-  document.body.appendChild(panel);
   return panel;
 }
 
@@ -163,7 +186,9 @@ function init() {
       downloadFolder: "",
       showSaveAs: false,
       showPreviewButton: true,
+      showVideoControls: true,
       minWidth: 150,
+      maxConcurrentDownloads: 5,
     },
     (items) => {
       settings = items;
@@ -194,8 +219,16 @@ function init() {
         settings.showPreviewButton = changes.showPreviewButton.newValue;
         updatePreviewButtonVisibility();
       }
+      if (changes.showVideoControls) {
+        settings.showVideoControls = changes.showVideoControls.newValue;
+        updateVideoControls();
+      }
       if (changes.minWidth) {
         settings.minWidth = changes.minWidth.newValue;
+      }
+      if (changes.maxConcurrentDownloads) {
+        settings.maxConcurrentDownloads =
+          changes.maxConcurrentDownloads.newValue;
       }
     }
   });
@@ -216,8 +249,17 @@ function processAllMedia() {
 }
 
 function trackMedia(media) {
+  if (media.tagName === "VIDEO") {
+    media.controls = settings.showVideoControls;
+  }
   mediaResizeObserver.observe(media);
   mediaIntersectionObserver.observe(media);
+}
+
+function updateVideoControls() {
+  document.querySelectorAll("video").forEach((video) => {
+    video.controls = settings.showVideoControls;
+  });
 }
 
 /**
@@ -775,6 +817,7 @@ function streamBlobVideo(video, url) {
     url,
     filename: getSuggestedVideoName(video),
     videoId: video.dataset.imdCaptureId,
+    maxConcurrent: settings.maxConcurrentDownloads,
   };
   blobDownloadRequests.set(detail.videoId, detail);
   window.dispatchEvent(

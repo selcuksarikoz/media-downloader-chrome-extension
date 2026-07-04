@@ -6,8 +6,9 @@ Media Downloader is a Chrome extension for downloading images and videos. It add
 
 - **One-Click Download:** Adds a download button to images and videos.
 - **Blob Video Download:** Validates readable `Blob` videos before starting the browser download, preventing empty files.
-- **MediaSource Segment Capture:** Captures appended MediaSource segments and reconstructs single-buffer MP4/WebM streams without quality loss. Separate audio/video buffers fall back to WebM recording.
-- **Download Progress:** Shows persistent video capture progress, prevents accidental duplicate actions, and warns before closing a tab with an active capture.
+- **MediaSource Segment Capture:** Captures appended MediaSource segments and reconstructs single-buffer MP4 streams without quality loss. Separate audio/video buffers use native high-bitrate MP4 recording when supported by Chrome.
+- **Download Queue:** Runs up to five video captures concurrently by default, queues additional jobs, and exposes the limit in Options.
+- **Download Progress:** Shows stacked progress panels, prevents accidental duplicate actions, and warns before closing a tab with active captures.
 - **Smart Positioning:** Choose where the button appears (Top-Right, Top-Left, etc.) via settings.
 - **Custom Save Location:** Save media to a specific sub-folder in your Downloads directory, or leave it empty to use Downloads directly.
 - **Size Filtering:** Automatically ignore small icons and thumbnails by setting a minimum width (default: 150px) to keep your interface clean.

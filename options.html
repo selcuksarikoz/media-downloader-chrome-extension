@@ -45,6 +45,21 @@
       </div>
 
       <div class="form-group">
+        <label for="maxConcurrent">Simultaneous Video Downloads</label>
+        <input
+          type="number"
+          id="maxConcurrent"
+          class="form-control"
+          min="1"
+          max="10"
+          value="5"
+        />
+        <small style="color: #666; font-size: 0.8rem; margin-top: 4px; display: block">
+          Additional videos wait in the download queue.
+        </small>
+      </div>
+
+      <div class="form-group">
         <label for="folder">Download Sub-folder</label>
         <input
           type="text"
@@ -85,6 +100,22 @@
         />
         <label for="showPreview" style="margin: 0; font-weight: normal"
           >Show preview button</label
+        >
+      </div>
+
+      <div
+        class="form-group"
+        style="display: flex; align-items: center; gap: 10px"
+      >
+        <input
+          type="checkbox"
+          id="showVideoControls"
+          style="width: auto; margin: 0"
+        />
+        <label
+          for="showVideoControls"
+          style="margin: 0; font-weight: normal"
+          >Always show video controls</label
         >
       </div>
 
