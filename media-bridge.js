@@ -9,7 +9,7 @@ let maxConcurrentJobs = 5;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
 const protectedVideos = new WeakSet();
-const nativeMediaProperties = new Map();
+const renderedFrameTimes = new WeakMap();
 
 const nativePause = HTMLMediaElement.prototype.pause;
 HTMLMediaElement.prototype.pause = function () {
@@ -26,7 +26,6 @@ for (const property of ["src", "srcObject", "currentTime"]) {
     property
   );
   if (!descriptor?.set) continue;
-  nativeMediaProperties.set(property, descriptor);
   Object.defineProperty(HTMLMediaElement.prototype, property, {
     ...descriptor,
     set(value) {
@@ -48,31 +47,51 @@ Element.prototype.removeAttribute = function (name) {
   }
 };
 
+function getMediaSourceRecord(mediaSource) {
+  let record = mediaSourceRecords.get(mediaSource);
+  if (!record) {
+    record = { buffers: [], lockCount: 0, pendingRevokes: new Set() };
+    mediaSourceRecords.set(mediaSource, record);
+  }
+  return record;
+}
+
 if (window.MediaSource && window.SourceBuffer) {
   const nativeAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
   MediaSource.prototype.addSourceBuffer = function (mimeType) {
     const sourceBuffer = nativeAddSourceBuffer.call(this, mimeType);
-    let record = mediaSourceRecords.get(this);
-    if (!record) {
-      record = { buffers: [] };
-      mediaSourceRecords.set(this, record);
-    }
+    const record = getMediaSourceRecord(this);
     const bufferRecord = { mimeType, chunks: [] };
     record.buffers.push(bufferRecord);
-    sourceBufferRecords.set(sourceBuffer, bufferRecord);
+    sourceBufferRecords.set(sourceBuffer, { bufferRecord, mediaRecord: record });
     return sourceBuffer;
   };
 
   const nativeAppendBuffer = SourceBuffer.prototype.appendBuffer;
   SourceBuffer.prototype.appendBuffer = function (data) {
-    const record = sourceBufferRecords.get(this);
-    if (record && data) {
+    const sourceRecord = sourceBufferRecords.get(this);
+    if (sourceRecord && data) {
       const bytes = ArrayBuffer.isView(data)
         ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
         : new Uint8Array(data);
-      record.chunks.push(bytes.slice().buffer);
+      sourceRecord.bufferRecord.chunks.push(bytes.slice().buffer);
     }
     return nativeAppendBuffer.call(this, data);
+  };
+
+  for (const method of ["remove", "abort", "changeType"]) {
+    const nativeMethod = SourceBuffer.prototype[method];
+    if (typeof nativeMethod !== "function") continue;
+    SourceBuffer.prototype[method] = function (...args) {
+      const record = sourceBufferRecords.get(this)?.mediaRecord;
+      if (!record?.lockCount) return nativeMethod.apply(this, args);
+    };
+  }
+
+  const nativeRemoveSourceBuffer = MediaSource.prototype.removeSourceBuffer;
+  MediaSource.prototype.removeSourceBuffer = function (...args) {
+    const record = mediaSourceRecords.get(this);
+    if (!record?.lockCount) return nativeRemoveSourceBuffer.apply(this, args);
   };
 }
 
@@ -80,11 +99,7 @@ const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
 URL.createObjectURL = (object) => {
   const url = nativeCreateObjectURL(object);
   if (object instanceof MediaSource) {
-    let record = mediaSourceRecords.get(object);
-    if (!record) {
-      record = { buffers: [] };
-      mediaSourceRecords.set(object, record);
-    }
+    const record = getMediaSourceRecord(object);
     blobKinds.set(url, { kind: "media-source", record });
   } else if (object instanceof Blob) {
     blobKinds.set(url, { kind: "blob" });
@@ -94,6 +109,11 @@ URL.createObjectURL = (object) => {
 
 const nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL);
 URL.revokeObjectURL = (url) => {
+  const source = blobKinds.get(url);
+  if (source?.kind === "media-source" && source.record.lockCount) {
+    source.record.pendingRevokes.add(url);
+    return;
+  }
   blobKinds.delete(url);
   return nativeRevokeObjectURL(url);
 };
@@ -119,7 +139,9 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
 
   if (activeJobs.has(videoId) || queuedVideoIds.has(videoId)) return;
 
-  const job = { url, filename, videoId, video };
+  const source = blobKinds.get(url);
+  if (source?.kind === "media-source") source.record.lockCount += 1;
+  const job = { url, filename, videoId, video, source };
   if (activeJobs.size >= maxConcurrentJobs) {
     queuedJobs.push(job);
     queuedVideoIds.add(videoId);
@@ -131,10 +153,9 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
 });
 
 function startJob(job) {
-  const { url, filename, videoId, video } = job;
+  const { url, filename, videoId, video, source } = job;
   activeJobs.add(videoId);
   emitStatus(videoId, "recording", "Preparing video download…");
-  const source = blobKinds.get(url);
   let operation;
   if (source?.kind === "blob") {
     operation = downloadKnownBlob(url, filename, videoId);
@@ -159,6 +180,16 @@ function startJob(job) {
       emitStatus(videoId, "error", error.message || String(error));
     })
     .finally(() => {
+      if (source?.kind === "media-source") {
+        source.record.lockCount -= 1;
+        if (!source.record.lockCount) {
+          for (const pendingUrl of source.record.pendingRevokes) {
+            blobKinds.delete(pendingUrl);
+            nativeRevokeObjectURL(pendingUrl);
+          }
+          source.record.pendingRevokes.clear();
+        }
+      }
       activeJobs.delete(videoId);
       startQueuedJobs();
     });
@@ -168,8 +199,7 @@ function startQueuedJobs() {
   while (activeJobs.size < maxConcurrentJobs && queuedJobs.length) {
     const job = queuedJobs.shift();
     queuedVideoIds.delete(job.videoId);
-    if (job.video.isConnected) startJob(job);
-    else emitStatus(job.videoId, "error", "Queued video is no longer available.");
+    startJob(job);
   }
   updateQueueStatuses();
 }
@@ -205,6 +235,10 @@ async function downloadCapturedMediaSource(
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
   const wasLooping = video.loop;
+  let targetDuration =
+    Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : null;
 
   try {
     if (!isMediaFullyBuffered(video)) {
@@ -323,8 +357,8 @@ async function recordMediaSource(video, videoId, filename) {
   let releasePlaybackLock = () => {};
   const reportProgress = () => {
     const progress =
-      Number.isFinite(video.duration) && video.duration > 0
-        ? (video.currentTime / video.duration) * 100
+      targetDuration
+        ? (video.currentTime / targetDuration) * 100
         : undefined;
     emitStatus(videoId, "progress", "Recording video stream…", progress);
   };
@@ -343,7 +377,6 @@ async function recordMediaSource(video, videoId, filename) {
     if (recorder.state !== "inactive") recorder.stop();
   };
   activeRecordings.set(videoId, { stop });
-  video.addEventListener("ended", stop, { once: true });
 
   try {
     if (video.seekable.length && video.duration !== Infinity) {
@@ -355,15 +388,21 @@ async function recordMediaSource(video, videoId, filename) {
     await video.play();
     const recordingStartedAt = performance.now();
     safetyTimer = setInterval(() => {
-      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
-      if (video.currentTime >= video.duration - 0.15) {
+      if (!targetDuration && Number.isFinite(video.duration) && video.duration > 0) {
+        targetDuration = video.duration;
+      }
+      if (!targetDuration) return;
+      const lastRenderedFrame = renderedFrameTimes.get(video) ?? 0;
+      const playbackReachedEnd = video.currentTime >= targetDuration - 0.15;
+      const videoReachedEnd = lastRenderedFrame >= targetDuration - 0.5;
+      if (playbackReachedEnd && videoReachedEnd) {
         reachedEndAt ??= performance.now();
         if (performance.now() - reachedEndAt >= 250) stop();
         return;
       }
       reachedEndAt = null;
       const expectedDuration =
-        (video.duration / Math.max(video.playbackRate, 0.1)) * 1000;
+        (targetDuration / Math.max(video.playbackRate, 0.1)) * 1000;
       if (performance.now() - recordingStartedAt > expectedDuration + 15_000) {
         stop();
       }
@@ -384,7 +423,6 @@ async function recordMediaSource(video, videoId, filename) {
     clearInterval(safetyTimer);
     releasePlaybackLock();
     activeRecordings.delete(videoId);
-    video.removeEventListener("ended", stop);
     video.removeEventListener("timeupdate", reportProgress);
     if (Number.isFinite(originalTime)) video.currentTime = originalTime;
     video.loop = wasLooping;
@@ -494,13 +532,16 @@ function hostVideoForCapture(video) {
 
 function keepVideoFramesDecoded(video) {
   const canvas = document.createElement("canvas");
-  canvas.width = 16;
-  canvas.height = 9;
+  canvas.width = 160;
+  canvas.height = 90;
+  canvas.setAttribute("aria-hidden", "true");
+  canvas.style.cssText =
+    "display:block;flex:0 0 160px;width:160px;height:90px;" +
+    "min-width:160px;min-height:90px;pointer-events:none";
+  getCaptureRenderHost().appendChild(canvas);
   const context = canvas.getContext("2d", { alpha: false });
   let stopped = false;
   let callbackId;
-  let lastFrameAt = performance.now();
-  let lastObservedTime = video.currentTime;
   let lastFrameCount = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
   const paint = () => {
     if (stopped) return;
@@ -508,8 +549,10 @@ function keepVideoFramesDecoded(video) {
       context?.drawImage(video, 0, 0, canvas.width, canvas.height);
     } catch {}
   };
-  const onFrame = () => {
-    lastFrameAt = performance.now();
+  const onFrame = (_now, metadata) => {
+    if (Number.isFinite(metadata?.mediaTime)) {
+      renderedFrameTimes.set(video, metadata.mediaTime);
+    }
     paint();
     callbackId = video.requestVideoFrameCallback?.(onFrame);
   };
@@ -522,29 +565,25 @@ function keepVideoFramesDecoded(video) {
     const currentTime = video.currentTime;
     const frameCount =
       video.getVideoPlaybackQuality?.().totalVideoFrames ?? lastFrameCount;
-    if (frameCount > lastFrameCount) lastFrameAt = performance.now();
-    lastFrameCount = frameCount;
-    const timeIsMoving = currentTime > lastObservedTime + 0.05;
-    if (timeIsMoving && performance.now() - lastFrameAt > 1500) {
-      const descriptor = nativeMediaProperties.get("currentTime");
-      descriptor?.set.call(video, Math.max(0, currentTime - 0.02));
-      video.play().catch(() => {});
-      lastFrameAt = performance.now();
+    if (frameCount > lastFrameCount) {
+      renderedFrameTimes.set(video, currentTime);
     }
-    lastObservedTime = currentTime;
+    lastFrameCount = frameCount;
   }, 250);
 
   return () => {
     stopped = true;
     clearInterval(intervalId);
     if (callbackId !== undefined) video.cancelVideoFrameCallback?.(callbackId);
+    renderedFrameTimes.delete(video);
+    canvas.remove();
   };
 }
 
 function getRecorderMimeType() {
   return [
-    "video/mp4;codecs=avc1.64003E,mp4a.40.2",
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1.64003E,mp4a.40.2",
     "video/mp4",
   ].find((type) => MediaRecorder.isTypeSupported(type));
 }
@@ -574,11 +613,26 @@ function validateVideoBlob(blob) {
       () => {
         const hasVideo = probe.videoWidth > 0 && probe.videoHeight > 0;
         const hasDuration = probe.duration > 0 || probe.duration === Infinity;
-        finish(
-          hasVideo && hasDuration
-            ? null
-            : new Error("Generated file does not contain playable video.")
+        if (!hasVideo || !hasDuration) {
+          finish(new Error("Generated file does not contain playable video."));
+          return;
+        }
+        if (!Number.isFinite(probe.duration) || probe.duration <= 1) {
+          finish(null);
+          return;
+        }
+        probe.addEventListener(
+          "seeked",
+          () => {
+            if (typeof probe.requestVideoFrameCallback === "function") {
+              probe.requestVideoFrameCallback(() => finish(null));
+            } else {
+              finish(null);
+            }
+          },
+          { once: true }
         );
+        probe.currentTime = Math.max(0, probe.duration - 0.5);
       },
       { once: true }
     );
