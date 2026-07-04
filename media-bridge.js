@@ -235,10 +235,6 @@ async function downloadCapturedMediaSource(
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
   const wasLooping = video.loop;
-  let targetDuration =
-    Number.isFinite(video.duration) && video.duration > 0
-      ? video.duration
-      : null;
 
   try {
     if (!isMediaFullyBuffered(video)) {
@@ -351,6 +347,10 @@ async function recordMediaSource(video, videoId, filename) {
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
   const wasLooping = video.loop;
+  let targetDuration =
+    Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : null;
   const chunks = [];
   let safetyTimer;
   let reachedEndAt = null;
@@ -617,22 +617,7 @@ function validateVideoBlob(blob) {
           finish(new Error("Generated file does not contain playable video."));
           return;
         }
-        if (!Number.isFinite(probe.duration) || probe.duration <= 1) {
-          finish(null);
-          return;
-        }
-        probe.addEventListener(
-          "seeked",
-          () => {
-            if (typeof probe.requestVideoFrameCallback === "function") {
-              probe.requestVideoFrameCallback(() => finish(null));
-            } else {
-              finish(null);
-            }
-          },
-          { once: true }
-        );
-        probe.currentTime = Math.max(0, probe.duration - 0.5);
+        finish(null);
       },
       { once: true }
     );
