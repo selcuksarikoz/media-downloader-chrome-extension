@@ -12,6 +12,8 @@ const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "recording", "progress"]);
 let settings = { ...DEFAULT_SETTINGS };
 
 const mediaControls = new Map();
+const actionGroupContainers = new WeakMap();
+const positionedContainers = new WeakMap();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
@@ -262,7 +264,7 @@ function startObserver() {
 
 function cleanupMedia(media) {
   const group = mediaControls.get(media);
-  if (group) group.remove();
+  if (group) detachActionGroup(group);
   if (media.dataset.imdCaptureId) {
     capturedVideos.delete(media.dataset.imdCaptureId);
   }
@@ -330,7 +332,6 @@ function processMedia(media) {
 
   const actionGroup = document.createElement("div");
   actionGroup.className = "imd-action-group";
-  actionGroup.popover = "manual";
   const downloadBtn = createActionButton(
     "imd-down-btn",
     `Download ${isImage ? "Image" : "Video"}`,
@@ -403,8 +404,56 @@ function processMedia(media) {
   actionGroup.addEventListener("mouseenter", showButtons);
   actionGroup.addEventListener("mouseleave", scheduleHide);
 
-  document.body.appendChild(actionGroup);
+  attachActionGroup(actionGroup, media);
   mediaControls.set(media, actionGroup);
+}
+
+function getActionContainer(media) {
+  let container = media.parentElement;
+  while (container && container !== document.body) {
+    const display = getComputedStyle(container).display;
+    if (display !== "inline" && display !== "contents") return container;
+    container = container.parentElement;
+  }
+  return document.body;
+}
+
+function attachActionGroup(group, media) {
+  const container = getActionContainer(media);
+  const currentContainer = actionGroupContainers.get(group);
+  if (currentContainer === container && group.parentElement === container) return;
+  if (currentContainer) detachActionGroup(group);
+
+  let state = positionedContainers.get(container);
+  if (!state) {
+    const needsPosition = getComputedStyle(container).position === "static";
+    state = {
+      count: 0,
+      needsPosition,
+      originalInlinePosition: container.style.position,
+    };
+    positionedContainers.set(container, state);
+    if (needsPosition) container.style.position = "relative";
+  }
+  state.count += 1;
+  actionGroupContainers.set(group, container);
+  container.appendChild(group);
+}
+
+function detachActionGroup(group) {
+  const container = actionGroupContainers.get(group);
+  group.remove();
+  actionGroupContainers.delete(group);
+  if (!container) return;
+
+  const state = positionedContainers.get(container);
+  if (!state) return;
+  state.count -= 1;
+  if (state.count > 0) return;
+  if (state.needsPosition && container.style.position === "relative") {
+    container.style.position = state.originalInlinePosition;
+  }
+  positionedContainers.delete(container);
 }
 
 function showActionGroup(group, media) {
@@ -421,36 +470,13 @@ function showActionGroup(group, media) {
     if (otherMedia !== media) hideActionGroup(otherGroup);
   });
 
-  if (!group.isConnected && document.body) {
-    document.body.appendChild(group);
-  }
-
-  if (typeof group.showPopover === "function") {
-    try {
-      if (group.isConnected && !group.matches(":popover-open")) {
-        group.showPopover();
-      }
-    } catch (error) {
-      if (error.name !== "InvalidStateError") throw error;
-      return;
-    }
-  }
+  attachActionGroup(group, media);
   group.classList.add("imd-show");
   positionActionGroup(group, media);
 }
 
 function hideActionGroup(group) {
   group.classList.remove("imd-show");
-  if (
-    typeof group.hidePopover === "function" &&
-    group.matches(":popover-open")
-  ) {
-    try {
-      group.hidePopover();
-    } catch (error) {
-      if (error.name !== "InvalidStateError") throw error;
-    }
-  }
 }
 
 function getMediaHoverTargets(media) {
@@ -475,7 +501,11 @@ function getMediaHoverTargets(media) {
 }
 
 function positionActionGroup(group, media) {
+  attachActionGroup(group, media);
+  const container = actionGroupContainers.get(group);
+  if (!container) return;
   const rect = media.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
   const width = group.offsetWidth || 86;
   const height = group.offsetHeight || 40;
   const gap = 10;
@@ -504,8 +534,12 @@ function positionActionGroup(group, media) {
       left = rect.right - width - gap;
   }
 
-  group.style.top = `${Math.max(0, top)}px`;
-  group.style.left = `${Math.max(0, left)}px`;
+  const localTop =
+    top - containerRect.top + container.scrollTop - container.clientTop;
+  const localLeft =
+    left - containerRect.left + container.scrollLeft - container.clientLeft;
+  group.style.top = `${localTop}px`;
+  group.style.left = `${localLeft}px`;
 }
 
 function repositionOpenControls() {
@@ -583,13 +617,13 @@ function findTopMediaAtPoint(x, y) {
       return;
     }
 
-    const targets = getMediaHoverTargets(media);
-    const isRelated = (element) =>
-      group.contains(element) ||
-      targets.some((target) => target === element || target.contains(element));
-    const stackIndex = stack.findIndex(isRelated);
+    const stackIndex = stack.indexOf(media);
     if (stackIndex === -1 || stackIndex >= bestStackIndex) return;
 
+    const container = actionGroupContainers.get(group);
+    const isRelated = (element) =>
+      group.contains(element) ||
+      (container?.contains(element) && !element.matches("img, video"));
     const blocked = stack
       .slice(0, stackIndex)
       .some((element) => !isRelated(element));
