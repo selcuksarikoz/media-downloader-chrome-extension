@@ -12,6 +12,7 @@ let settings = {
 };
 
 const mediaControls = new Map();
+const blobDownloadRequests = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 const visibleMedia = new WeakSet();
@@ -47,7 +48,7 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 });
 
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
-  const { videoId, status, message } = event.detail || {};
+  const { videoId, status, message, progress } = event.detail || {};
   const video = Array.from(mediaControls.keys()).find(
     (media) => media.dataset.imdCaptureId === videoId
   );
@@ -56,15 +57,87 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     : null;
 
   if (button) {
-    button.title =
-      status === "recording" ? "Stop Video Recording" : "Download Video";
+    const isActive = status === "recording" || status === "progress";
+    button.title = isActive ? "Video download in progress" : "Download Video";
     button.setAttribute("aria-label", button.title);
-    button.classList.toggle("imd-recording", status === "recording");
+    button.classList.toggle("imd-recording", isActive);
+    button.disabled = isActive;
   }
+
+  updateBlobDownloadPanel(videoId, status, message, progress);
 
   if (status === "error") console.error(message);
   else console.info(message);
 });
+
+let blobDownloadPanel;
+window.addEventListener("beforeunload", (event) => {
+  if (!blobDownloadRequests.size) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
+function updateBlobDownloadPanel(videoId, status, message, progress) {
+  if (!blobDownloadPanel) blobDownloadPanel = createBlobDownloadPanel();
+  if (!blobDownloadPanel.isConnected) document.body.appendChild(blobDownloadPanel);
+  const isActive = status === "recording" || status === "progress";
+  const percent = Number.isFinite(progress)
+    ? Math.max(0, Math.min(100, Math.round(progress)))
+    : null;
+
+  blobDownloadPanel.dataset.videoId = videoId || "";
+  blobDownloadPanel.querySelector(".imd-download-message").textContent =
+    message || "Preparing video download…";
+  const fill = blobDownloadPanel.querySelector(".imd-download-progress-fill");
+  fill.style.width = `${percent ?? (isActive ? 15 : 100)}%`;
+  fill.classList.toggle("imd-indeterminate", percent === null && isActive);
+  blobDownloadPanel.querySelector(".imd-download-percent").textContent =
+    percent === null ? "" : `${percent}%`;
+  blobDownloadPanel.querySelector(".imd-finish-download").hidden = !isActive;
+
+  if (typeof blobDownloadPanel.showPopover === "function") {
+    if (!blobDownloadPanel.matches(":popover-open")) {
+      blobDownloadPanel.showPopover();
+    }
+  }
+
+  if (!isActive) {
+    blobDownloadRequests.delete(videoId);
+    setTimeout(() => {
+      if (
+        blobDownloadPanel.matches(":popover-open") &&
+        blobDownloadPanel.dataset.videoId === videoId
+      ) {
+        blobDownloadPanel.hidePopover();
+      }
+    }, status === "error" ? 6000 : 2500);
+  }
+}
+
+function createBlobDownloadPanel() {
+  const panel = document.createElement("div");
+  panel.className = "imd-download-panel";
+  panel.popover = "manual";
+  panel.innerHTML = `
+    <div class="imd-download-title">Video download</div>
+    <div class="imd-download-message"></div>
+    <div class="imd-download-progress">
+      <div class="imd-download-progress-fill"></div>
+    </div>
+    <div class="imd-download-footer">
+      <span class="imd-download-percent"></span>
+      <span>Keep this tab open</span>
+      <button type="button" class="imd-finish-download">Finish and save now</button>
+    </div>`;
+  panel.querySelector(".imd-finish-download").addEventListener("click", () => {
+    const request = blobDownloadRequests.get(panel.dataset.videoId);
+    if (request) {
+      window.dispatchEvent(new CustomEvent(BLOB_DOWNLOAD_EVENT, { detail: request }));
+    }
+  });
+  document.body.appendChild(panel);
+  return panel;
+}
 
 // SVG Icon for the download button
 const DOWNLOAD_ICON = `
@@ -698,13 +771,15 @@ async function downloadMedia(media) {
 }
 
 function streamBlobVideo(video, url) {
+  const detail = {
+    url,
+    filename: getSuggestedVideoName(video),
+    videoId: video.dataset.imdCaptureId,
+  };
+  blobDownloadRequests.set(detail.videoId, detail);
   window.dispatchEvent(
     new CustomEvent(BLOB_DOWNLOAD_EVENT, {
-      detail: {
-        url,
-        filename: getSuggestedVideoName(video),
-        videoId: video.dataset.imdCaptureId,
-      },
+      detail,
     })
   );
 }

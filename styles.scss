@@ -139,6 +139,11 @@ body.options-page {
   background-color: rgba(190, 35, 35, 0.95);
 }
 
+.imd-action-btn:disabled {
+  cursor: progress;
+  opacity: 0.75;
+}
+
 .imd-action-btn:active {
   transform: scale(0.95);
 }
@@ -149,4 +154,78 @@ body.options-page {
   height: 24px;
   fill: #ffffff;
   pointer-events: none; /* Let clicks pass to button */
+}
+
+.imd-download-panel {
+  position: fixed;
+  inset: auto 20px 20px auto;
+  width: min(360px, calc(100vw - 40px));
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(24, 24, 27, 0.97);
+  color: #fff;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.4);
+  font: 13px/1.4 system-ui, sans-serif;
+  z-index: 2147483647;
+}
+
+.imd-download-title {
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.imd-download-message {
+  margin-bottom: 10px;
+  color: #d4d4d8;
+}
+
+.imd-download-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #3f3f46;
+}
+
+.imd-download-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #3498db;
+  transition: width 0.25s ease;
+}
+
+.imd-download-progress-fill.imd-indeterminate {
+  animation: imd-progress-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.imd-download-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.imd-download-percent {
+  color: #fff;
+  font-weight: 700;
+}
+
+.imd-finish-download {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid #52525b;
+  border-radius: 6px;
+  background: #27272a;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+@keyframes imd-progress-pulse {
+  from { width: 15%; }
+  to { width: 75%; }
 }

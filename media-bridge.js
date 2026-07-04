@@ -101,7 +101,7 @@ async function downloadKnownBlob(url, filename, videoId) {
   const downloadUrl = nativeCreateObjectURL(blob);
   triggerDownload(downloadUrl, filename);
   setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
-  emitStatus(videoId, "complete", "Blob video downloaded.");
+  emitStatus(videoId, "complete", "Blob video downloaded.", 100);
 }
 
 async function downloadCapturedMediaSource(
@@ -123,7 +123,8 @@ async function downloadCapturedMediaSource(
       emitStatus(
         videoId,
         "recording",
-        "Original media segments are being collected. Click again to finish early."
+        "Collecting original media segments…",
+        0
       );
       await waitForMediaCompletion(video, videoId);
     }
@@ -138,7 +139,12 @@ async function downloadCapturedMediaSource(
     const downloadUrl = nativeCreateObjectURL(blob);
     triggerDownload(downloadUrl, replaceExtension(filename, extension));
     setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
-    emitStatus(videoId, "complete", "Original media segments downloaded.");
+    emitStatus(
+      videoId,
+      "complete",
+      "Original media segments downloaded.",
+      100
+    );
   } finally {
     activeRecordings.delete(videoId);
     if (Number.isFinite(originalTime)) video.currentTime = originalTime;
@@ -158,10 +164,23 @@ function isMediaFullyBuffered(video) {
 function waitForMediaCompletion(video, videoId) {
   return new Promise((resolve, reject) => {
     let timer;
+    const reportProgress = () => {
+      const progress =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? (video.currentTime / video.duration) * 100
+          : undefined;
+      emitStatus(
+        videoId,
+        "progress",
+        "Collecting original media segments…",
+        progress
+      );
+    };
     const finish = () => {
       clearTimeout(timer);
       video.removeEventListener("ended", finish);
       video.removeEventListener("error", fail);
+      video.removeEventListener("timeupdate", reportProgress);
       resolve();
     };
     const fail = () => {
@@ -172,6 +191,7 @@ function waitForMediaCompletion(video, videoId) {
     activeRecordings.set(videoId, { stop: finish });
     video.addEventListener("ended", finish, { once: true });
     video.addEventListener("error", fail, { once: true });
+    video.addEventListener("timeupdate", reportProgress);
     if (Number.isFinite(video.duration) && video.duration > 0) {
       timer = setTimeout(finish, Math.ceil(video.duration * 1000) + 5000);
     }
@@ -197,6 +217,13 @@ async function recordMediaSource(video, videoId, filename) {
   const wasLooping = video.loop;
   const chunks = [];
   let stopTimer;
+  const reportProgress = () => {
+    const progress =
+      Number.isFinite(video.duration) && video.duration > 0
+        ? (video.currentTime / video.duration) * 100
+        : undefined;
+    emitStatus(videoId, "progress", "Recording video stream…", progress);
+  };
 
   const completion = new Promise((resolve, reject) => {
     recorder.addEventListener("dataavailable", (event) => {
@@ -231,8 +258,10 @@ async function recordMediaSource(video, videoId, filename) {
     emitStatus(
       videoId,
       "recording",
-      "MediaSource recording started. Click download again to stop."
+      "Recording video stream…",
+      0
     );
+    video.addEventListener("timeupdate", reportProgress);
     await completion;
     const recordedBlob = new Blob(chunks, {
       type: recorder.mimeType || "video/webm",
@@ -243,13 +272,14 @@ async function recordMediaSource(video, videoId, filename) {
     const downloadUrl = nativeCreateObjectURL(recordedBlob);
     triggerDownload(downloadUrl, webmName);
     setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
-    emitStatus(videoId, "complete", "MediaSource recording saved.");
+    emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
   } catch (error) {
     throw error;
   } finally {
     clearTimeout(stopTimer);
     activeRecordings.delete(videoId);
     video.removeEventListener("ended", stop);
+    video.removeEventListener("timeupdate", reportProgress);
     if (Number.isFinite(originalTime)) video.currentTime = originalTime;
     video.loop = wasLooping;
     if (wasPaused) video.pause();
@@ -279,10 +309,10 @@ function triggerDownload(url, filename) {
   link.remove();
 }
 
-function emitStatus(videoId, status, message) {
+function emitStatus(videoId, status, message, progress) {
   window.dispatchEvent(
     new CustomEvent(STATUS_EVENT, {
-      detail: { videoId, status, message },
+      detail: { videoId, status, message, progress },
     })
   );
 }
