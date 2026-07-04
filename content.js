@@ -14,6 +14,11 @@ let settings = {
 const mediaControls = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
+const mediaResizeObserver = new ResizeObserver((entries) => {
+  entries.forEach(({ target }) => {
+    if (!target.dataset.imdProcessed) processMedia(target);
+  });
+});
 
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message } = event.detail || {};
@@ -108,7 +113,12 @@ function hasForbiddenFolder(folder) {
  */
 function processAllMedia() {
   const mediaElements = document.querySelectorAll("img, video");
-  mediaElements.forEach(processMedia);
+  mediaElements.forEach(trackMedia);
+}
+
+function trackMedia(media) {
+  mediaResizeObserver.observe(media);
+  processMedia(media);
 }
 
 /**
@@ -121,9 +131,9 @@ function startObserver() {
         if (node.nodeType === 1) {
           // Element
           if (node.matches("img, video")) {
-            processMedia(node);
+            trackMedia(node);
           } else {
-            node.querySelectorAll("img, video").forEach(processMedia);
+            node.querySelectorAll("img, video").forEach(trackMedia);
           }
         }
       });
@@ -174,16 +184,25 @@ function processMedia(media) {
   const isImage = media.tagName === "IMG";
   const isLoaded = isImage ? media.complete : true;
   if (!isLoaded) {
-    media.addEventListener(
-      "load",
-      () => processMedia(media),
-      { once: true }
-    );
+    if (!media.dataset.imdWaiting) {
+      media.dataset.imdWaiting = "true";
+      media.addEventListener("load", () => processMedia(media), { once: true });
+    }
     return;
   }
 
-  if (!isValidMedia(media)) return;
+  if (!isValidMedia(media)) {
+    if (media.tagName === "VIDEO" && !media.dataset.imdWaiting) {
+      media.dataset.imdWaiting = "true";
+      media.addEventListener("loadedmetadata", () => processMedia(media), {
+        once: true,
+      });
+    }
+    return;
+  }
 
+  mediaResizeObserver.unobserve(media);
+  delete media.dataset.imdWaiting;
   media.dataset.imdProcessed = "true";
   if (!isImage && !media.dataset.imdCaptureId) {
     media.dataset.imdCaptureId = crypto.randomUUID();
@@ -222,38 +241,93 @@ function processMedia(media) {
   // Toggle the controls from the media element because sibling hover selectors
   // are unreliable across arbitrary page markup.
 
-  const showButtons = () => {
-    if (typeof actionGroup.showPopover === "function") {
-      if (!actionGroup.matches(":popover-open")) actionGroup.showPopover();
-    }
-    actionGroup.classList.add("imd-show");
-    positionActionGroup(actionGroup, media);
-  };
-  const hideButtons = () => {
-    actionGroup.classList.remove("imd-show");
-    if (
-      typeof actionGroup.hidePopover === "function" &&
-      actionGroup.matches(":popover-open")
-    ) {
-      actionGroup.hidePopover();
-    }
+  const showButtons = () => showActionGroup(actionGroup, media);
+  const hideButtons = () => hideActionGroup(actionGroup);
+
+  // Sites such as Instagram place sibling overlays above the actual media.
+  // Listen on the nearest same-sized wrappers as well as the media itself.
+  const hoverTargets = getMediaHoverTargets(media);
+  const scheduleHide = () => {
+    setTimeout(() => {
+      const stillHoveringMedia = hoverTargets.some((target) =>
+        target.matches(":hover")
+      );
+      if (!stillHoveringMedia && !actionGroup.matches(":hover")) {
+        hideButtons();
+      }
+    }, 100);
   };
 
-  media.addEventListener("mouseenter", showButtons);
-  media.addEventListener("mouseleave", (e) => {
-    // delay hiding to allow moving to button
-    if (!actionGroup.contains(e.relatedTarget)) {
-      setTimeout(() => {
-        if (!actionGroup.matches(":hover")) hideButtons();
-      }, 100);
-    }
+  hoverTargets.forEach((target) => {
+    target.addEventListener("mouseenter", showButtons);
+    target.addEventListener("mouseleave", scheduleHide);
   });
 
   actionGroup.addEventListener("mouseenter", showButtons);
-  actionGroup.addEventListener("mouseleave", hideButtons);
+  actionGroup.addEventListener("mouseleave", scheduleHide);
 
   document.body.appendChild(actionGroup);
   mediaControls.set(media, actionGroup);
+}
+
+function showActionGroup(group, media) {
+  if (!media.isConnected) {
+    group.remove();
+    mediaControls.delete(media);
+    return;
+  }
+
+  if (!group.isConnected && document.body) {
+    document.body.appendChild(group);
+  }
+
+  if (typeof group.showPopover === "function") {
+    try {
+      if (group.isConnected && !group.matches(":popover-open")) {
+        group.showPopover();
+      }
+    } catch (error) {
+      if (error.name !== "InvalidStateError") throw error;
+      return;
+    }
+  }
+  group.classList.add("imd-show");
+  positionActionGroup(group, media);
+}
+
+function hideActionGroup(group) {
+  group.classList.remove("imd-show");
+  if (
+    typeof group.hidePopover === "function" &&
+    group.matches(":popover-open")
+  ) {
+    try {
+      group.hidePopover();
+    } catch (error) {
+      if (error.name !== "InvalidStateError") throw error;
+    }
+  }
+}
+
+function getMediaHoverTargets(media) {
+  const targets = [media];
+  const mediaRect = media.getBoundingClientRect();
+  let ancestor = media.parentElement;
+
+  for (let depth = 0; ancestor && depth < 3; depth += 1) {
+    const rect = ancestor.getBoundingClientRect();
+    const widthLimit = Math.max(mediaRect.width * 1.5, mediaRect.width + 40);
+    const heightLimit = Math.max(mediaRect.height * 1.5, mediaRect.height + 40);
+
+    if (rect.width <= widthLimit && rect.height <= heightLimit) {
+      targets.push(ancestor);
+      ancestor = ancestor.parentElement;
+      continue;
+    }
+    break;
+  }
+
+  return targets;
 }
 
 function positionActionGroup(group, media) {
@@ -305,6 +379,39 @@ function repositionOpenControls() {
 
 window.addEventListener("scroll", repositionOpenControls, true);
 window.addEventListener("resize", repositionOpenControls);
+
+let pointerFrame = null;
+document.addEventListener(
+  "pointermove",
+  (event) => {
+    if (event.pointerType === "touch") return;
+    const { clientX, clientY } = event;
+    if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
+    pointerFrame = requestAnimationFrame(() => {
+      pointerFrame = null;
+      mediaControls.forEach((group, media) => {
+        if (!media.isConnected) {
+          group.remove();
+          mediaControls.delete(media);
+          return;
+        }
+        const rect = media.getBoundingClientRect();
+        const isOverMedia =
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom;
+
+        if (isOverMedia) {
+          showActionGroup(group, media);
+        } else if (!group.matches(":hover")) {
+          hideActionGroup(group);
+        }
+      });
+    });
+  },
+  true
+);
 
 function createActionButton(className, title, icon) {
   const button = document.createElement("button");
