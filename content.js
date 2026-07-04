@@ -5,11 +5,14 @@ const DEFAULT_SETTINGS = {
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
+  blacklistedDomains: ["netflix.com", "primevideo.com"],
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };
 const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "recording", "progress"]);
 let settings = { ...DEFAULT_SETTINGS };
+let extensionActive = false;
+let mediaMutationObserver = null;
 
 const mediaControls = new Map();
 const actionGroupContainers = new WeakMap();
@@ -188,8 +191,7 @@ function init() {
       settings.downloadFolder = "";
       chrome.storage.sync.set({ downloadFolder: "" });
     }
-    processAllMedia();
-    startObserver();
+    applyDomainAccess();
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -200,6 +202,43 @@ function init() {
     if (changes.buttonPosition) updateAllButtonPositions();
     if (changes.showPreviewButton) updatePreviewButtonVisibility();
     if (changes.showVideoControls) updateVideoControls();
+    if (changes.blacklistedDomains) applyDomainAccess();
+  });
+}
+
+function isCurrentDomainBlacklisted() {
+  const hostname = location.hostname.toLowerCase().replace(/\.$/, "");
+  const domains = Array.isArray(settings.blacklistedDomains)
+    ? settings.blacklistedDomains
+    : [];
+  return domains.some((domain) => {
+    if (typeof domain !== "string") return false;
+    const normalized = domain
+      .toLowerCase()
+      .replace(/^\*\./, "")
+      .replace(/^www\./, "")
+      .replace(/\.$/, "");
+    return (
+      normalized &&
+      (hostname === normalized || hostname.endsWith(`.${normalized}`))
+    );
+  });
+}
+
+function applyDomainAccess() {
+  const shouldBeActive = !isCurrentDomainBlacklisted();
+  if (shouldBeActive === extensionActive) return;
+  extensionActive = shouldBeActive;
+  if (extensionActive) {
+    processAllMedia();
+    startObserver();
+    return;
+  }
+
+  mediaMutationObserver?.disconnect();
+  mediaMutationObserver = null;
+  document.querySelectorAll("img, video").forEach((media) => {
+    cleanupMedia(media);
   });
 }
 
@@ -214,6 +253,7 @@ function processAllMedia() {
 }
 
 function trackMedia(media) {
+  if (!extensionActive) return;
   if (media.tagName === "VIDEO") {
     media.controls = settings.showVideoControls;
   }
@@ -228,7 +268,8 @@ function updateVideoControls() {
 }
 
 function startObserver() {
-  const observer = new MutationObserver((mutations) => {
+  if (mediaMutationObserver) return;
+  mediaMutationObserver = new MutationObserver((mutations) => {
     const removedMedia = new Set();
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
@@ -256,7 +297,7 @@ function startObserver() {
     schedulePointerReconciliation();
   });
 
-  observer.observe(document.body, {
+  mediaMutationObserver.observe(document.body, {
     childList: true,
     subtree: true,
   });
@@ -409,13 +450,35 @@ function processMedia(media) {
 }
 
 function getActionContainer(media) {
+  const mediaRect = media.getBoundingClientRect();
   let container = media.parentElement;
-  while (container && container !== document.body) {
+  let bestContainer = null;
+  for (
+    let depth = 0;
+    container && container !== document.body && depth < 6;
+    depth += 1
+  ) {
     const display = getComputedStyle(container).display;
-    if (display !== "inline" && display !== "contents") return container;
+    const rect = container.getBoundingClientRect();
+    const closelyWrapsMedia =
+      rect.width <= mediaRect.width * 1.15 + 12 &&
+      rect.height <= mediaRect.height * 1.15 + 12 &&
+      rect.left <= mediaRect.left + 2 &&
+      rect.right >= mediaRect.right - 2 &&
+      rect.top <= mediaRect.top + 2 &&
+      rect.bottom >= mediaRect.bottom - 2;
+    if (
+      display !== "inline" &&
+      display !== "contents" &&
+      closelyWrapsMedia
+    ) {
+      bestContainer = container;
+    } else if (bestContainer) {
+      break;
+    }
     container = container.parentElement;
   }
-  return document.body;
+  return bestContainer || media.parentElement || document.body;
 }
 
 function attachActionGroup(group, media) {
@@ -617,17 +680,12 @@ function findTopMediaAtPoint(x, y) {
       return;
     }
 
-    const stackIndex = stack.indexOf(media);
+    const directStackIndex = stack.indexOf(media);
+    const stackIndex =
+      directStackIndex !== -1
+        ? directStackIndex
+        : stack.findIndex((element) => element.contains(media));
     if (stackIndex === -1 || stackIndex >= bestStackIndex) return;
-
-    const container = actionGroupContainers.get(group);
-    const isRelated = (element) =>
-      group.contains(element) ||
-      (container?.contains(element) && !element.matches("img, video"));
-    const blocked = stack
-      .slice(0, stackIndex)
-      .some((element) => !isRelated(element));
-    if (blocked) return;
 
     bestMedia = media;
     bestStackIndex = stackIndex;
@@ -637,10 +695,11 @@ function findTopMediaAtPoint(x, y) {
 }
 
 function isMediaActuallyVisible(media) {
+  const hasBackgroundProxy = hasVisibleBackgroundProxy(media);
   if (
     typeof media.checkVisibility === "function" &&
     !media.checkVisibility({
-      checkOpacity: true,
+      checkOpacity: !hasBackgroundProxy,
       checkVisibilityCSS: true,
     })
   ) {
@@ -659,12 +718,39 @@ function isMediaActuallyVisible(media) {
     if (
       style.display === "none" ||
       style.visibility === "hidden" ||
-      Number(style.opacity) === 0
+      (Number(style.opacity) === 0 &&
+        !(element === media && hasBackgroundProxy))
     ) {
       return false;
     }
   }
   return true;
+}
+
+function hasVisibleBackgroundProxy(media) {
+  if (media.tagName !== "IMG" || !media.parentElement) return false;
+  const mediaRect = media.getBoundingClientRect();
+  return Array.from(media.parentElement.children).some((element) => {
+    if (element === media) return false;
+    const style = getComputedStyle(element);
+    if (
+      style.backgroundImage === "none" ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.left < mediaRect.right &&
+      rect.right > mediaRect.left &&
+      rect.top < mediaRect.bottom &&
+      rect.bottom > mediaRect.top
+    );
+  });
 }
 
 function getModalAtPoint(x, y, stack) {

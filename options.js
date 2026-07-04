@@ -5,10 +5,12 @@ const DEFAULTS = {
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
+  blacklistedDomains: ["netflix.com", "primevideo.com"],
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };
 const get = (id) => document.getElementById(id);
+let blacklistedDomains = [...DEFAULTS.blacklistedDomains];
 
 function saveOptions() {
   const requestedFolder = get("folder").value.trim();
@@ -22,6 +24,7 @@ function saveOptions() {
       showPreviewButton: get("showPreview").checked,
       showVideoControls: get("showVideoControls").checked,
       captureType: get("captureType").value,
+      blacklistedDomains,
       minWidth: parseInt(get("minWidth").value, 10) || DEFAULTS.minWidth,
       maxConcurrentDownloads: Math.min(
         10,
@@ -56,9 +59,95 @@ function restoreOptions() {
       : DEFAULTS.captureType;
     get("minWidth").value = items.minWidth;
     get("maxConcurrent").value = items.maxConcurrentDownloads;
+    blacklistedDomains = normalizeDomainList(items.blacklistedDomains);
+    renderBlacklist();
     if (folder !== items.downloadFolder) {
       chrome.storage.sync.set({ downloadFolder: "" });
     }
+  });
+}
+
+function normalizeDomain(value) {
+  if (typeof value !== "string") return null;
+  const input = value.trim().toLowerCase().replace(/^\*\./, "");
+  if (!input) return null;
+  try {
+    const hostname = new URL(
+      input.includes("://") ? input : `https://${input}`
+    ).hostname
+      .replace(/^www\./, "")
+      .replace(/\.$/, "");
+    if (
+      !hostname.includes(".") ||
+      !/^[a-z0-9.-]+$/.test(hostname) ||
+      hostname
+        .split(".")
+        .some(
+          (part) => !part || part.startsWith("-") || part.endsWith("-")
+        )
+    ) {
+      return null;
+    }
+    return hostname;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDomainList(domains) {
+  if (!Array.isArray(domains)) return [...DEFAULTS.blacklistedDomains];
+  return [...new Set(domains.map(normalizeDomain).filter(Boolean))];
+}
+
+function renderBlacklist() {
+  const list = get("blacklist");
+  list.replaceChildren();
+  blacklistedDomains.forEach((domain) => {
+    const row = document.createElement("div");
+    row.className = "domain-item";
+    const name = document.createElement("span");
+    name.textContent = domain;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn-domain-delete";
+    remove.textContent = "Delete";
+    remove.setAttribute("aria-label", `Remove ${domain} from blacklist`);
+    remove.addEventListener("click", () => {
+      blacklistedDomains = blacklistedDomains.filter((item) => item !== domain);
+      renderBlacklist();
+      persistBlacklist("Domain removed.");
+    });
+    row.append(name, remove);
+    list.appendChild(row);
+  });
+  if (!blacklistedDomains.length) {
+    const empty = document.createElement("div");
+    empty.className = "domain-list-empty";
+    empty.textContent = "No blacklisted domains.";
+    list.appendChild(empty);
+  }
+}
+
+function addBlacklistDomain() {
+  const input = get("blacklistDomain");
+  const domain = normalizeDomain(input.value);
+  if (!domain) {
+    get("status").textContent = "Enter a valid domain, such as example.com.";
+    return;
+  }
+  if (!blacklistedDomains.includes(domain)) blacklistedDomains.push(domain);
+  blacklistedDomains.sort();
+  input.value = "";
+  renderBlacklist();
+  persistBlacklist("Domain added.");
+}
+
+function persistBlacklist(message) {
+  chrome.storage.sync.set({ blacklistedDomains }, () => {
+    get("status").textContent = message;
+    setTimeout(() => {
+      if (get("status").textContent === message) get("status").textContent = "";
+    }, 2000);
   });
 }
 
@@ -71,3 +160,9 @@ function hasForbiddenFolder(folder) {
 
 document.addEventListener("DOMContentLoaded", restoreOptions);
 get("save").addEventListener("click", saveOptions);
+get("addBlacklistDomain").addEventListener("click", addBlacklistDomain);
+get("blacklistDomain").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addBlacklistDomain();
+});

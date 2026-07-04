@@ -76,6 +76,57 @@ body.options-page {
   outline: none;
 }
 
+.domain-entry {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-secondary,
+.btn-domain-delete {
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  padding: 0 16px;
+  background: #34495e;
+}
+
+.domain-list {
+  max-height: 160px;
+  margin-top: 8px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.domain-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.btn-domain-delete {
+  padding: 5px 8px;
+  background: #c0392b;
+}
+
+.domain-list-empty {
+  padding: 10px;
+  color: #777;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
 .btn-save {
   width: 100%;
   padding: 0.8rem;

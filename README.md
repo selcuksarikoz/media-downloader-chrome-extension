@@ -26,6 +26,7 @@ directly to page media.
 - Preview button visibility
 - Native video controls
 - Frame capture type: JPG (default), PNG, or WebP
+- Domain blacklist with subdomain matching
 
 ## Development
 
