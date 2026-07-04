@@ -163,11 +163,11 @@ body.options-page {
   gap: 6px;
   opacity: 0;
   transition: opacity 0.2s ease;
-  pointer-events: auto;
+  pointer-events: none;
 
-  &.imd-show,
-  &:hover {
+  &.imd-show {
     opacity: 1;
+    pointer-events: auto;
   }
 }
 

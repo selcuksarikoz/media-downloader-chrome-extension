@@ -1,6 +1,16 @@
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.action !== "download" || !message.url) return;
-  downloadMedia(message);
+  if (!message.url) return;
+  if (message.action === "download") {
+    downloadMedia(message);
+    return;
+  }
+  if (message.action === "preview") {
+    chrome.tabs.create({ url: message.url, active: false }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Preview failed:", chrome.runtime.lastError.message);
+      }
+    });
+  }
 });
 
 function downloadMedia({ url, folder, saveAs, mediaType }) {

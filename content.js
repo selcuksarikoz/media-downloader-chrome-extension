@@ -42,13 +42,15 @@ const mediaIntersectionObserver = new IntersectionObserver(
 );
 const mediaResizeObserver = new ResizeObserver((entries) => {
   entries.forEach(({ target }) => {
-    if (!visibleMedia.has(target)) return;
     if (!target.dataset.imdProcessed) {
       processMedia(target);
       return;
     }
     const group = mediaControls.get(target);
-    if (group?.classList.contains("imd-show")) {
+    if (
+      visibleMedia.has(target) &&
+      group?.classList.contains("imd-show")
+    ) {
       positionActionGroup(group, target);
     }
   });
@@ -265,11 +267,14 @@ function processAllMedia() {
 
 function trackMedia(media) {
   if (!extensionActive) return;
+  media.dataset.imdMediaType =
+    media.tagName === "VIDEO" ? "video" : "image";
   if (media.tagName === "VIDEO") {
     media.controls = settings.showVideoControls;
   }
   mediaResizeObserver.observe(media);
   mediaIntersectionObserver.observe(media);
+  processMedia(media);
 }
 
 function updateVideoControls() {
@@ -326,6 +331,7 @@ function cleanupMedia(media) {
   mediaResizeObserver.unobserve(media);
   delete media.dataset.imdProcessed;
   delete media.dataset.imdWaiting;
+  delete media.dataset.imdMediaType;
 }
 
 function updateAllButtonPositions() {
@@ -354,7 +360,7 @@ function isValidMedia(media) {
 }
 
 function processMedia(media) {
-  if (!visibleMedia.has(media) || !media.isConnected) return;
+  if (!extensionActive || !media.isConnected) return;
   const isImage = media.tagName === "IMG";
   const isLoaded = isImage ? media.complete : true;
   if (!isLoaded) {
@@ -466,7 +472,12 @@ function processMedia(media) {
 }
 
 function isInstagramVideoPlayerMedia(media) {
-  return Boolean(getAssociatedVideoPlayer(media));
+  return Boolean(getAssociatedVideoPlayer(media) || getInstagramReelLink(media));
+}
+
+function getInstagramReelLink(media) {
+  if (!/(^|\.)instagram\.com$/.test(location.hostname)) return null;
+  return media.closest('a[href*="/reel/"], a[href*="/reels/"]');
 }
 
 function getAssociatedVideoPlayer(media) {
@@ -474,7 +485,7 @@ function getAssociatedVideoPlayer(media) {
   const directPlayer = media.closest(selector);
   if (directPlayer) return directPlayer;
 
-  const reelLink = media.closest('a[href*="/reel"], a[href*="/p/"]');
+  const reelLink = getInstagramReelLink(media) || media.closest('a[href*="/p/"]');
   const linkedPlayer = reelLink?.querySelector(selector);
   if (linkedPlayer) return linkedPlayer;
 
@@ -494,6 +505,22 @@ function getAssociatedVideoPlayer(media) {
     ancestor = ancestor.parentElement;
   }
   return null;
+}
+
+function getActionRect(media) {
+  const player = getAssociatedVideoPlayer(media);
+  if (player) {
+    const rect = player.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return rect;
+  }
+
+  const reelLink = getInstagramReelLink(media);
+  if (reelLink) {
+    const rect = reelLink.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return rect;
+  }
+
+  return media.getBoundingClientRect();
 }
 
 function isolateActionGroupEvents(group) {
@@ -669,7 +696,7 @@ function positionActionGroup(group, media) {
   attachActionGroup(group, media);
   const container = actionGroupContainers.get(group);
   if (!container) return;
-  const rect = media.getBoundingClientRect();
+  const rect = getActionRect(media);
   const width = group.offsetWidth || 86;
   const height = group.offsetHeight || 40;
   const gap = 10;
@@ -836,13 +863,23 @@ function isMediaActuallyVisible(media) {
 }
 
 function hasVisibleBackgroundProxy(media) {
-  if (media.tagName !== "IMG" || !media.parentElement) return false;
+  if (!media.parentElement) return false;
   const mediaRect = media.getBoundingClientRect();
-  return Array.from(media.parentElement.children).some((element) => {
+  const candidates =
+    media.tagName === "VIDEO"
+      ? Array.from(
+          (getInstagramReelLink(media) || media.parentElement).querySelectorAll(
+            "img"
+          )
+        )
+      : Array.from(media.parentElement.children);
+  return candidates.some((element) => {
     if (element === media) return false;
     const style = getComputedStyle(element);
+    const hasVisibleImage =
+      element.tagName === "IMG" && Boolean(element.currentSrc || element.src);
     if (
-      style.backgroundImage === "none" ||
+      (!hasVisibleImage && style.backgroundImage === "none") ||
       style.display === "none" ||
       style.visibility === "hidden" ||
       Number(style.opacity) === 0
@@ -899,24 +936,23 @@ function createActionButton(className, title, icon) {
   return button;
 }
 
-function previewMedia(media) {
+async function previewMedia(media) {
   if (media.tagName === "VIDEO") {
     const url = getVideoUrl(media);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    if (url) openPreviewInBackground(url);
     return;
   }
 
-  const previewWindow = window.open("about:blank", "_blank");
-  if (!previewWindow) return;
-  previewWindow.opener = null;
-  resolveHighestResolutionImageUrl(media)
-    .then((url) => {
-      if (url && !previewWindow.closed) previewWindow.location.replace(url);
-    })
-    .catch((error) => {
-      previewWindow.close();
-      console.error("Image resolution detection failed.", error);
-    });
+  try {
+    const url = await resolveHighestResolutionImageUrl(media);
+    if (url) openPreviewInBackground(url);
+  } catch (error) {
+    console.error("Image resolution detection failed.", error);
+  }
+}
+
+function openPreviewInBackground(url) {
+  chrome.runtime.sendMessage({ action: "preview", url });
 }
 
 function getHighestResolutionImageUrl(img) {
