@@ -6,7 +6,7 @@ imgDownloader is a powerful and easy-to-use Chrome Extension that allows you to 
 
 - **One-Click Download:** Adds a convenient download button to every image on a webpage.
 - **Smart Positioning:** Choose where the button appears (Top-Right, Top-Left, etc.) via settings.
-- **Custom Save Location:** Save images to a specific sub-folder in your Downloads directory, or choose to have the browser ask for a location every time.
+- **Custom Save Location:** Save images to a specific sub-folder in your Downloads directory, or leave it empty to use Downloads directly.
 - **Size Filtering:** Automatically ignore small icons and thumbnails by setting a minimum width (default: 150px) to keep your interface clean.
 - **Dynamic Support:** Works on pages with lazy-loading (infinite scroll) images.
 - **Modern Design:** Sleek, unobtrusive UI that blends correct button placement without breaking site layouts.

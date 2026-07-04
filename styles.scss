@@ -84,22 +84,35 @@ body.options-page {
 /* =========================================
    Injected Content Button Styles
    ========================================= */
-/* The button container */
-.imd-down-btn {
+/* Preview and download controls */
+.imd-action-group {
   position: absolute;
+  z-index: 2147483647;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: auto;
+}
+
+.imd-action-btn {
   width: 40px;
   height: 40px;
+  padding: 0;
+  border: none;
   background-color: rgba(30, 30, 30, 0.85); /* Dark semi-transparent */
   border-radius: 8px;
   cursor: pointer;
-  z-index: 2147483647; /* Max z-index */
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.2s ease, transform 0.1s ease;
-  opacity: 0; /* Hidden by default until hover */
+  transition: transform 0.1s ease, background-color 0.2s ease;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-  pointer-events: auto; /* Ensure it captures clicks */
+  appearance: none;
+}
+
+.imd-preview-btn[hidden] {
+  display: none;
 }
 
 /* Show button on specific conditions handled by JS or sibling hover */
@@ -108,17 +121,21 @@ body.options-page {
    We will rely on the content script to toggle a class or just rely on the button itself being hovered.
    Actually, the best UX is: show when mouse is over the image.
    We'll use a class '.imd-show' added by JS mouseover events on the image. */
-.imd-down-btn.imd-show,
-.imd-down-btn:hover {
+.imd-action-group.imd-show,
+.imd-action-group:hover {
   opacity: 1;
 }
 
-.imd-down-btn:active {
+.imd-action-btn:hover {
+  background-color: rgba(50, 50, 50, 0.95);
+}
+
+.imd-action-btn:active {
   transform: scale(0.95);
 }
 
 /* Icon (SVG) styling */
-.imd-down-btn svg {
+.imd-action-btn svg {
   width: 24px;
   height: 24px;
   fill: #ffffff;

@@ -12,13 +12,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function downloadImage(url, folder, saveAs) {
   let filename = getFilenameFromUrl(url);
 
-  // Ensure the folder path.
-  // Chrome downloads API treats / as subdirectory separator.
-  // Remove leading/trailing slashes from folder name just in case.
-  if (folder) {
-    folder = folder.replace(/^[\/\\]+|[\/\\]+$/g, "");
-    if (folder.length > 0) {
-      // Check length after trim
+  // An empty folder means the browser's default Downloads directory.
+  // Never recreate the folder used by older extension versions.
+  if (typeof folder === "string") {
+    folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    const hasForbiddenFolder = folder
+      .split(/[\/\\]+/)
+      .some((part) => part.toLowerCase() === "imgdownloader_files");
+    if (folder && !hasForbiddenFolder) {
       filename = `${folder}/${filename}`;
     }
   }
@@ -27,7 +28,7 @@ function downloadImage(url, folder, saveAs) {
     {
       url: url,
       filename: filename,
-      saveAs: !!saveAs, // Force boolean
+      saveAs: saveAs === true,
       conflictAction: "uniquify",
     },
     (downloadId) => {
