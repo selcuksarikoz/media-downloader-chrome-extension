@@ -1,71 +1,58 @@
-// Saves options to chrome.storage
+const DEFAULTS = {
+  buttonPosition: "top-right",
+  downloadFolder: "",
+  showSaveAs: false,
+  showPreviewButton: true,
+  showVideoControls: true,
+  minWidth: 150,
+  maxConcurrentDownloads: 5,
+};
+const get = (id) => document.getElementById(id);
+
 function saveOptions() {
-  const position = document.getElementById("position").value;
-  const requestedFolder = document.getElementById("folder").value.trim();
+  const requestedFolder = get("folder").value.trim();
   const folder = hasForbiddenFolder(requestedFolder) ? "" : requestedFolder;
-  const saveAs = document.getElementById("saveAs").checked;
-  const showPreview = document.getElementById("showPreview").checked;
-  const showVideoControls = document.getElementById(
-    "showVideoControls"
-  ).checked;
-  const minWidth = document.getElementById("minWidth").value;
-  const maxConcurrent = document.getElementById("maxConcurrent").value;
 
   chrome.storage.sync.set(
     {
-      buttonPosition: position,
+      buttonPosition: get("position").value,
       downloadFolder: folder,
-      showSaveAs: saveAs,
-      showPreviewButton: showPreview,
-      showVideoControls,
-      minWidth: parseInt(minWidth, 10) || 150,
+      showSaveAs: get("saveAs").checked,
+      showPreviewButton: get("showPreview").checked,
+      showVideoControls: get("showVideoControls").checked,
+      minWidth: parseInt(get("minWidth").value, 10) || DEFAULTS.minWidth,
       maxConcurrentDownloads: Math.min(
         10,
-        Math.max(1, parseInt(maxConcurrent, 10) || 5)
+        Math.max(
+          1,
+          parseInt(get("maxConcurrent").value, 10) ||
+            DEFAULTS.maxConcurrentDownloads
+        )
       ),
     },
     () => {
-      // Update status to let user know options were saved.
-      const status = document.getElementById("status");
-      status.textContent = "Options saved successfully!";
-      setTimeout(() => {
-        status.textContent = "";
-      }, 2000);
+      get("status").textContent = "Options saved.";
+      setTimeout(() => (get("status").textContent = ""), 2000);
     }
   );
 }
 
-// Restores select box and text fields using the preferences stored in chrome.storage.
 function restoreOptions() {
-  chrome.storage.sync.get(
-    {
-      buttonPosition: "top-right", // Default value
-      downloadFolder: "", // Empty means the default Downloads folder
-      showSaveAs: false, // Default value
-      showPreviewButton: true,
-      showVideoControls: true,
-      minWidth: 150, // Default value
-      maxConcurrentDownloads: 5,
-    },
-    (items) => {
-      document.getElementById("position").value = items.buttonPosition;
-      const folder = hasForbiddenFolder(items.downloadFolder)
-        ? ""
-        : items.downloadFolder;
-      document.getElementById("folder").value = folder;
-      if (folder !== items.downloadFolder) {
-        chrome.storage.sync.set({ downloadFolder: "" });
-      }
-      document.getElementById("saveAs").checked = items.showSaveAs;
-      document.getElementById("showPreview").checked =
-        items.showPreviewButton;
-      document.getElementById("showVideoControls").checked =
-        items.showVideoControls;
-      document.getElementById("minWidth").value = items.minWidth;
-      document.getElementById("maxConcurrent").value =
-        items.maxConcurrentDownloads;
+  chrome.storage.sync.get(DEFAULTS, (items) => {
+    const folder = hasForbiddenFolder(items.downloadFolder)
+      ? ""
+      : items.downloadFolder;
+    get("position").value = items.buttonPosition;
+    get("folder").value = folder;
+    get("saveAs").checked = items.showSaveAs;
+    get("showPreview").checked = items.showPreviewButton;
+    get("showVideoControls").checked = items.showVideoControls;
+    get("minWidth").value = items.minWidth;
+    get("maxConcurrent").value = items.maxConcurrentDownloads;
+    if (folder !== items.downloadFolder) {
+      chrome.storage.sync.set({ downloadFolder: "" });
     }
-  );
+  });
 }
 
 function hasForbiddenFolder(folder) {
@@ -76,4 +63,4 @@ function hasForbiddenFolder(folder) {
 }
 
 document.addEventListener("DOMContentLoaded", restoreOptions);
-document.getElementById("save").addEventListener("click", saveOptions);
+get("save").addEventListener("click", saveOptions);

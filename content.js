@@ -1,9 +1,4 @@
-/**
- * Media Downloader content script.
- * Injects download and preview controls onto images and videos.
- */
-
-let settings = {
+const DEFAULT_SETTINGS = {
   buttonPosition: "top-right",
   downloadFolder: "",
   showSaveAs: false,
@@ -12,8 +7,11 @@ let settings = {
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };
+const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "recording", "progress"]);
+let settings = { ...DEFAULT_SETTINGS };
 
 const mediaControls = new Map();
+const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
@@ -51,16 +49,13 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
-  const video = Array.from(mediaControls.keys()).find(
-    (media) => media.dataset.imdCaptureId === videoId
-  );
+  const video = capturedVideos.get(videoId);
   const button = video
     ? mediaControls.get(video)?.querySelector(".imd-down-btn")
     : null;
 
   if (button) {
-    const isActive =
-      status === "queued" || status === "recording" || status === "progress";
+    const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
     button.title = isActive ? "Video download in progress" : "Download Video";
     button.setAttribute("aria-label", button.title);
     button.classList.toggle("imd-recording", isActive);
@@ -70,7 +65,6 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   updateBlobDownloadPanel(videoId, status, message, progress);
 
   if (status === "error") console.error(message);
-  else console.info(message);
 });
 
 let blobDownloadStack;
@@ -83,15 +77,16 @@ window.addEventListener("beforeunload", (event) => {
 
 function updateBlobDownloadPanel(videoId, status, message, progress) {
   if (!blobDownloadStack) blobDownloadStack = createBlobDownloadStack();
-  if (!blobDownloadStack.isConnected) document.body.appendChild(blobDownloadStack);
+  if (!blobDownloadStack.isConnected) {
+    document.body.appendChild(blobDownloadStack);
+  }
   let panel = blobDownloadPanels.get(videoId);
   if (!panel) {
     panel = createBlobDownloadPanel(videoId);
     blobDownloadPanels.set(videoId, panel);
     blobDownloadStack.appendChild(panel);
   }
-  const isActive =
-    status === "queued" || status === "recording" || status === "progress";
+  const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
   const canFinish = status === "recording" || status === "progress";
   const percent = Number.isFinite(progress)
     ? Math.max(0, Math.min(100, Math.round(progress)))
@@ -134,7 +129,6 @@ function createBlobDownloadStack() {
   const stack = document.createElement("div");
   stack.className = "imd-download-stack";
   stack.popover = "manual";
-  document.body.appendChild(stack);
   return stack;
 }
 
@@ -156,13 +150,14 @@ function createBlobDownloadPanel(videoId) {
   panel.querySelector(".imd-finish-download").addEventListener("click", () => {
     const request = blobDownloadRequests.get(videoId);
     if (request) {
-      window.dispatchEvent(new CustomEvent(BLOB_DOWNLOAD_EVENT, { detail: request }));
+      window.dispatchEvent(
+        new CustomEvent(BLOB_DOWNLOAD_EVENT, { detail: request })
+      );
     }
   });
   return panel;
 }
 
-// SVG Icon for the download button
 const DOWNLOAD_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
@@ -175,62 +170,25 @@ const PREVIEW_ICON = `
 </svg>
 `;
 
-/**
- * Initialize the extension content script.
- */
 function init() {
-  // Load settings first
-  chrome.storage.sync.get(
-    {
-      buttonPosition: "top-right",
-      downloadFolder: "",
-      showSaveAs: false,
-      showPreviewButton: true,
-      showVideoControls: true,
-      minWidth: 150,
-      maxConcurrentDownloads: 5,
-    },
-    (items) => {
-      settings = items;
-      if (hasForbiddenFolder(settings.downloadFolder)) {
-        settings.downloadFolder = "";
-        chrome.storage.sync.set({ downloadFolder: "" });
-      }
-      processAllMedia();
-      // Observe for dynamically added media
-      startObserver();
+  chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
+    settings = items;
+    if (hasForbiddenFolder(settings.downloadFolder)) {
+      settings.downloadFolder = "";
+      chrome.storage.sync.set({ downloadFolder: "" });
     }
-  );
+    processAllMedia();
+    startObserver();
+  });
 
-  // Listen for setting changes
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync") {
-      if (changes.buttonPosition) {
-        settings.buttonPosition = changes.buttonPosition.newValue;
-        updateAllButtonPositions();
-      }
-      if (changes.downloadFolder) {
-        settings.downloadFolder = changes.downloadFolder.newValue;
-      }
-      if (changes.showSaveAs) {
-        settings.showSaveAs = changes.showSaveAs.newValue;
-      }
-      if (changes.showPreviewButton) {
-        settings.showPreviewButton = changes.showPreviewButton.newValue;
-        updatePreviewButtonVisibility();
-      }
-      if (changes.showVideoControls) {
-        settings.showVideoControls = changes.showVideoControls.newValue;
-        updateVideoControls();
-      }
-      if (changes.minWidth) {
-        settings.minWidth = changes.minWidth.newValue;
-      }
-      if (changes.maxConcurrentDownloads) {
-        settings.maxConcurrentDownloads =
-          changes.maxConcurrentDownloads.newValue;
-      }
-    }
+    if (area !== "sync") return;
+    Object.entries(changes).forEach(([key, change]) => {
+      settings[key] = change.newValue;
+    });
+    if (changes.buttonPosition) updateAllButtonPositions();
+    if (changes.showPreviewButton) updatePreviewButtonVisibility();
+    if (changes.showVideoControls) updateVideoControls();
   });
 }
 
@@ -240,12 +198,8 @@ function hasForbiddenFolder(folder) {
     .some((part) => part.toLowerCase() === "imgdownloader_files");
 }
 
-/**
- * Process all existing images and videos on the page.
- */
 function processAllMedia() {
-  const mediaElements = document.querySelectorAll("img, video");
-  mediaElements.forEach(trackMedia);
+  document.querySelectorAll("img, video").forEach(trackMedia);
 }
 
 function trackMedia(media) {
@@ -262,16 +216,12 @@ function updateVideoControls() {
   });
 }
 
-/**
- * Start MutationObserver to detect new media elements.
- */
 function startObserver() {
   const observer = new MutationObserver((mutations) => {
     const removedMedia = new Set();
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === 1) {
-          // Element
           if (node.matches("img, video")) {
             trackMedia(node);
           } else {
@@ -304,6 +254,9 @@ function startObserver() {
 function cleanupMedia(media) {
   const group = mediaControls.get(media);
   if (group) group.remove();
+  if (media.dataset.imdCaptureId) {
+    capturedVideos.delete(media.dataset.imdCaptureId);
+  }
   mediaControls.delete(media);
   visibleMedia.delete(media);
   mediaIntersectionObserver.unobserve(media);
@@ -312,9 +265,6 @@ function cleanupMedia(media) {
   delete media.dataset.imdWaiting;
 }
 
-/**
- * Update positions of all existing buttons.
- */
 function updateAllButtonPositions() {
   mediaControls.forEach((group, media) => {
     positionActionGroup(group, media);
@@ -331,9 +281,6 @@ function updatePreviewButtonVisibility() {
   repositionOpenControls();
 }
 
-/**
- * Check if a media element is large enough and has not been processed.
- */
 function isValidMedia(media) {
   const width = media.clientWidth || media.width;
   const height = media.clientHeight || media.height;
@@ -343,9 +290,6 @@ function isValidMedia(media) {
   return true;
 }
 
-/**
- * Create and inject controls for an image or video.
- */
 function processMedia(media) {
   if (!visibleMedia.has(media) || !media.isConnected) return;
   const isImage = media.tagName === "IMG";
@@ -373,6 +317,7 @@ function processMedia(media) {
   if (!isImage && !media.dataset.imdCaptureId) {
     media.dataset.imdCaptureId = crypto.randomUUID();
   }
+  if (!isImage) capturedVideos.set(media.dataset.imdCaptureId, media);
 
   const actionGroup = document.createElement("div");
   actionGroup.className = "imd-action-group";
@@ -391,7 +336,6 @@ function processMedia(media) {
   previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
   actionGroup.append(downloadBtn, previewBtn);
 
-  // Prevent clicks from bubbling to links
   downloadBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -404,9 +348,6 @@ function processMedia(media) {
     previewMedia(media);
   });
 
-  // Toggle the controls from the media element because sibling hover selectors
-  // are unreliable across arbitrary page markup.
-
   const showButtons = () => {
     if (
       !lastPointerPosition ||
@@ -417,8 +358,6 @@ function processMedia(media) {
   };
   const hideButtons = () => hideActionGroup(actionGroup);
 
-  // Sites such as Instagram place sibling overlays above the actual media.
-  // Listen on the nearest same-sized wrappers as well as the media itself.
   const hoverTargets = getMediaHoverTargets(media);
   const scheduleHide = () => {
     setTimeout(() => {
@@ -647,8 +586,6 @@ function previewMedia(media) {
     return;
   }
 
-  // Open synchronously to retain the click's popup permission, then navigate
-  // after the candidates have been measured.
   const previewWindow = window.open("about:blank", "_blank");
   if (!previewWindow) return;
   previewWindow.opener = null;
@@ -693,9 +630,7 @@ function collectImageCandidates(img) {
     if (!value) return;
     try {
       urls.add(new URL(value, document.baseURI).href);
-    } catch (_error) {
-      // Ignore malformed page-provided candidates.
-    }
+    } catch {}
   };
 
   addUrl(img.currentSrc);
@@ -705,7 +640,7 @@ function collectImageCandidates(img) {
   let sourcePath = "";
   try {
     sourcePath = new URL(img.currentSrc || img.src).pathname;
-  } catch (_error) {
+  } catch {
     return Array.from(urls);
   }
 
@@ -719,9 +654,7 @@ function collectImageCandidates(img) {
       try {
         const url = new URL(value, document.baseURI);
         if (url.pathname === sourcePath) addUrl(url.href);
-      } catch (_error) {
-        // Ignore malformed candidates.
-      }
+      } catch {}
     });
   });
 
@@ -784,10 +717,6 @@ function parseSrcset(srcset) {
     .filter((candidate) => candidate.url);
 }
 
-/**
- * Download normal URLs through chrome.downloads and stream Blob-backed videos
- * directly to a user-selected file without buffering the entire video.
- */
 async function downloadMedia(media) {
   const src =
     media.tagName === "IMG"
@@ -834,15 +763,12 @@ function getSuggestedVideoName(video) {
       const pathname = new URL(source, document.baseURI).pathname;
       const filename = decodeURIComponent(pathname.split("/").pop() || "");
       if (filename) return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-    } catch (_error) {
-      // Use the generated fallback below.
-    }
+    } catch {}
   }
 
   return `video-${Date.now()}.mp4`;
 }
 
-// Run init
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
 } else {

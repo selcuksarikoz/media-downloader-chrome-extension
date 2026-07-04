@@ -1,9 +1,3 @@
-/**
- * Runs in the page's MAIN world so page-owned Blob and MediaSource URLs remain
- * accessible. Content scripts cannot reliably fetch those URLs from their
- * isolated JavaScript world.
- */
-
 const DOWNLOAD_EVENT = "imd:download-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const blobKinds = new Map();
@@ -102,17 +96,22 @@ function startJob(job) {
   activeJobs.add(videoId);
   emitStatus(videoId, "recording", "Preparing video download…");
   const source = blobKinds.get(url);
-  const operation =
-    source?.kind === "blob"
-      ? downloadKnownBlob(url, filename, videoId)
-      : source?.kind === "media-source" && source.record.buffers.length === 1
-        ? downloadCapturedMediaSource(
-            video,
-            videoId,
-            filename,
-            source.record.buffers[0]
-          )
-        : recordMediaSource(video, videoId, filename);
+  let operation;
+  if (source?.kind === "blob") {
+    operation = downloadKnownBlob(url, filename, videoId);
+  } else if (
+    source?.kind === "media-source" &&
+    source.record.buffers.length === 1
+  ) {
+    operation = downloadCapturedMediaSource(
+      video,
+      videoId,
+      filename,
+      source.record.buffers[0]
+    );
+  } else {
+    operation = recordMediaSource(video, videoId, filename);
+  }
 
   operation
     .catch((error) => {
@@ -142,8 +141,7 @@ function updateQueueStatuses() {
       job.videoId,
       "queued",
       `Waiting in queue · position ${index + 1}`,
-      0,
-      index + 1
+      0
     );
   });
 }
@@ -231,22 +229,18 @@ function waitForMediaCompletion(video, videoId) {
         progress
       );
     };
-    const finish = () => {
+    const settle = (error) => {
       clearTimeout(timer);
       video.removeEventListener("ended", finish);
       video.removeEventListener("error", fail);
       video.removeEventListener("timeupdate", reportProgress);
       releasePlaybackLock();
-      resolve();
+      if (error) reject(error);
+      else resolve();
     };
-    const fail = () => {
-      clearTimeout(timer);
-      video.removeEventListener("ended", finish);
-      video.removeEventListener("error", fail);
-      video.removeEventListener("timeupdate", reportProgress);
-      releasePlaybackLock();
-      reject(new Error("Video playback failed while collecting segments."));
-    };
+    const finish = () => settle();
+    const fail = () =>
+      settle(new Error("Video playback failed while collecting segments."));
 
     activeRecordings.set(videoId, { stop: finish });
     video.addEventListener("ended", finish, { once: true });
@@ -324,12 +318,7 @@ async function recordMediaSource(video, videoId, filename) {
           2000
       );
     }
-    emitStatus(
-      videoId,
-      "recording",
-      "Recording video stream…",
-      0
-    );
+    emitStatus(videoId, "recording", "Recording video stream…", 0);
     video.addEventListener("timeupdate", reportProgress);
     await completion;
     const recordedBlob = new Blob(chunks, { type: recorder.mimeType });
@@ -340,8 +329,6 @@ async function recordMediaSource(video, videoId, filename) {
     triggerDownload(downloadUrl, outputName);
     setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
     emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
-  } catch (error) {
-    throw error;
   } finally {
     clearTimeout(stopTimer);
     releasePlaybackLock();
@@ -391,17 +378,9 @@ function getCaptureRenderHost() {
   if (captureRenderHost?.isConnected) return captureRenderHost;
   captureRenderHost = document.createElement("div");
   captureRenderHost.setAttribute("aria-hidden", "true");
-  captureRenderHost.style.cssText = [
-    "position:fixed",
-    "top:0",
-    "left:0",
-    "width:2px",
-    "height:2px",
-    "overflow:hidden",
-    "opacity:0.01",
-    "pointer-events:none",
-    "z-index:2147483646",
-  ].join(";");
+  captureRenderHost.style.cssText =
+    "position:fixed;top:0;left:0;width:2px;height:2px;overflow:hidden;" +
+    "opacity:.01;pointer-events:none;z-index:2147483646";
   document.documentElement.appendChild(captureRenderHost);
   return captureRenderHost;
 }
@@ -446,16 +425,9 @@ function keepVideoRendered(video) {
     placeholder.style.cssText = `display:block;width:${rect.width}px;height:${rect.height}px`;
     video.parentNode.insertBefore(placeholder, video);
     getCaptureRenderHost().appendChild(video);
-    video.style.cssText = [
-      "position:absolute",
-      "inset:0",
-      "width:2px",
-      "height:2px",
-      "min-width:2px",
-      "min-height:2px",
-      "opacity:1",
-      "pointer-events:none",
-    ].join(";");
+    video.style.cssText =
+      "position:absolute;inset:0;width:2px;height:2px;min-width:2px;" +
+      "min-height:2px;opacity:1;pointer-events:none";
     hosted = true;
     observer.disconnect();
     observer.observe(placeholder);
@@ -513,10 +485,10 @@ function triggerDownload(url, filename) {
   link.remove();
 }
 
-function emitStatus(videoId, status, message, progress, queuePosition) {
+function emitStatus(videoId, status, message, progress) {
   window.dispatchEvent(
     new CustomEvent(STATUS_EVENT, {
-      detail: { videoId, status, message, progress, queuePosition },
+      detail: { videoId, status, message, progress },
     })
   );
 }

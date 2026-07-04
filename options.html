@@ -30,16 +30,9 @@
           id="minWidth"
           class="form-control"
           min="0"
-          value="50"
+          value="150"
         />
-        <small
-          style="
-            color: #666;
-            font-size: 0.8rem;
-            margin-top: 4px;
-            display: block;
-          "
-        >
+        <small class="field-help">
           Images and videos smaller than this size will be ignored.
         </small>
       </div>
@@ -54,7 +47,7 @@
           max="10"
           value="5"
         />
-        <small style="color: #666; font-size: 0.8rem; margin-top: 4px; display: block">
+        <small class="field-help">
           Additional videos wait in the download queue.
         </small>
       </div>
@@ -67,56 +60,24 @@
           class="form-control"
           placeholder="e.g. Media"
         />
-        <small
-          style="
-            color: #666;
-            font-size: 0.8rem;
-            margin-top: 4px;
-            display: block;
-          "
-        >
+        <small class="field-help">
           Leave empty to save directly in the Downloads folder.
         </small>
       </div>
 
-      <div
-        class="form-group"
-        style="display: flex; align-items: center; gap: 10px"
-      >
-        <input type="checkbox" id="saveAs" style="width: auto; margin: 0" />
-        <label for="saveAs" style="margin: 0; font-weight: normal"
-          >Always ask where to save</label
-        >
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="saveAs" />
+        <label for="saveAs">Always ask where to save</label>
       </div>
 
-      <div
-        class="form-group"
-        style="display: flex; align-items: center; gap: 10px"
-      >
-        <input
-          type="checkbox"
-          id="showPreview"
-          style="width: auto; margin: 0"
-        />
-        <label for="showPreview" style="margin: 0; font-weight: normal"
-          >Show preview button</label
-        >
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="showPreview" />
+        <label for="showPreview">Show preview button</label>
       </div>
 
-      <div
-        class="form-group"
-        style="display: flex; align-items: center; gap: 10px"
-      >
-        <input
-          type="checkbox"
-          id="showVideoControls"
-          style="width: auto; margin: 0"
-        />
-        <label
-          for="showVideoControls"
-          style="margin: 0; font-weight: normal"
-          >Always show video controls</label
-        >
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="showVideoControls" />
+        <label for="showVideoControls">Always show video controls</label>
       </div>
 
       <button id="save" class="btn-save">Save Settings</button>
