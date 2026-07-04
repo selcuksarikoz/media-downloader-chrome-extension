@@ -546,6 +546,7 @@ function hostVideoForCapture(video) {
   const originalParent = video.parentNode;
   const originalNextSibling = video.nextSibling;
   const originalStyle = video.getAttribute("style");
+  const originalMuted = video.muted;
   if (!originalParent) return () => {};
 
   const rect = video.getBoundingClientRect();
@@ -562,14 +563,46 @@ function hostVideoForCapture(video) {
       .drawImage(video, 0, 0, placeholder.width, placeholder.height);
   } catch {}
 
+  const placeholderContext = placeholder.getContext("2d");
+  let stopped = false;
+  let frameCallbackId;
+  const paintPlaceholder = () => {
+    if (stopped || !placeholder.isConnected) return;
+    try {
+      placeholderContext?.drawImage(
+        video,
+        0,
+        0,
+        placeholder.width,
+        placeholder.height
+      );
+    } catch {}
+  };
+  const paintFrame = () => {
+    if (stopped) return;
+    paintPlaceholder();
+    frameCallbackId = video.requestVideoFrameCallback?.(paintFrame);
+  };
+
   originalParent.insertBefore(placeholder, video);
   getCaptureRenderHost().appendChild(video);
+  video.muted = true;
   video.style.cssText =
     "position:relative;display:block;flex:0 0 160px;width:160px;height:90px;" +
     "min-width:160px;min-height:90px;opacity:1;pointer-events:none;" +
     "transform:translateZ(0);will-change:transform";
 
+  if (typeof video.requestVideoFrameCallback === "function") {
+    frameCallbackId = video.requestVideoFrameCallback(paintFrame);
+  }
+  const paintInterval = setInterval(paintPlaceholder, 100);
+
   return () => {
+    stopped = true;
+    clearInterval(paintInterval);
+    if (frameCallbackId !== undefined) {
+      video.cancelVideoFrameCallback?.(frameCallbackId);
+    }
     const targetParent = placeholder.isConnected
       ? placeholder.parentNode
       : originalParent.isConnected
@@ -588,6 +621,7 @@ function hostVideoForCapture(video) {
     placeholder.remove();
     if (originalStyle === null) video.removeAttribute("style");
     else video.setAttribute("style", originalStyle);
+    video.muted = originalMuted;
   };
 }
 
