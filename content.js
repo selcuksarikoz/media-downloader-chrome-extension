@@ -138,6 +138,7 @@ function startObserver() {
         }
       });
     });
+    schedulePointerReconciliation();
   });
 
   observer.observe(document.body, {
@@ -241,7 +242,14 @@ function processMedia(media) {
   // Toggle the controls from the media element because sibling hover selectors
   // are unreliable across arbitrary page markup.
 
-  const showButtons = () => showActionGroup(actionGroup, media);
+  const showButtons = () => {
+    if (
+      !lastPointerPosition ||
+      findTopMediaAtPoint(lastPointerPosition.x, lastPointerPosition.y) === media
+    ) {
+      showActionGroup(actionGroup, media);
+    }
+  };
   const hideButtons = () => hideActionGroup(actionGroup);
 
   // Sites such as Instagram place sibling overlays above the actual media.
@@ -381,37 +389,78 @@ window.addEventListener("scroll", repositionOpenControls, true);
 window.addEventListener("resize", repositionOpenControls);
 
 let pointerFrame = null;
+let lastPointerPosition = null;
 document.addEventListener(
   "pointermove",
   (event) => {
     if (event.pointerType === "touch") return;
-    const { clientX, clientY } = event;
-    if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
-    pointerFrame = requestAnimationFrame(() => {
-      pointerFrame = null;
-      mediaControls.forEach((group, media) => {
-        if (!media.isConnected) {
-          group.remove();
-          mediaControls.delete(media);
-          return;
-        }
-        const rect = media.getBoundingClientRect();
-        const isOverMedia =
-          clientX >= rect.left &&
-          clientX <= rect.right &&
-          clientY >= rect.top &&
-          clientY <= rect.bottom;
-
-        if (isOverMedia) {
-          showActionGroup(group, media);
-        } else if (!group.matches(":hover")) {
-          hideActionGroup(group);
-        }
-      });
-    });
+    lastPointerPosition = { x: event.clientX, y: event.clientY };
+    schedulePointerReconciliation();
   },
   true
 );
+
+function schedulePointerReconciliation() {
+  if (!lastPointerPosition) return;
+  if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
+  pointerFrame = requestAnimationFrame(() => {
+    pointerFrame = null;
+    reconcileControlsAtPoint(lastPointerPosition.x, lastPointerPosition.y);
+  });
+}
+
+function reconcileControlsAtPoint(x, y) {
+  const topMedia = findTopMediaAtPoint(x, y);
+  mediaControls.forEach((group, media) => {
+    if (!media.isConnected) {
+      group.remove();
+      mediaControls.delete(media);
+      return;
+    }
+
+    if (media === topMedia) {
+      showActionGroup(group, media);
+    } else if (!group.matches(":hover")) {
+      hideActionGroup(group);
+    }
+  });
+}
+
+function findTopMediaAtPoint(x, y) {
+  const stack = document.elementsFromPoint(x, y);
+  let bestMedia = null;
+  let bestStackIndex = Infinity;
+
+  mediaControls.forEach((group, media) => {
+    if (!media.isConnected) return;
+    const rect = media.getBoundingClientRect();
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      return;
+    }
+
+    for (let index = 0; index < stack.length; index += 1) {
+      let element = stack[index];
+      if (group.contains(element)) {
+        bestMedia = media;
+        bestStackIndex = -1;
+        return;
+      }
+
+      for (let depth = 0; element && depth < 5; depth += 1) {
+        if (element === media || element.contains(media)) {
+          if (index < bestStackIndex) {
+            bestMedia = media;
+            bestStackIndex = index;
+          }
+          return;
+        }
+        element = element.parentElement;
+      }
+    }
+  });
+
+  return bestMedia;
+}
 
 function createActionButton(className, title, icon) {
   const button = document.createElement("button");
@@ -424,20 +473,25 @@ function createActionButton(className, title, icon) {
 }
 
 function previewMedia(media) {
-  const url = getBestMediaUrl(media);
-  if (!url) {
-    console.error("Media has no preview source.");
+  if (media.tagName === "VIDEO") {
+    const url = getVideoUrl(media);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
     return;
   }
-  window.open(url, "_blank", "noopener,noreferrer");
-}
 
-function getBestMediaUrl(media) {
-  if (media.tagName === "VIDEO") {
-    return getVideoUrl(media);
-  }
-
-  return getHighestResolutionImageUrl(media);
+  // Open synchronously to retain the click's popup permission, then navigate
+  // after the candidates have been measured.
+  const previewWindow = window.open("about:blank", "_blank");
+  if (!previewWindow) return;
+  previewWindow.opener = null;
+  resolveHighestResolutionImageUrl(media)
+    .then((url) => {
+      if (url && !previewWindow.closed) previewWindow.location.replace(url);
+    })
+    .catch((error) => {
+      previewWindow.close();
+      console.error("Image resolution detection failed.", error);
+    });
 }
 
 function getHighestResolutionImageUrl(img) {
@@ -447,6 +501,92 @@ function getHighestResolutionImageUrl(img) {
     return new URL(candidates[0].url, document.baseURI).href;
   }
   return img.currentSrc || img.src;
+}
+
+async function resolveHighestResolutionImageUrl(img) {
+  const candidates = collectImageCandidates(img);
+  if (!candidates.length) return getHighestResolutionImageUrl(img);
+
+  const measured = await Promise.all(
+    candidates.map(async (url) => ({
+      url,
+      area: await measureImageArea(url),
+    }))
+  );
+  measured.sort((a, b) => b.area - a.area);
+  return measured[0]?.area > 0
+    ? measured[0].url
+    : getHighestResolutionImageUrl(img);
+}
+
+function collectImageCandidates(img) {
+  const urls = new Set();
+  const addUrl = (value) => {
+    if (!value) return;
+    try {
+      urls.add(new URL(value, document.baseURI).href);
+    } catch (_error) {
+      // Ignore malformed page-provided candidates.
+    }
+  };
+
+  addUrl(img.currentSrc);
+  addUrl(img.src);
+  parseSrcset(img.getAttribute("srcset")).forEach(({ url }) => addUrl(url));
+
+  let sourcePath = "";
+  try {
+    sourcePath = new URL(img.currentSrc || img.src).pathname;
+  } catch (_error) {
+    return Array.from(urls);
+  }
+
+  const container = img.closest("article, [role='dialog']") || img.parentElement;
+  container?.querySelectorAll("img").forEach((candidate) => {
+    const values = [candidate.currentSrc, candidate.src];
+    parseSrcset(candidate.getAttribute("srcset")).forEach(({ url }) =>
+      values.push(url)
+    );
+    values.forEach((value) => {
+      try {
+        const url = new URL(value, document.baseURI);
+        if (url.pathname === sourcePath) addUrl(url.href);
+      } catch (_error) {
+        // Ignore malformed candidates.
+      }
+    });
+  });
+
+  Array.from(urls).forEach((value) => {
+    const url = new URL(value);
+    if (!url.hostname.includes("cdninstagram.com")) return;
+
+    const withoutTransform = new URL(url);
+    withoutTransform.searchParams.delete("stp");
+    urls.add(withoutTransform.href);
+
+    const originalCandidate = new URL(withoutTransform);
+    originalCandidate.searchParams.delete("efg");
+    urls.add(originalCandidate.href);
+  });
+
+  return Array.from(urls);
+}
+
+function measureImageArea(url) {
+  return new Promise((resolve) => {
+    const probe = new Image();
+    const timeout = setTimeout(() => resolve(0), 5000);
+    probe.onload = () => {
+      clearTimeout(timeout);
+      resolve(probe.naturalWidth * probe.naturalHeight);
+    };
+    probe.onerror = () => {
+      clearTimeout(timeout);
+      resolve(0);
+    };
+    probe.src = url;
+  });
 }
 
 function getVideoUrl(video) {
@@ -481,7 +621,10 @@ function parseSrcset(srcset) {
  * directly to a user-selected file without buffering the entire video.
  */
 async function downloadMedia(media) {
-  const src = getBestMediaUrl(media);
+  const src =
+    media.tagName === "IMG"
+      ? await resolveHighestResolutionImageUrl(media)
+      : getVideoUrl(media);
   if (!src) {
     console.error("Media has no source.");
     return;

@@ -42,12 +42,9 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
 
   const kind = blobKinds.get(url);
   const operation =
-    kind === "media-source"
-      ? recordMediaSource(video, videoId, filename)
-      : streamBlob(url, filename, videoId).catch((error) => {
-          if (error && error.name === "AbortError") throw error;
-          return recordMediaSource(video, videoId, filename);
-        });
+    kind === "blob"
+      ? downloadKnownBlob(url, filename, videoId)
+      : recordMediaSource(video, videoId, filename);
 
   operation.catch((error) => {
     if (error && error.name === "AbortError") return;
@@ -55,26 +52,13 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
   });
 });
 
-async function streamBlob(url, filename, videoId) {
-  const responsePromise = fetch(url);
-  const fileHandle = await pickFile(filename, [
-    {
-      description: "Video",
-      accept: {
-        "video/mp4": [".mp4"],
-        "video/webm": [".webm"],
-        "video/quicktime": [".mov"],
-        "video/x-matroska": [".mkv"],
-      },
-    },
-  ]);
-  const response = await responsePromise;
-  if (!response.ok || !response.body) {
-    throw new Error(`Blob stream could not be read (${response.status}).`);
-  }
-
-  const writable = await fileHandle.createWritable();
-  await response.body.pipeTo(writable);
+async function downloadKnownBlob(url, filename, videoId) {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  if (!blob.size) throw new Error("The Blob video contains no data.");
+  const downloadUrl = nativeCreateObjectURL(blob);
+  triggerDownload(downloadUrl, filename);
+  setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
   emitStatus(videoId, "complete", "Blob video downloaded.");
 }
 
@@ -90,23 +74,16 @@ async function recordMediaSource(video, videoId, filename) {
 
   const mimeType = getRecorderMimeType();
   const webmName = replaceExtension(filename, "webm");
-  const fileHandle = await pickFile(webmName, [
-    {
-      description: "WebM video recording",
-      accept: { "video/webm": [".webm"] },
-    },
-  ]);
-  const writable = await fileHandle.createWritable();
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
-  let writeQueue = Promise.resolve();
+  const wasLooping = video.loop;
+  const chunks = [];
+  let stopTimer;
 
   const completion = new Promise((resolve, reject) => {
     recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size) {
-        writeQueue = writeQueue.then(() => writable.write(event.data));
-      }
+      if (event.data.size) chunks.push(event.data);
     });
     recorder.addEventListener("stop", resolve, { once: true });
     recorder.addEventListener("error", () => reject(recorder.error), {
@@ -124,24 +101,40 @@ async function recordMediaSource(video, videoId, filename) {
     if (video.seekable.length && video.duration !== Infinity) {
       video.currentTime = 0;
     }
+    video.loop = false;
     recorder.start(1000);
     await video.play();
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      stopTimer = setTimeout(
+        stop,
+        Math.ceil((video.duration / Math.max(video.playbackRate, 0.1)) * 1000) +
+          2000
+      );
+    }
     emitStatus(
       videoId,
       "recording",
       "MediaSource recording started. Click download again to stop."
     );
     await completion;
-    await writeQueue;
-    await writable.close();
+    const recordedBlob = new Blob(chunks, {
+      type: recorder.mimeType || "video/webm",
+    });
+    if (!recordedBlob.size) {
+      throw new Error("No video data was captured; no file was created.");
+    }
+    const downloadUrl = nativeCreateObjectURL(recordedBlob);
+    triggerDownload(downloadUrl, webmName);
+    setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
     emitStatus(videoId, "complete", "MediaSource recording saved.");
   } catch (error) {
-    await writable.abort().catch(() => {});
     throw error;
   } finally {
+    clearTimeout(stopTimer);
     activeRecordings.delete(videoId);
     video.removeEventListener("ended", stop);
     if (Number.isFinite(originalTime)) video.currentTime = originalTime;
+    video.loop = wasLooping;
     if (wasPaused) video.pause();
   }
 }
@@ -159,11 +152,14 @@ function replaceExtension(filename, extension) {
   return `${base}.${extension}`;
 }
 
-function pickFile(suggestedName, types) {
-  if (typeof window.showSaveFilePicker !== "function") {
-    throw new Error("Saving streamed video requires Chrome File System Access.");
-  }
-  return window.showSaveFilePicker({ suggestedName, types });
+function triggerDownload(url, filename) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.documentElement.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function emitStatus(videoId, status, message) {
