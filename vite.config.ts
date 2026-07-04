@@ -6,6 +6,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    sourcemap: true,
     rollupOptions: {
       input: {
         background: resolve(__dirname, "background.js"),
@@ -22,6 +23,19 @@ export default defineConfig({
     },
   },
   plugins: [
+    {
+      name: "isolate-main-world-content-script",
+      renderChunk(code, chunk) {
+        if (chunk.name !== "media-bridge") return null;
+
+        // Chrome executes MAIN-world content scripts as classic scripts. Keep
+        // minified bindings private so page globals cannot overwrite them.
+        return {
+          code: `(() => {\n${code}\n})();`,
+          map: null,
+        };
+      },
+    },
     viteStaticCopy({
       targets: [
         {

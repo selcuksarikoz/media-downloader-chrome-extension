@@ -117,6 +117,7 @@ function startJob(job) {
   operation
     .catch((error) => {
       if (error && error.name === "AbortError") return;
+      console.error("[Media Downloader] Video download failed:", error);
       emitStatus(videoId, "error", error.message || String(error));
     })
     .finally(() => {
@@ -217,6 +218,7 @@ function isMediaFullyBuffered(video) {
 function waitForMediaCompletion(video, videoId) {
   return new Promise((resolve, reject) => {
     let timer;
+    const releasePlaybackLock = keepVideoPlaying(video);
     const reportProgress = () => {
       const progress =
         Number.isFinite(video.duration) && video.duration > 0
@@ -234,10 +236,15 @@ function waitForMediaCompletion(video, videoId) {
       video.removeEventListener("ended", finish);
       video.removeEventListener("error", fail);
       video.removeEventListener("timeupdate", reportProgress);
+      releasePlaybackLock();
       resolve();
     };
     const fail = () => {
       clearTimeout(timer);
+      video.removeEventListener("ended", finish);
+      video.removeEventListener("error", fail);
+      video.removeEventListener("timeupdate", reportProgress);
+      releasePlaybackLock();
       reject(new Error("Video playback failed while collecting segments."));
     };
 
@@ -248,7 +255,7 @@ function waitForMediaCompletion(video, videoId) {
     if (Number.isFinite(video.duration) && video.duration > 0) {
       timer = setTimeout(finish, Math.ceil(video.duration * 1000) + 5000);
     }
-    video.play().catch(fail);
+    video.play().catch(() => {});
   });
 }
 
@@ -277,6 +284,7 @@ async function recordMediaSource(video, videoId, filename) {
   const wasLooping = video.loop;
   const chunks = [];
   let stopTimer;
+  let releasePlaybackLock = () => {};
   const reportProgress = () => {
     const progress =
       Number.isFinite(video.duration) && video.duration > 0
@@ -306,6 +314,7 @@ async function recordMediaSource(video, videoId, filename) {
       video.currentTime = 0;
     }
     video.loop = false;
+    releasePlaybackLock = keepVideoPlaying(video);
     recorder.start(1000);
     await video.play();
     if (Number.isFinite(video.duration) && video.duration > 0) {
@@ -335,6 +344,7 @@ async function recordMediaSource(video, videoId, filename) {
     throw error;
   } finally {
     clearTimeout(stopTimer);
+    releasePlaybackLock();
     activeRecordings.delete(videoId);
     video.removeEventListener("ended", stop);
     video.removeEventListener("timeupdate", reportProgress);
@@ -342,6 +352,134 @@ async function recordMediaSource(video, videoId, filename) {
     video.loop = wasLooping;
     if (wasPaused) video.pause();
   }
+}
+
+function keepVideoPlaying(video) {
+  let disposed = false;
+  let resumePending = false;
+  const previousPreload = video.preload;
+  const releaseRenderHost = keepVideoRendered(video);
+  video.preload = "auto";
+
+  const resume = () => {
+    if (disposed || resumePending || video.ended || video.error) return;
+    resumePending = true;
+    queueMicrotask(() => {
+      resumePending = false;
+      if (!disposed && video.paused && !video.ended) {
+        video.play().catch(() => {});
+      }
+    });
+  };
+
+  video.addEventListener("pause", resume);
+  const watchdog = setInterval(resume, 500);
+  resume();
+
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    clearInterval(watchdog);
+    video.removeEventListener("pause", resume);
+    video.preload = previousPreload;
+    releaseRenderHost();
+  };
+}
+
+let captureRenderHost;
+function getCaptureRenderHost() {
+  if (captureRenderHost?.isConnected) return captureRenderHost;
+  captureRenderHost = document.createElement("div");
+  captureRenderHost.setAttribute("aria-hidden", "true");
+  captureRenderHost.style.cssText = [
+    "position:fixed",
+    "top:0",
+    "left:0",
+    "width:2px",
+    "height:2px",
+    "overflow:hidden",
+    "opacity:0.01",
+    "pointer-events:none",
+    "z-index:2147483646",
+  ].join(";");
+  document.documentElement.appendChild(captureRenderHost);
+  return captureRenderHost;
+}
+
+function keepVideoRendered(video) {
+  const originalParent = video.parentNode;
+  const originalNextSibling = video.nextSibling;
+  const originalStyle = video.getAttribute("style");
+  let placeholder;
+  let hosted = false;
+  let disposed = false;
+
+  const restoreVideo = () => {
+    if (!hosted) return;
+    const targetParent = placeholder?.isConnected
+      ? placeholder.parentNode
+      : originalParent?.isConnected
+        ? originalParent
+        : null;
+    if (targetParent) {
+      targetParent.insertBefore(
+        video,
+        placeholder?.isConnected
+          ? placeholder
+          : originalNextSibling?.parentNode === targetParent
+            ? originalNextSibling
+            : null
+      );
+    }
+    placeholder?.remove();
+    placeholder = undefined;
+    if (originalStyle === null) video.removeAttribute("style");
+    else video.setAttribute("style", originalStyle);
+    hosted = false;
+  };
+
+  const hostVideo = () => {
+    if (hosted || disposed || !video.parentNode) return;
+    const rect = video.getBoundingClientRect();
+    placeholder = document.createElement("span");
+    placeholder.setAttribute("aria-hidden", "true");
+    placeholder.style.cssText = `display:block;width:${rect.width}px;height:${rect.height}px`;
+    video.parentNode.insertBefore(placeholder, video);
+    getCaptureRenderHost().appendChild(video);
+    video.style.cssText = [
+      "position:absolute",
+      "inset:0",
+      "width:2px",
+      "height:2px",
+      "min-width:2px",
+      "min-height:2px",
+      "opacity:1",
+      "pointer-events:none",
+    ].join(";");
+    hosted = true;
+    observer.disconnect();
+    observer.observe(placeholder);
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    const entry = entries[entries.length - 1];
+    if (!entry || disposed) return;
+    if (entry.target === video && !entry.isIntersecting) {
+      hostVideo();
+    } else if (entry.target === placeholder && entry.isIntersecting) {
+      observer.disconnect();
+      restoreVideo();
+      observer.observe(video);
+    }
+  });
+  observer.observe(video);
+
+  return () => {
+    disposed = true;
+    observer.disconnect();
+    restoreVideo();
+    if (!video.isConnected && !originalParent?.isConnected) video.remove();
+  };
 }
 
 function getRecorderMimeType() {
