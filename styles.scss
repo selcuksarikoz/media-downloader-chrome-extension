@@ -86,7 +86,12 @@ body.options-page {
    ========================================= */
 /* Preview and download controls */
 .imd-action-group {
-  position: absolute;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   z-index: 2147483647;
   display: flex;
   gap: 6px;
@@ -140,31 +145,4 @@ body.options-page {
   height: 24px;
   fill: #ffffff;
   pointer-events: none; /* Let clicks pass to button */
-}
-
-/* Positioning Classes */
-/* We will likely set top/left/right/bottom inline in JS for precise positioning relative to image rect,
-   OR we can use these if we use a relative container wrapper.
-   Given the "no wrapper" preference to avoid layout break, we'll likely use absolute positioning
-   calculated in JS. But I'll provide these valid potential helper classes just in case. */
-.imd-pos-tl {
-  top: 10px;
-  left: 10px;
-}
-.imd-pos-tr {
-  top: 10px;
-  right: 10px;
-}
-.imd-pos-bl {
-  bottom: 10px;
-  left: 10px;
-}
-.imd-pos-br {
-  bottom: 10px;
-  right: 10px;
-}
-.imd-pos-center {
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
 }

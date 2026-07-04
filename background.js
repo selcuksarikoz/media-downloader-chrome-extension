@@ -1,16 +1,21 @@
 /**
- * imgDownloader Background Script
- * Handles image downloading via chrome.downloads API.
+ * Media Downloader background script.
+ * Handles image and video downloading via chrome.downloads API.
  */
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "download" && message.url) {
-    downloadImage(message.url, message.folder, message.saveAs);
+    downloadMedia(
+      message.url,
+      message.folder,
+      message.saveAs,
+      message.mediaType
+    );
   }
 });
 
-function downloadImage(url, folder, saveAs) {
-  let filename = getFilenameFromUrl(url);
+function downloadMedia(url, folder, saveAs, mediaType) {
+  let filename = getFilenameFromUrl(url, mediaType);
 
   // An empty folder means the browser's default Downloads directory.
   // Never recreate the folder used by older extension versions.
@@ -41,12 +46,16 @@ function downloadImage(url, folder, saveAs) {
   );
 }
 
-function getFilenameFromUrl(url) {
+function getFilenameFromUrl(url, mediaType = "image") {
+  const fallbackExtension = mediaType === "video" ? "mp4" : "jpg";
+  const fallbackName = () =>
+    `${mediaType}-${Date.now()}.${fallbackExtension}`;
+
   // Handle Data URIs
   if (url.startsWith("data:")) {
     const mime = url.match(/data:([^;]*);/);
-    const extension = mime ? mime[1].split("/")[1] : "png";
-    return `image-${Date.now()}.${extension}`;
+    const extension = mime ? mime[1].split("/")[1] : fallbackExtension;
+    return `${mediaType}-${Date.now()}.${extension}`;
   }
 
   // Handle standard URLs
@@ -58,7 +67,7 @@ function getFilenameFromUrl(url) {
     // Remove query strings or extra chars if simple extraction failed or included them (pathname usually doesn't have query)
     // But sometimes pathname ends in nothing or /.
     if (!name || name === "/") {
-      name = `image-${Date.now()}.jpg`;
+      name = fallbackName();
     }
 
     // Decode URI component (e.g. %20 -> space)
@@ -67,15 +76,14 @@ function getFilenameFromUrl(url) {
     // Basic sanitization
     name = name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 
-    // If no extension, try to guess or default to jpg?
-    // Chrome might handle it, but it's safer to have one.
+    // Keep a usable extension when the source path has none.
     if (!name.includes(".")) {
-      name += ".jpg";
+      name += `.${fallbackExtension}`;
     }
 
     return name;
   } catch (e) {
     // Fallback
-    return `image-${Date.now()}.jpg`;
+    return fallbackName();
   }
 }

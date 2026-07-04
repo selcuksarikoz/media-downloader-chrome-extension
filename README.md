@@ -1,14 +1,15 @@
-# imgDownloader
+# Media Downloader
 
-imgDownloader is a powerful and easy-to-use Chrome Extension that allows you to download images from any website with a single click. It automatically injects a download button onto images, making it effortless to save content.
+Media Downloader is a Chrome extension for downloading images and videos. It adds download and preview controls directly to supported media elements.
 
 ## Features
 
-- **One-Click Download:** Adds a convenient download button to every image on a webpage.
+- **One-Click Download:** Adds a download button to images and videos.
+- **Blob Video Streaming:** Streams readable `blob:` video sources directly to a user-selected file without buffering the full video in memory.
 - **Smart Positioning:** Choose where the button appears (Top-Right, Top-Left, etc.) via settings.
-- **Custom Save Location:** Save images to a specific sub-folder in your Downloads directory, or leave it empty to use Downloads directly.
+- **Custom Save Location:** Save media to a specific sub-folder in your Downloads directory, or leave it empty to use Downloads directly.
 - **Size Filtering:** Automatically ignore small icons and thumbnails by setting a minimum width (default: 150px) to keep your interface clean.
-- **Dynamic Support:** Works on pages with lazy-loading (infinite scroll) images.
+- **Dynamic Support:** Works with dynamically loaded images and videos.
 - **Modern Design:** Sleek, unobtrusive UI that blends correct button placement without breaking site layouts.
 
 ## Installation
@@ -52,9 +53,12 @@ This project uses **Vite** for building and **Sass** for styling.
 Right-click the extension icon and select **Options** to configure:
 
 - **Button Position:** Top-Right (Default), Top-Left, Bottom-Right, Bottom-Left, Center.
-- **Minimum Image Width:** Set a pixel threshold to avoid adding buttons to tiny icons (default 150px).
+- **Minimum Media Size:** Set a pixel threshold to avoid adding buttons to tiny media elements (default 150px).
 - **Download Folder:** Specify a folder name to organize downloads.
-- **Always ask where to save:** Check this to trigger the "Save As" dialog for every image.
+- **Always ask where to save:** Check this to trigger the "Save As" dialog for regular media downloads.
+- **Show preview button:** Show or hide the media preview control.
+
+Readable `Blob` URLs can be streamed directly. `MediaSource` URLs used by HLS/DASH players do not expose their appended segments through `fetch()`; downloading those streams requires a separate segment-capture and muxing pipeline.
 
 ## License
 

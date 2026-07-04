@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>imgDownloader Settings</title>
+    <title>Media Downloader Settings</title>
     <link rel="stylesheet" href="styles.scss" />
   </head>
   <body class="options-page">
     <div class="options-container">
       <div class="options-header">
-        <h1>imgDownloader Settings</h1>
+        <h1>Media Downloader Settings</h1>
       </div>
 
       <div class="form-group">
@@ -24,7 +24,7 @@
       </div>
 
       <div class="form-group">
-        <label for="minWidth">Minimum Image Width (px)</label>
+        <label for="minWidth">Minimum Media Size (px)</label>
         <input
           type="number"
           id="minWidth"
@@ -40,7 +40,7 @@
             display: block;
           "
         >
-          Images smaller than this width will be ignored.
+          Images and videos smaller than this size will be ignored.
         </small>
       </div>
 
@@ -50,7 +50,7 @@
           type="text"
           id="folder"
           class="form-control"
-          placeholder="e.g. Images"
+          placeholder="e.g. Media"
         />
         <small
           style="

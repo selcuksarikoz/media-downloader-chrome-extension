@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "imgDownloader",
-  "version": "1.0.0",
-  "description": "Download images from any website easily with an overlay button.",
+  "name": "Media Downloader",
+  "version": "1.1.0",
+  "description": "Download images and videos with overlay controls.",
   "permissions": ["storage", "downloads", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {

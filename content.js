@@ -1,6 +1,6 @@
 /**
- * imgDownloader Content Script
- * Injects download buttons onto images on the page.
+ * Media Downloader content script.
+ * Injects download and preview controls onto images and videos.
  */
 
 let settings = {
@@ -10,6 +10,8 @@ let settings = {
   showPreviewButton: true,
   minWidth: 150,
 };
+
+const mediaControls = new Map();
 
 // SVG Icon for the download button
 const DOWNLOAD_ICON = `
@@ -43,9 +45,8 @@ function init() {
         settings.downloadFolder = "";
         chrome.storage.sync.set({ downloadFolder: "" });
       }
-      // Start processing existing images
-      processAllImages();
-      // Observe for new images
+      processAllMedia();
+      // Observe for dynamically added media
       startObserver();
     }
   );
@@ -81,15 +82,15 @@ function hasForbiddenFolder(folder) {
 }
 
 /**
- * Process all existing images on the page.
+ * Process all existing images and videos on the page.
  */
-function processAllImages() {
-  const images = document.querySelectorAll("img");
-  images.forEach(processImage);
+function processAllMedia() {
+  const mediaElements = document.querySelectorAll("img, video");
+  mediaElements.forEach(processMedia);
 }
 
 /**
- * Start MutationObserver to detect new images.
+ * Start MutationObserver to detect new media elements.
  */
 function startObserver() {
   const observer = new MutationObserver((mutations) => {
@@ -97,12 +98,10 @@ function startObserver() {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === 1) {
           // Element
-          if (node.tagName === "IMG") {
-            processImage(node);
+          if (node.matches("img, video")) {
+            processMedia(node);
           } else {
-            // Check children of added node
-            const imgs = node.querySelectorAll("img");
-            imgs.forEach(processImage);
+            node.querySelectorAll("img, video").forEach(processMedia);
           }
         }
       });
@@ -119,18 +118,8 @@ function startObserver() {
  * Update positions of all existing buttons.
  */
 function updateAllButtonPositions() {
-  const actionGroups = document.querySelectorAll(".imd-action-group");
-  actionGroups.forEach((group) => {
-    // Remove old pos classes
-    group.classList.remove(
-      "imd-pos-tl",
-      "imd-pos-tr",
-      "imd-pos-bl",
-      "imd-pos-br",
-      "imd-pos-center"
-    );
-    // Add new pos class
-    group.classList.add(getPositionClass(settings.buttonPosition));
+  mediaControls.forEach((group, media) => {
+    positionActionGroup(group, media);
   });
 }
 
@@ -139,63 +128,51 @@ function updatePreviewButtonVisibility() {
   previewButtons.forEach((button) => {
     button.hidden = !settings.showPreviewButton;
   });
+  repositionOpenControls();
 }
 
 /**
- * Map setting value to CSS class.
+ * Check if a media element is large enough and has not been processed.
  */
-function getPositionClass(pos) {
-  switch (pos) {
-    case "top-left":
-      return "imd-pos-tl";
-    case "bottom-left":
-      return "imd-pos-bl";
-    case "bottom-right":
-      return "imd-pos-br";
-    case "center":
-      return "imd-pos-center";
-    default:
-      return "imd-pos-tr"; // Top-Right
-  }
-}
-
-/**
- * Check if image is suitable for a download button.
- */
-function isValidImage(img) {
-  // Ignore small icons/tracking pixels based on setting
-  if (img.width < settings.minWidth || img.height < settings.minWidth)
+function isValidMedia(media) {
+  const width = media.clientWidth || media.width;
+  const height = media.clientHeight || media.height;
+  if (width < settings.minWidth || height < settings.minWidth)
     return false;
-  // Ignore if already has a button (check sibling)
-  if (img.dataset.imdProcessed) return false;
+  if (media.dataset.imdProcessed) return false;
   return true;
 }
 
 /**
- * Create and inject the download button for a specific image.
+ * Create and inject controls for an image or video.
  */
-function processImage(img) {
-  // Ensure image is loaded to check dimensions
-  if (!img.complete) {
-    img.addEventListener("load", () => processImage(img), { once: true });
+function processMedia(media) {
+  const isImage = media.tagName === "IMG";
+  const isLoaded = isImage ? media.complete : true;
+  if (!isLoaded) {
+    media.addEventListener(
+      "load",
+      () => processMedia(media),
+      { once: true }
+    );
     return;
   }
 
-  if (!isValidImage(img)) return;
+  if (!isValidMedia(media)) return;
 
-  // Mark as processed
-  img.dataset.imdProcessed = "true";
+  media.dataset.imdProcessed = "true";
 
   const actionGroup = document.createElement("div");
-  actionGroup.className = `imd-action-group ${getPositionClass(settings.buttonPosition)}`;
+  actionGroup.className = "imd-action-group";
+  actionGroup.popover = "manual";
   const downloadBtn = createActionButton(
     "imd-down-btn",
-    "Download Image",
+    `Download ${isImage ? "Image" : "Video"}`,
     DOWNLOAD_ICON
   );
   const previewBtn = createActionButton(
     "imd-preview-btn",
-    "Preview highest resolution",
+    `Preview ${isImage ? "highest-resolution image" : "video"}`,
     PREVIEW_ICON
   );
   previewBtn.hidden = !settings.showPreviewButton;
@@ -205,26 +182,37 @@ function processImage(img) {
   downloadBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    downloadImage(img);
+    downloadMedia(media);
   });
 
   previewBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    previewImage(img);
+    previewMedia(media);
   });
 
-  // Show button on hover (Logic for button visibility)
-  // We rely on CSS: .imd-down-btn { opacity: 0; } and .imd-show { opacity: 1; }
-  // We add event listeners to the IMG to toggle the button visibility
-  // Because we are inserting the button as a sibling, we can't always rely on CSS sibling selector +
-  // if there are text nodes in between. So JS events are safer.
+  // Toggle the controls from the media element because sibling hover selectors
+  // are unreliable across arbitrary page markup.
 
-  const showButtons = () => actionGroup.classList.add("imd-show");
-  const hideButtons = () => actionGroup.classList.remove("imd-show");
+  const showButtons = () => {
+    if (typeof actionGroup.showPopover === "function") {
+      if (!actionGroup.matches(":popover-open")) actionGroup.showPopover();
+    }
+    actionGroup.classList.add("imd-show");
+    positionActionGroup(actionGroup, media);
+  };
+  const hideButtons = () => {
+    actionGroup.classList.remove("imd-show");
+    if (
+      typeof actionGroup.hidePopover === "function" &&
+      actionGroup.matches(":popover-open")
+    ) {
+      actionGroup.hidePopover();
+    }
+  };
 
-  img.addEventListener("mouseenter", showButtons);
-  img.addEventListener("mouseleave", (e) => {
+  media.addEventListener("mouseenter", showButtons);
+  media.addEventListener("mouseleave", (e) => {
     // delay hiding to allow moving to button
     if (!actionGroup.contains(e.relatedTarget)) {
       setTimeout(() => {
@@ -236,28 +224,59 @@ function processImage(img) {
   actionGroup.addEventListener("mouseenter", showButtons);
   actionGroup.addEventListener("mouseleave", hideButtons);
 
-  // Positioning Strategy: Relative to Container
-  // We need to inject the button into the same container as the image.
-  // We also need to ensure the container is positioned relatively so absolute works contextually.
-
-  const parent = img.parentElement;
-  if (parent) {
-    const parentStyle = window.getComputedStyle(parent);
-    if (parentStyle.position === "static") {
-      parent.style.position = "relative";
-    }
-
-    // Inject button after image
-    // Sometimes images are wrapped in <a> tags, this button will be inside the <a> but clicks stopped.
-    // If the image is the only child, this is perfect.
-    // If there are other siblings, we might overlap them, which is expected for an overlay.
-    if (img.nextSibling) {
-      parent.insertBefore(actionGroup, img.nextSibling);
-    } else {
-      parent.appendChild(actionGroup);
-    }
-  }
+  document.body.appendChild(actionGroup);
+  mediaControls.set(media, actionGroup);
 }
+
+function positionActionGroup(group, media) {
+  const rect = media.getBoundingClientRect();
+  const width = group.offsetWidth || 86;
+  const height = group.offsetHeight || 40;
+  const gap = 10;
+  let top;
+  let left;
+
+  switch (settings.buttonPosition) {
+    case "top-left":
+      top = rect.top + gap;
+      left = rect.left + gap;
+      break;
+    case "bottom-left":
+      top = rect.bottom - height - gap;
+      left = rect.left + gap;
+      break;
+    case "bottom-right":
+      top = rect.bottom - height - gap;
+      left = rect.right - width - gap;
+      break;
+    case "center":
+      top = rect.top + (rect.height - height) / 2;
+      left = rect.left + (rect.width - width) / 2;
+      break;
+    default:
+      top = rect.top + gap;
+      left = rect.right - width - gap;
+  }
+
+  group.style.top = `${Math.max(0, top)}px`;
+  group.style.left = `${Math.max(0, left)}px`;
+}
+
+function repositionOpenControls() {
+  mediaControls.forEach((group, media) => {
+    if (!media.isConnected) {
+      group.remove();
+      mediaControls.delete(media);
+      return;
+    }
+    if (group.classList.contains("imd-show")) {
+      positionActionGroup(group, media);
+    }
+  });
+}
+
+window.addEventListener("scroll", repositionOpenControls, true);
+window.addEventListener("resize", repositionOpenControls);
 
 function createActionButton(className, title, icon) {
   const button = document.createElement("button");
@@ -269,22 +288,40 @@ function createActionButton(className, title, icon) {
   return button;
 }
 
-function previewImage(img) {
-  const url = getHighestResolutionUrl(img);
+function previewMedia(media) {
+  const url = getBestMediaUrl(media);
   if (!url) {
-    console.error("Image has no preview source.");
+    console.error("Media has no preview source.");
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-function getHighestResolutionUrl(img) {
+function getBestMediaUrl(media) {
+  if (media.tagName === "VIDEO") {
+    return getVideoUrl(media);
+  }
+
+  return getHighestResolutionImageUrl(media);
+}
+
+function getHighestResolutionImageUrl(img) {
   const candidates = parseSrcset(img.getAttribute("srcset"));
   if (candidates.length > 0) {
     candidates.sort((a, b) => b.score - a.score);
     return new URL(candidates[0].url, document.baseURI).href;
   }
   return img.currentSrc || img.src;
+}
+
+function getVideoUrl(video) {
+  if (video.currentSrc) return video.currentSrc;
+  if (video.src) return video.src;
+
+  const source = Array.from(video.querySelectorAll("source[src]")).find(
+    (item) => item.src
+  );
+  return source ? source.src : "";
 }
 
 function parseSrcset(srcset) {
@@ -305,21 +342,86 @@ function parseSrcset(srcset) {
 }
 
 /**
- * Send download request to background script.
+ * Download normal URLs through chrome.downloads and stream Blob-backed videos
+ * directly to a user-selected file without buffering the entire video.
  */
-function downloadImage(img) {
-  const src = getHighestResolutionUrl(img);
+async function downloadMedia(media) {
+  const src = getBestMediaUrl(media);
   if (!src) {
-    console.error("Image has no source.");
+    console.error("Media has no source.");
+    return;
+  }
+
+  if (media.tagName === "VIDEO" && src.startsWith("blob:")) {
+    await streamBlobVideo(media, src);
     return;
   }
 
   chrome.runtime.sendMessage({
     action: "download",
     url: src,
+    mediaType: media.tagName === "VIDEO" ? "video" : "image",
     folder: settings.downloadFolder,
     saveAs: settings.showSaveAs,
   });
+}
+
+async function streamBlobVideo(video, url) {
+  const suggestedName = getSuggestedVideoName(video);
+
+  try {
+    if (typeof window.showSaveFilePicker !== "function") {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = suggestedName;
+      link.click();
+      return;
+    }
+
+    // The picker must open before the first await to retain user activation.
+    const fileHandle = await window.showSaveFilePicker({
+      suggestedName,
+      types: [
+        {
+          description: "Video",
+          accept: {
+            "video/mp4": [".mp4"],
+            "video/webm": [".webm"],
+            "video/quicktime": [".mov"],
+            "video/x-matroska": [".mkv"],
+          },
+        },
+      ],
+    });
+    const response = await fetch(url);
+    if (!response.ok || !response.body) {
+      throw new Error(`Blob stream could not be read (${response.status}).`);
+    }
+
+    const writable = await fileHandle.createWritable();
+    await response.body.pipeTo(writable);
+  } catch (error) {
+    if (error && error.name === "AbortError") return;
+    console.error(
+      "Blob video download failed. MediaSource streams require segment capture and muxing.",
+      error
+    );
+  }
+}
+
+function getSuggestedVideoName(video) {
+  const source = video.currentSrc || video.src;
+  if (source && !source.startsWith("blob:")) {
+    try {
+      const pathname = new URL(source, document.baseURI).pathname;
+      const filename = decodeURIComponent(pathname.split("/").pop() || "");
+      if (filename) return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    } catch (_error) {
+      // Use the generated fallback below.
+    }
+  }
+
+  return `video-${Date.now()}.mp4`;
 }
 
 // Run init
