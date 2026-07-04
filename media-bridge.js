@@ -9,6 +9,7 @@ let maxConcurrentJobs = 5;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
 const protectedVideos = new WeakSet();
+const nativeMediaProperties = new Map();
 
 const nativePause = HTMLMediaElement.prototype.pause;
 HTMLMediaElement.prototype.pause = function () {
@@ -25,6 +26,7 @@ for (const property of ["src", "srcObject", "currentTime"]) {
     property
   );
   if (!descriptor?.set) continue;
+  nativeMediaProperties.set(property, descriptor);
   Object.defineProperty(HTMLMediaElement.prototype, property, {
     ...descriptor,
     set(value) {
@@ -434,7 +436,8 @@ function getCaptureRenderHost() {
   captureRenderHost = document.createElement("div");
   captureRenderHost.setAttribute("aria-hidden", "true");
   captureRenderHost.style.cssText =
-    "position:fixed;top:0;left:0;height:90px;display:flex;overflow:hidden;" +
+    "position:fixed;top:0;left:0;width:100vw;min-height:90px;display:flex;" +
+    "flex-wrap:wrap;overflow:hidden;" +
     "opacity:.01;pointer-events:none;z-index:2147483646;transform:translateZ(0)";
   document.documentElement.appendChild(captureRenderHost);
   return captureRenderHost;
@@ -496,20 +499,40 @@ function keepVideoFramesDecoded(video) {
   const context = canvas.getContext("2d", { alpha: false });
   let stopped = false;
   let callbackId;
-  let intervalId;
-  const draw = () => {
+  let lastFrameAt = performance.now();
+  let lastObservedTime = video.currentTime;
+  let lastFrameCount = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+  const paint = () => {
     if (stopped) return;
     try {
       context?.drawImage(video, 0, 0, canvas.width, canvas.height);
     } catch {}
-    callbackId = video.requestVideoFrameCallback?.(draw);
+  };
+  const onFrame = () => {
+    lastFrameAt = performance.now();
+    paint();
+    callbackId = video.requestVideoFrameCallback?.(onFrame);
   };
 
   if (typeof video.requestVideoFrameCallback === "function") {
-    callbackId = video.requestVideoFrameCallback(draw);
-  } else {
-    intervalId = setInterval(draw, 100);
+    callbackId = video.requestVideoFrameCallback(onFrame);
   }
+  const intervalId = setInterval(() => {
+    paint();
+    const currentTime = video.currentTime;
+    const frameCount =
+      video.getVideoPlaybackQuality?.().totalVideoFrames ?? lastFrameCount;
+    if (frameCount > lastFrameCount) lastFrameAt = performance.now();
+    lastFrameCount = frameCount;
+    const timeIsMoving = currentTime > lastObservedTime + 0.05;
+    if (timeIsMoving && performance.now() - lastFrameAt > 1500) {
+      const descriptor = nativeMediaProperties.get("currentTime");
+      descriptor?.set.call(video, Math.max(0, currentTime - 0.02));
+      video.play().catch(() => {});
+      lastFrameAt = performance.now();
+    }
+    lastObservedTime = currentTime;
+  }, 250);
 
   return () => {
     stopped = true;
