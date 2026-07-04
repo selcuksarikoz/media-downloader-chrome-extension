@@ -1,11 +1,16 @@
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (!message.url) return;
   if (message.action === "download") {
     downloadMedia(message);
     return;
   }
   if (message.action === "preview") {
-    chrome.tabs.create({ url: message.url, active: false }, () => {
+    const createProperties = { url: message.url, active: false };
+    if (sender.tab) {
+      createProperties.windowId = sender.tab.windowId;
+      createProperties.index = sender.tab.index + 1;
+    }
+    chrome.tabs.create(createProperties, () => {
       if (chrome.runtime.lastError) {
         console.error("Preview failed:", chrome.runtime.lastError.message);
       }
