@@ -1,22 +1,87 @@
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message.url) return;
   if (message.action === "download") {
     downloadMedia(message);
     return;
   }
   if (message.action === "preview") {
-    const createProperties = { url: message.url, active: false };
-    if (sender.tab) {
-      createProperties.windowId = sender.tab.windowId;
-      createProperties.index = sender.tab.index + 1;
-    }
-    chrome.tabs.create(createProperties, () => {
-      if (chrome.runtime.lastError) {
-        console.error("Preview failed:", chrome.runtime.lastError.message);
-      }
-    });
+    openPreviewTab(message.url, sender.tab?.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
   }
 });
+
+async function openPreviewTab(url, sourceTabId) {
+  const sourceTab = sourceTabId
+    ? await chrome.tabs.get(sourceTabId)
+    : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];
+  if (!sourceTab?.id) throw new Error("Source tab was not found.");
+
+  const previewTab = await chrome.tabs.create({
+    url,
+    active: false,
+    windowId: sourceTab.windowId,
+    index: sourceTab.index + 1,
+    pinned: sourceTab.pinned,
+  });
+  if (!previewTab?.id) throw new Error("Preview tab was not created.");
+
+  if (sourceTab.groupId >= 0) {
+    await chrome.tabs.group({
+      tabIds: previewTab.id,
+      groupId: sourceTab.groupId,
+    });
+  }
+
+  await keepPreviewNextToSource(previewTab.id, sourceTab.id);
+}
+
+async function keepPreviewNextToSource(previewTabId, sourceTabId) {
+  let moving = false;
+  let disposed = false;
+  const enforcePosition = async () => {
+    if (moving || disposed) return;
+    moving = true;
+    try {
+      const [sourceTab, previewTab] = await Promise.all([
+        chrome.tabs.get(sourceTabId),
+        chrome.tabs.get(previewTabId),
+      ]);
+      const targetIndex = sourceTab.index + 1;
+      if (
+        previewTab.windowId !== sourceTab.windowId ||
+        previewTab.index !== targetIndex
+      ) {
+        await chrome.tabs.move(previewTabId, {
+          windowId: sourceTab.windowId,
+          index: targetIndex,
+        });
+      }
+    } finally {
+      moving = false;
+    }
+  };
+  const handleMoved = (tabId) => {
+    if (tabId === previewTabId || tabId === sourceTabId) enforcePosition();
+  };
+  const handleUpdated = (tabId, changeInfo) => {
+    if (tabId === previewTabId && changeInfo.status === "complete") {
+      enforcePosition();
+    }
+  };
+
+  chrome.tabs.onMoved.addListener(handleMoved);
+  chrome.tabs.onAttached.addListener(handleMoved);
+  chrome.tabs.onUpdated.addListener(handleUpdated);
+  await enforcePosition();
+  setTimeout(() => {
+    disposed = true;
+    chrome.tabs.onMoved.removeListener(handleMoved);
+    chrome.tabs.onAttached.removeListener(handleMoved);
+    chrome.tabs.onUpdated.removeListener(handleUpdated);
+  }, 5000);
+}
 
 function downloadMedia({ url, folder, saveAs, mediaType }) {
   let filename = getFilenameFromUrl(url, mediaType);

@@ -420,7 +420,9 @@ function processMedia(media) {
   downloadBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    downloadMedia(media);
+    downloadMedia(media).catch((error) => {
+      console.error("Media download failed:", error);
+    });
   });
 
   previewBtn.addEventListener("click", (e) => {
@@ -952,7 +954,23 @@ async function previewMedia(media) {
 }
 
 function openPreviewInBackground(url) {
-  chrome.runtime.sendMessage({ action: "preview", url });
+  const runtime = globalThis.chrome?.runtime;
+  if (typeof runtime?.sendMessage !== "function") {
+    console.warn(
+      "[Media Downloader] Extension context is unavailable. Reload the page."
+    );
+    return;
+  }
+
+  runtime.sendMessage({ action: "preview", url }, (response) => {
+    if (runtime.lastError) {
+      console.warn("[Media Downloader] Preview failed:", runtime.lastError.message);
+      return;
+    }
+    if (response?.ok === false) {
+      console.warn("[Media Downloader] Preview failed:", response.error);
+    }
+  });
 }
 
 function getHighestResolutionImageUrl(img) {
@@ -967,6 +985,7 @@ function getHighestResolutionImageUrl(img) {
 async function resolveHighestResolutionImageUrl(img) {
   const candidates = collectImageCandidates(img);
   if (!candidates.length) return getHighestResolutionImageUrl(img);
+  if (candidates.length === 1) return candidates[0];
 
   const measured = await Promise.all(
     candidates.map(async (url) => ({
