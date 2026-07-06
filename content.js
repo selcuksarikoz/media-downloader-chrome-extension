@@ -15,8 +15,6 @@ let extensionActive = false;
 let mediaMutationObserver = null;
 
 const mediaControls = new Map();
-const actionGroupContainers = new WeakMap();
-const positionedContainers = new WeakMap();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
@@ -487,7 +485,7 @@ function processMedia(media) {
   actionGroup.addEventListener("mouseenter", showButtons);
   actionGroup.addEventListener("mouseleave", scheduleHide);
 
-  attachActionGroup(actionGroup, media);
+  attachActionGroup(actionGroup);
   mediaControls.set(media, actionGroup);
 }
 
@@ -567,83 +565,13 @@ function isolateActionGroupEvents(group) {
   });
 }
 
-function getActionContainer(media) {
-  if (isInstagramVideoPlayerMedia(media)) return document.body;
-
-  const mediaRect = media.getBoundingClientRect();
-  let container = media.parentElement;
-  let bestContainer = null;
-  for (
-    let depth = 0;
-    container && container !== document.body && depth < 6;
-    depth += 1
-  ) {
-    const display = getComputedStyle(container).display;
-    const rect = container.getBoundingClientRect();
-    const closelyWrapsMedia =
-      rect.width <= mediaRect.width * 1.15 + 12 &&
-      rect.height <= mediaRect.height * 1.15 + 12 &&
-      rect.left <= mediaRect.left + 2 &&
-      rect.right >= mediaRect.right - 2 &&
-      rect.top <= mediaRect.top + 2 &&
-      rect.bottom >= mediaRect.bottom - 2;
-    if (
-      display !== "inline" &&
-      display !== "contents" &&
-      closelyWrapsMedia
-    ) {
-      bestContainer = container;
-    } else if (bestContainer) {
-      break;
-    }
-    container = container.parentElement;
-  }
-  return bestContainer || media.parentElement || document.body;
-}
-
-function attachActionGroup(group, media) {
-  const container = getActionContainer(media);
-  const currentContainer = actionGroupContainers.get(group);
-  if (currentContainer === container && group.parentElement === container) return;
-  if (currentContainer) detachActionGroup(group);
-
-  if (group.classList.contains("imd-video-portal")) {
-    actionGroupContainers.set(group, document.body);
-    document.body.appendChild(group);
-    return;
-  }
-
-  let state = positionedContainers.get(container);
-  if (!state) {
-    const needsPosition = getComputedStyle(container).position === "static";
-    state = {
-      count: 0,
-      needsPosition,
-      originalInlinePosition: container.style.position,
-    };
-    positionedContainers.set(container, state);
-    if (needsPosition) container.style.position = "relative";
-  }
-  state.count += 1;
-  actionGroupContainers.set(group, container);
-  container.appendChild(group);
+function attachActionGroup(group) {
+  if (group.parentElement === document.body) return;
+  document.body.appendChild(group);
 }
 
 function detachActionGroup(group) {
-  const container = actionGroupContainers.get(group);
   group.remove();
-  actionGroupContainers.delete(group);
-  if (group.classList.contains("imd-video-portal")) return;
-  if (!container) return;
-
-  const state = positionedContainers.get(container);
-  if (!state) return;
-  state.count -= 1;
-  if (state.count > 0) return;
-  if (state.needsPosition && container.style.position === "relative") {
-    container.style.position = state.originalInlinePosition;
-  }
-  positionedContainers.delete(container);
 }
 
 function showActionGroup(group, media) {
@@ -660,7 +588,7 @@ function showActionGroup(group, media) {
     if (otherMedia !== media) hideActionGroup(otherGroup);
   });
 
-  attachActionGroup(group, media);
+  attachActionGroup(group);
   if (
     group.classList.contains("imd-video-portal") &&
     typeof group.showPopover === "function" &&
@@ -713,9 +641,7 @@ function getMediaHoverTargets(media) {
 }
 
 function positionActionGroup(group, media) {
-  attachActionGroup(group, media);
-  const container = actionGroupContainers.get(group);
-  if (!container) return;
+  attachActionGroup(group);
   const rect = getActionRect(media);
   const width = group.offsetWidth || 86;
   const height = group.offsetHeight || 40;
@@ -745,19 +671,8 @@ function positionActionGroup(group, media) {
       left = rect.right - width - gap;
   }
 
-  if (group.classList.contains("imd-video-portal")) {
-    group.style.top = `${Math.max(0, top)}px`;
-    group.style.left = `${Math.max(0, left)}px`;
-    return;
-  }
-
-  const containerRect = container.getBoundingClientRect();
-  const localTop =
-    top - containerRect.top + container.scrollTop - container.clientTop;
-  const localLeft =
-    left - containerRect.left + container.scrollLeft - container.clientLeft;
-  group.style.top = `${localTop}px`;
-  group.style.left = `${localLeft}px`;
+  group.style.top = `${Math.max(0, top)}px`;
+  group.style.left = `${Math.max(0, left)}px`;
 }
 
 function repositionOpenControls() {
@@ -766,7 +681,8 @@ function repositionOpenControls() {
       cleanupMedia(media);
       return;
     }
-    if (!visibleMedia.has(media)) {
+    const inLightbox = media.closest(".imd-lightbox-overlay");
+    if (!visibleMedia.has(media) && !inLightbox) {
       hideActionGroup(group);
     } else if (group.classList.contains("imd-show")) {
       positionActionGroup(group, media);
@@ -1002,7 +918,17 @@ function openLightbox(media) {
     document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
       btn.hidden = true;
     });
-    document.body.style.overflow = "hidden";
+    const scrollY = window.scrollY;
+    const body = document.body;
+    body.dataset.imdScrollY = scrollY;
+    body.dataset.imdOverflow = body.style.overflow;
+    body.dataset.imdPosition = body.style.position;
+    body.dataset.imdTop = body.style.top;
+    body.dataset.imdWidth = body.style.width;
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
 
     const overlay = document.createElement("div");
     overlay.className = "imd-lightbox-overlay";
@@ -1019,13 +945,39 @@ function openLightbox(media) {
     overlay.appendChild(container);
     document.body.appendChild(overlay);
 
-    const close = () => {
+    requestAnimationFrame(() => {
+      overlay.classList.add("imd-lightbox-open");
+    });
+
+    overlay.addEventListener("scroll", repositionOpenControls, { passive: true });
+
+    const cleanup = () => {
       overlay.remove();
       lightboxOpen = false;
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = false;
       });
-      document.body.style.overflow = "";
+      const body = document.body;
+      const scrollY = Number(body.dataset.imdScrollY) || 0;
+      body.style.overflow = body.dataset.imdOverflow || "";
+      body.style.position = body.dataset.imdPosition || "";
+      body.style.top = body.dataset.imdTop || "";
+      body.style.width = body.dataset.imdWidth || "";
+      delete body.dataset.imdScrollY;
+      delete body.dataset.imdOverflow;
+      delete body.dataset.imdPosition;
+      delete body.dataset.imdTop;
+      delete body.dataset.imdWidth;
+      window.scrollTo(0, scrollY);
+    };
+
+    const close = () => {
+      overlay.classList.remove("imd-lightbox-open");
+      overlay.removeEventListener("scroll", repositionOpenControls);
+      overlay.addEventListener("transitionend", (e) => {
+        if (e.target === overlay) cleanup();
+      }, { once: true });
+      setTimeout(cleanup, 160);
     };
 
     overlay.addEventListener("click", (e) => {
@@ -1034,8 +986,19 @@ function openLightbox(media) {
 
     img.addEventListener("click", (e) => {
       if (e.target === img) {
-        container.classList.toggle("imd-lightbox-fullwidth");
+        const wasZoomed = container.classList.toggle("imd-lightbox-fullwidth");
         overlay.classList.toggle("imd-lightbox-zoomed");
+        requestAnimationFrame(() => {
+          const group = mediaControls.get(img);
+          if (group) {
+            if (wasZoomed) {
+              group.classList.add("imd-show");
+              positionActionGroup(group, img);
+            } else {
+              group.classList.remove("imd-show");
+            }
+          }
+        });
       }
     });
 
