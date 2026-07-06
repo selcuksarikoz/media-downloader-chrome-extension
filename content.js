@@ -99,6 +99,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
       if (status === "complete" || status === "error" || status === "canceled") {
         button.title = "Trim from current time";
         button.innerHTML = TRIM_ICON;
+        button.dataset.recording = "false";
       } else if (isActive) {
         button.title = elapsed ? `Save (${elapsed})` : "Save trim";
         button.innerHTML = STOP_ICON;

@@ -481,6 +481,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     signal.throwIfAborted();
   }
 
+  let completed = false;
   try {
     if (video.seekable.length && video.duration !== Infinity) {
       video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
@@ -526,13 +527,14 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     triggerDownload(downloadUrl, outputName);
     setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
     emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
+    completed = true;
   } finally {
     clearInterval(safetyTimer);
     releasePlaybackLock();
     activeRecordings.delete(videoId);
     signal.removeEventListener("abort", cancel);
     video.removeEventListener("timeupdate", reportProgress);
-    if (Number.isFinite(originalTime)) video.currentTime = originalTime;
+    if (!completed && Number.isFinite(originalTime)) video.currentTime = originalTime;
     video.loop = wasLooping;
     if (wasPaused) video.pause();
   }
