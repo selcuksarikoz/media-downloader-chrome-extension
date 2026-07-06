@@ -353,12 +353,13 @@ body.options-page {
     object-fit: contain;
     border-radius: 4px;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-    cursor: pointer;
+    cursor: zoom-in;
 
     .imd-lightbox-fullwidth & {
       max-width: none;
       max-height: none;
       border-radius: 0;
+      cursor: zoom-out;
     }
   }
 }
