@@ -1,3 +1,5 @@
+import { DEFAULT_BLACKLISTED_DOMAINS } from "./shared.js";
+
 const DEFAULTS = {
   buttonPosition: "top-right",
   downloadFolder: "",
@@ -5,7 +7,7 @@ const DEFAULTS = {
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
-  blacklistedDomains: ["netflix.com", "primevideo.com"],
+  blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };
@@ -78,13 +80,13 @@ function normalizeDomain(value) {
       .replace(/^www\./, "")
       .replace(/\.$/, "");
     if (
-      !hostname.includes(".") ||
       !/^[a-z0-9.-]+$/.test(hostname) ||
       hostname
         .split(".")
         .some(
           (part) => !part || part.startsWith("-") || part.endsWith("-")
-        )
+        ) ||
+      (!hostname.includes(".") && hostname !== "localhost")
     ) {
       return null;
     }

@@ -1,3 +1,5 @@
+import { DEFAULT_BLACKLISTED_DOMAINS } from "./shared.js";
+
 const DEFAULT_SETTINGS = {
   buttonPosition: "top-right",
   downloadFolder: "",
@@ -5,7 +7,7 @@ const DEFAULT_SETTINGS = {
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
-  blacklistedDomains: ["netflix.com", "primevideo.com"],
+  blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
   maxConcurrentDownloads: 5,
 };

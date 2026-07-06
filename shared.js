@@ -1,0 +1,15 @@
+export const DEFAULT_BLACKLISTED_DOMAINS = [
+  "netflix.com",
+  "primevideo.com",
+  "disneyplus.com",
+  "hbo.com",
+  "hbomax.com",
+  "max.com",
+  "paramountplus.com",
+  "hulu.com",
+  "peacocktv.com",
+  "discoveryplus.com",
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+];
