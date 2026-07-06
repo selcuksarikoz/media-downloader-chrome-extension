@@ -1084,6 +1084,8 @@ function openLightbox(media, url) {
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = false;
       });
+      lightboxZoomLevel = 1;
+      lightboxScrolled = false;
 
     };
 
@@ -1092,16 +1094,72 @@ function openLightbox(media, url) {
       cleanup();
     };
 
+    let lightboxZoomLevel = 1;
+    let lightboxScrolled = false;
+
+    overlay.addEventListener("scroll", () => {
+      lightboxScrolled = true;
+    }, { passive: true });
+
     overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) close();
+      if (e.target !== overlay) return;
+      if (lightboxScrolled) {
+        lightboxScrolled = false;
+        return;
+      }
+      if (overlay.scrollWidth > overlay.clientWidth || overlay.scrollHeight > overlay.clientHeight) {
+        const rect = overlay.getBoundingClientRect();
+        const sw = overlay.offsetWidth - overlay.clientWidth;
+        const sh = overlay.offsetHeight - overlay.clientHeight;
+        if (e.clientX > rect.right - sw || e.clientY > rect.bottom - sh) return;
+      }
+      close();
     });
 
+    function getZoomOrigin(e) {
+      const rect = img.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      return { x, y };
+    }
+
+    function applyZoom(origin) {
+      if (lightboxZoomLevel > 1) {
+        img.style.transformOrigin = `${origin.x}% ${origin.y}%`;
+        img.style.transform = `scale(${lightboxZoomLevel})`;
+        container.classList.add("imd-lightbox-fullwidth");
+        overlay.classList.add("imd-lightbox-zoomed");
+      } else {
+        img.style.transform = "";
+        img.style.transformOrigin = "";
+        container.classList.remove("imd-lightbox-fullwidth");
+        overlay.classList.remove("imd-lightbox-zoomed");
+      }
+    }
+
     img.addEventListener("click", (e) => {
-      if (e.target === img) {
-        container.classList.toggle("imd-lightbox-fullwidth");
-        overlay.classList.toggle("imd-lightbox-zoomed");
+      if (e.target !== img) return;
+      e.stopPropagation();
+
+      if (lightboxZoomLevel > 1) {
+        lightboxZoomLevel = 1;
+        applyZoom();
+      } else {
+        lightboxZoomLevel = 2;
+        applyZoom(getZoomOrigin(e));
       }
     });
+
+    overlay.addEventListener("wheel", (e) => {
+      if (e.target.closest(".imd-lightbox-actions")) return;
+
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 1 / 1.2 : 1.2;
+        lightboxZoomLevel = Math.min(Math.max(lightboxZoomLevel * delta, 1), 10);
+        applyZoom(getZoomOrigin(e));
+      }
+    }, { passive: false });
 
     const escHandler = (e) => {
       if (e.key === "Escape") {

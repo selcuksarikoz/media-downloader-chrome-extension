@@ -3,7 +3,7 @@ import { DEFAULT_BLACKLISTED_DOMAINS } from "./shared.js";
 const DEFAULTS = {
   buttonPosition: "top-right",
   downloadFolder: "",
-  showSaveAs: false,
+  showSaveAs: true,
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
