@@ -7,6 +7,12 @@ directly to page media.
 ## Behavior
 
 - Controls are shown only for the visible media currently under the pointer.
+- Action buttons are circular with no transition delay for instant feedback.
+- Video controls include a Picture-in-Picture button (when supported).
+- Click the bolt icon on images to open them in a full-size lightbox overlay with
+  download and preview buttons fixed at the top-right corner.
+- Click the lightbox image to toggle zoom (natural size); buttons stay fixed in
+  place even when scrolling a zoomed image. Click outside or press ESC to close.
 - Regular image and video URLs use `chrome.downloads`.
 - Blob URLs are copied directly when readable.
 - Single-buffer MediaSource streams reuse captured segments.

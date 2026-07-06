@@ -1,4 +1,60 @@
-import { DEFAULT_BLACKLISTED_DOMAINS } from "./shared.js";
+const DEFAULT_BLACKLISTED_DOMAINS = [
+  "youtube.com",
+  "twitch.tv",
+  "x.com",
+  "twitter.com",
+  "instagram.com",
+  "tiktok.com",
+  "netflix.com",
+  "fb.watch",
+  "facebook.com",
+  "fb.com",
+  "reddit.com",
+  "dailymotion.com",
+  "odysee.com",
+  "rumble.com",
+  "vimeo.com",
+  "9gag.com",
+  "pinterest.com",
+  "imgur.com",
+  "flickr.com",
+  "deviantart.com",
+  "behance.net",
+  "dribbble.com",
+  "500px.com",
+  "unsplash.com",
+  "pixabay.com",
+  "pexels.com",
+  "freepik.com",
+  "shutterstock.com",
+  "istockphoto.com",
+  "gettyimages.com",
+  "adobe.com",
+  "canva.com",
+  "figma.com",
+  "linkedin.com",
+  "discord.com",
+  "telegram.org",
+  "whatsapp.com",
+  "amazon.com",
+  "amazon.de",
+  "amazon.co.uk",
+  "steamcommunity.com",
+  "steampowered.com",
+  "patreon.com",
+  "medium.com",
+  "dropbox.com",
+  "googleusercontent.com",
+  "googleapis.com",
+  "ggpht.com",
+  "wp.com",
+  "gravatar.com",
+  "ytimg.com",
+  "twimg.com",
+  "fbcdn.net",
+  "cdninstagram.com",
+  "pinimg.com",
+];
 
 const DEFAULT_SETTINGS = {
   buttonPosition: "top-right",
@@ -19,6 +75,7 @@ let mediaMutationObserver = null;
 const mediaControls = new Map();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
+const pipState = new WeakMap();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
@@ -198,6 +255,12 @@ const CAPTURE_ICON = `
 </svg>
 `;
 
+const PIP_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"/>
+</svg>
+`;
+
 const LIGHTBOX_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M13 2L4 14h6l-2 8 9-12h-6l2-8z"/>
@@ -274,6 +337,7 @@ function processAllMedia() {
 
 function trackMedia(media) {
   if (!extensionActive) return;
+  if (media.closest(".imd-lightbox-overlay")) return;
   media.dataset.imdMediaType =
     media.tagName === "VIDEO" ? "video" : "image";
   if (media.tagName === "VIDEO") {
@@ -331,6 +395,12 @@ function cleanupMedia(media) {
   if (group) detachActionGroup(group);
   if (media.dataset.imdCaptureId) {
     capturedVideos.delete(media.dataset.imdCaptureId);
+  }
+  const pipListeners = pipState.get(media);
+  if (pipListeners) {
+    media.removeEventListener("enterpictureinpicture", pipListeners.onEnterPip);
+    media.removeEventListener("leavepictureinpicture", pipListeners.onLeavePip);
+    pipState.delete(media);
   }
   mediaControls.delete(media);
   visibleMedia.delete(media);
@@ -422,11 +492,15 @@ function processMedia(media) {
   const lightboxBtn = isImage && !media.closest(".imd-lightbox-overlay")
     ? createActionButton("imd-lightbox-btn", "View full-size image", LIGHTBOX_ICON)
     : null;
+  const pipBtn = !isImage && document.pictureInPictureEnabled
+    ? createActionButton("imd-pip-btn", "Picture-in-Picture", PIP_ICON)
+    : null;
   const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
   previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
   const buttons = [downloadBtn, previewBtn];
   if (lightboxBtn) buttons.push(lightboxBtn);
   if (captureBtn) buttons.push(captureBtn);
+  if (pipBtn) buttons.push(pipBtn);
   actionGroup.append(...buttons);
 
   downloadBtn.addEventListener("click", (e) => {
@@ -455,6 +529,12 @@ function processMedia(media) {
     e.preventDefault();
     e.stopPropagation();
     openLightbox(media);
+  });
+
+  pipBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePictureInPicture(media);
   });
 
   const showButtons = () => {
@@ -486,6 +566,17 @@ function processMedia(media) {
 
   actionGroup.addEventListener("mouseenter", showButtons);
   actionGroup.addEventListener("mouseleave", scheduleHide);
+
+  if (pipBtn) {
+    const onEnterPip = () => { pipBtn.hidden = true; };
+    const onLeavePip = () => { pipBtn.hidden = false; };
+    media.addEventListener("enterpictureinpicture", onEnterPip);
+    media.addEventListener("leavepictureinpicture", onLeavePip);
+    pipState.set(media, { onEnterPip, onLeavePip });
+    if (document.pictureInPictureElement === media) {
+      pipBtn.hidden = true;
+    }
+  }
 
   attachActionGroup(actionGroup);
   mediaControls.set(media, actionGroup);
@@ -920,17 +1011,6 @@ function openLightbox(media) {
     document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
       btn.hidden = true;
     });
-    const scrollY = window.scrollY;
-    const body = document.body;
-    body.dataset.imdScrollY = scrollY;
-    body.dataset.imdOverflow = body.style.overflow;
-    body.dataset.imdPosition = body.style.position;
-    body.dataset.imdTop = body.style.top;
-    body.dataset.imdWidth = body.style.width;
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
 
     const overlay = document.createElement("div");
     overlay.className = "imd-lightbox-overlay";
@@ -945,7 +1025,25 @@ function openLightbox(media) {
 
     container.appendChild(img);
     overlay.appendChild(container);
+
+    const actions = document.createElement("div");
+    actions.className = "imd-lightbox-actions";
+    actions.innerHTML = `
+      <button type="button" class="imd-action-btn imd-down-btn" title="Download Image" aria-label="Download Image">${DOWNLOAD_ICON}</button>
+      <button type="button" class="imd-action-btn imd-preview-btn" title="Preview image" aria-label="Preview image">${PREVIEW_ICON}</button>
+    `;
+    actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      downloadMedia(img);
+    });
+    actions.querySelector(".imd-preview-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      previewMedia(img);
+    });
     document.body.appendChild(overlay);
+    document.body.appendChild(actions);
 
     requestAnimationFrame(() => {
       overlay.classList.add("imd-lightbox-open");
@@ -955,22 +1053,12 @@ function openLightbox(media) {
 
     const cleanup = () => {
       overlay.remove();
+      actions.remove();
       lightboxOpen = false;
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = false;
       });
-      const body = document.body;
-      const scrollY = Number(body.dataset.imdScrollY) || 0;
-      body.style.overflow = body.dataset.imdOverflow || "";
-      body.style.position = body.dataset.imdPosition || "";
-      body.style.top = body.dataset.imdTop || "";
-      body.style.width = body.dataset.imdWidth || "";
-      delete body.dataset.imdScrollY;
-      delete body.dataset.imdOverflow;
-      delete body.dataset.imdPosition;
-      delete body.dataset.imdTop;
-      delete body.dataset.imdWidth;
-      window.scrollTo(0, scrollY);
+
     };
 
     const close = () => {
@@ -988,19 +1076,8 @@ function openLightbox(media) {
 
     img.addEventListener("click", (e) => {
       if (e.target === img) {
-        const wasZoomed = container.classList.toggle("imd-lightbox-fullwidth");
+        container.classList.toggle("imd-lightbox-fullwidth");
         overlay.classList.toggle("imd-lightbox-zoomed");
-        requestAnimationFrame(() => {
-          const group = mediaControls.get(img);
-          if (group) {
-            if (wasZoomed) {
-              group.classList.add("imd-show");
-              positionActionGroup(group, img);
-            } else {
-              group.classList.remove("imd-show");
-            }
-          }
-        });
       }
     });
 
@@ -1215,6 +1292,14 @@ async function captureVideoFrame(video) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+function togglePictureInPicture(video) {
+  if (document.pictureInPictureElement === video) {
+    document.exitPictureInPicture().catch(console.error);
+  } else {
+    video.requestPictureInPicture().catch(console.error);
+  }
 }
 
 function getSuggestedVideoName(video) {

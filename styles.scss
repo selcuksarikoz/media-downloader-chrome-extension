@@ -158,13 +158,11 @@ body.options-page {
   padding: 0;
   border: 0;
   background: transparent;
-  z-index: 2147483647;
+  z-index: 999;
   display: flex;
   gap: 6px;
   opacity: 0;
-  transition: opacity 0.2s ease;
   pointer-events: none;
-  will-change: opacity, top, left;
 
   &.imd-show {
     opacity: 1;
@@ -178,12 +176,11 @@ body.options-page {
   padding: 0;
   border: none;
   background-color: rgba(30, 30, 30, 0.85);
-  border-radius: 8px;
+  border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.1s ease, background-color 0.2s ease;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   appearance: none;
 
@@ -213,7 +210,8 @@ body.options-page {
 }
 
 .imd-preview-btn[hidden],
-.imd-lightbox-btn[hidden] {
+.imd-lightbox-btn[hidden],
+.imd-pip-btn[hidden] {
   display: none;
 }
 
@@ -230,7 +228,7 @@ body.options-page {
     overflow-y: auto;
     border: 0;
     background: transparent;
-    z-index: 2147483647;
+    z-index: 1002;
   }
 
   &-panel {
@@ -325,7 +323,7 @@ body.options-page {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0);
-    z-index: 2147483646;
+    z-index: 1000;
     cursor: pointer;
     overflow: auto;
     display: flex;
@@ -371,6 +369,15 @@ body.options-page {
       border-radius: 0;
     }
   }
+}
+
+.imd-lightbox-actions {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  z-index: 1001;
 }
 
 .imd-lightbox-zoomed {
