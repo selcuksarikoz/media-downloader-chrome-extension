@@ -329,8 +329,6 @@ body.options-page {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.15s ease;
-    will-change: background;
 
     &.imd-lightbox-open {
       background: rgba(0, 0, 0, 0.85);
@@ -344,8 +342,6 @@ body.options-page {
     justify-content: center;
     max-width: 95vw;
     max-height: 95vh;
-    transition: max-width 0.15s ease, max-height 0.15s ease;
-    will-change: max-width, max-height;
 
     &.imd-lightbox-fullwidth {
       max-width: none;
@@ -360,8 +356,6 @@ body.options-page {
     border-radius: 4px;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
     cursor: pointer;
-    transition: max-width 0.15s ease, max-height 0.15s ease, border-radius 0.15s ease;
-    will-change: max-width, max-height, border-radius;
 
     .imd-lightbox-fullwidth & {
       max-width: none;

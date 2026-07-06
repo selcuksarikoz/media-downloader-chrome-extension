@@ -520,7 +520,9 @@ function processMedia(media) {
   captureBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    captureVideoFrame(media).catch((error) => {
+    captureVideoFrame(media).then((blobUrl) => {
+      if (blobUrl) openLightbox(media, blobUrl);
+    }).catch((error) => {
       console.error("Video frame capture failed:", error);
     });
   });
@@ -1000,12 +1002,13 @@ function openPreviewInBackground(url) {
   });
 }
 
-function openLightbox(media) {
-  if (media.tagName !== "IMG") return;
+function openLightbox(media, url) {
+  if (media.tagName !== "IMG" && !url) return;
   if (lightboxOpen) return;
 
-  resolveHighestResolutionImageUrl(media).then((url) => {
-    if (!url) return;
+  const promise = url ? Promise.resolve(url) : resolveHighestResolutionImageUrl(media);
+  promise.then((resolvedUrl) => {
+    if (!resolvedUrl) return;
 
     lightboxOpen = true;
     document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
@@ -1020,7 +1023,7 @@ function openLightbox(media) {
 
     const img = document.createElement("img");
     img.className = "imd-lightbox-image";
-    img.src = url;
+    img.src = resolvedUrl;
     img.alt = media.alt || "";
 
     container.appendChild(img);
@@ -1062,12 +1065,8 @@ function openLightbox(media) {
     };
 
     const close = () => {
-      overlay.classList.remove("imd-lightbox-open");
       overlay.removeEventListener("scroll", repositionOpenControls);
-      overlay.addEventListener("transitionend", (e) => {
-        if (e.target === overlay) cleanup();
-      }, { once: true });
-      setTimeout(cleanup, 160);
+      cleanup();
     };
 
     overlay.addEventListener("click", (e) => {
@@ -1292,6 +1291,7 @@ async function captureVideoFrame(video) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return url;
 }
 
 function togglePictureInPicture(video) {
