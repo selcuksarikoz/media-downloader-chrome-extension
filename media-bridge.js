@@ -637,7 +637,7 @@ function hostVideoForCapture(video) {
   video.style.cssText =
     "position:relative;display:block;flex:0 0 160px;width:160px;height:90px;" +
     "min-width:160px;min-height:90px;opacity:1;pointer-events:none;" +
-    "transform:translateZ(0);will-change:transform";
+    "transform:translateZ(0)";
 
   if (typeof video.requestVideoFrameCallback === "function") {
     frameCallbackId = video.requestVideoFrameCallback(paintFrame);

@@ -136,7 +136,6 @@ body.options-page {
   border-radius: 4px;
   font-size: 1rem;
   cursor: pointer;
-  transition: background-color 0.2s;
 }
 
 .btn-save:hover {
@@ -264,7 +263,6 @@ body.options-page {
       height: 100%;
       border-radius: inherit;
       background: #3498db;
-      transition: width 0.25s ease;
 
       &.imd-indeterminate {
         animation: imd-progress-pulse 1.2s ease-in-out infinite alternate;
