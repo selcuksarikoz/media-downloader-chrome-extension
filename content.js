@@ -103,6 +103,7 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 
+/** Update or create the download panel for a blob video. */
 function updateBlobDownloadPanel(videoId, status, message, progress) {
   if (!blobDownloadStack) blobDownloadStack = createBlobDownloadStack();
   if (!blobDownloadStack.isConnected) {
@@ -154,6 +155,7 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
   }
 }
 
+/** Create the popover container for blob download panels. */
 function createBlobDownloadStack() {
   const stack = document.createElement("div");
   stack.className = "imd-download-stack";
@@ -161,6 +163,7 @@ function createBlobDownloadStack() {
   return stack;
 }
 
+/** Create a download panel section for a blob video. */
 function createBlobDownloadPanel(videoId) {
   const panel = document.createElement("section");
   panel.className = "imd-download-panel";
@@ -188,6 +191,7 @@ function createBlobDownloadPanel(videoId) {
   return panel;
 }
 
+/** Dispatch a control event (save/cancel) for a blob video download. */
 function dispatchBlobControl(videoId, action) {
   window.dispatchEvent(
     new CustomEvent(BLOB_CONTROL_EVENT, {
@@ -226,6 +230,7 @@ const LIGHTBOX_ICON = `
 </svg>
 `;
 
+/** Initialize extension: load settings, apply domain access, listen for changes. */
 function init() {
   chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
     settings = items;
@@ -248,6 +253,7 @@ function init() {
   });
 }
 
+/** Check if the current domain is in the blacklist. */
 function isCurrentDomainBlacklisted() {
   const hostname = location.hostname.toLowerCase().replace(/\.$/, "");
   const domains = Array.isArray(settings.blacklistedDomains)
@@ -267,6 +273,7 @@ function isCurrentDomainBlacklisted() {
   });
 }
 
+/** Enable or disable the extension based on domain blacklist. */
 function applyDomainAccess() {
   const shouldBeActive = !isCurrentDomainBlacklisted();
   if (shouldBeActive === extensionActive) return;
@@ -284,16 +291,19 @@ function applyDomainAccess() {
   });
 }
 
+/** Check if the download folder path contains a forbidden segment. */
 function hasForbiddenFolder(folder) {
   return folder
     .split(/[\/\\]+/)
     .some((part) => part.toLowerCase() === "imgdownloader_files");
 }
 
+/** Process all existing img/video elements on the page. */
 function processAllMedia() {
   document.querySelectorAll("img, video").forEach(trackMedia);
 }
 
+/** Track a media element with observers and process it. */
 function trackMedia(media) {
   if (!extensionActive) return;
   if (media.closest(".imd-lightbox-overlay")) return;
@@ -307,12 +317,14 @@ function trackMedia(media) {
   processMedia(media);
 }
 
+/** Apply the showVideoControls setting to all video elements. */
 function updateVideoControls() {
   document.querySelectorAll("video").forEach((video) => {
     video.controls = settings.showVideoControls;
   });
 }
 
+/** Start the mutation observer to track dynamically added/removed media. */
 function startObserver() {
   if (mediaMutationObserver) return;
   mediaMutationObserver = new MutationObserver((mutations) => {
@@ -349,6 +361,7 @@ function startObserver() {
   });
 }
 
+/** Remove all extension traces (controls, listeners, observers) from a media element. */
 function cleanupMedia(media) {
   const group = mediaControls.get(media);
   if (group) detachActionGroup(group);
@@ -379,12 +392,14 @@ function cleanupMedia(media) {
   delete media.dataset.imdMediaType;
 }
 
+/** Reposition all visible action groups (e.g. on setting change). */
 function updateAllButtonPositions() {
   mediaControls.forEach((group, media) => {
     positionActionGroup(group, media);
   });
 }
 
+/** Show/hide preview buttons based on settings and blob status. */
 function updatePreviewButtonVisibility() {
   mediaControls.forEach((group, media) => {
     const button = group.querySelector(".imd-preview-btn");
@@ -395,6 +410,7 @@ function updatePreviewButtonVisibility() {
   repositionOpenControls();
 }
 
+/** Check if a media element meets minimum size and hasn't been processed yet. */
 function isValidMedia(media) {
   const width = media.clientWidth || media.width;
   const height = media.clientHeight || media.height;
@@ -404,6 +420,7 @@ function isValidMedia(media) {
   return true;
 }
 
+/** Attach action controls (download, preview, capture, PiP) to a media element. */
 function processMedia(media) {
   if (!extensionActive || !media.isConnected) return;
   const isImage = media.tagName === "IMG";
@@ -565,15 +582,18 @@ function processMedia(media) {
   mediaControls.set(media, actionGroup);
 }
 
+/** Check if media belongs to an Instagram video player context. */
 function isInstagramVideoPlayerMedia(media) {
   return Boolean(getAssociatedVideoPlayer(media) || getInstagramReelLink(media));
 }
 
+/** Get the closest Instagram reel link ancestor. */
 function getInstagramReelLink(media) {
   if (!/(^|\.)instagram\.com$/.test(location.hostname)) return null;
   return media.closest('a[href*="/reel/"], a[href*="/reels/"]');
 }
 
+/** Find the associated Instagram video player element near the media. */
 function getAssociatedVideoPlayer(media) {
   const selector = '[role="group"][aria-label="Video player"]';
   const directPlayer = media.closest(selector);
@@ -601,6 +621,7 @@ function getAssociatedVideoPlayer(media) {
   return null;
 }
 
+/** Get the bounding rect to position the action group, considering Instagram overlays. */
 function getActionRect(media) {
   const player = getAssociatedVideoPlayer(media);
   if (player) {
@@ -617,6 +638,7 @@ function getActionRect(media) {
   return media.getBoundingClientRect();
 }
 
+/** Prevent action group events from propagating to the underlying page. */
 function isolateActionGroupEvents(group) {
   const eventTypes = [
     "pointerdown",
@@ -641,15 +663,18 @@ function isolateActionGroupEvents(group) {
   });
 }
 
+/** Append the action group to document.body if not already there. */
 function attachActionGroup(group) {
   if (group.parentElement === document.body) return;
   document.body.appendChild(group);
 }
 
+/** Remove the action group from the DOM. */
 function detachActionGroup(group) {
   group.remove();
 }
 
+/** Show the action group positioned over the media element. */
 function showActionGroup(group, media) {
   if (!media.isConnected) {
     cleanupMedia(media);
@@ -680,6 +705,7 @@ function showActionGroup(group, media) {
   positionActionGroup(group, media);
 }
 
+/** Hide the action group and close its popover if applicable. */
 function hideActionGroup(group) {
   group.classList.remove("imd-show");
   if (
@@ -695,6 +721,7 @@ function hideActionGroup(group) {
   }
 }
 
+/** Collect hover targets (media + tightly wrapping ancestors) for show/hide. */
 function getMediaHoverTargets(media) {
   const targets = [media];
   const mediaRect = media.getBoundingClientRect();
@@ -716,6 +743,7 @@ function getMediaHoverTargets(media) {
   return targets;
 }
 
+/** Position the action group relative to the media element based on settings. */
 function positionActionGroup(group, media) {
   attachActionGroup(group);
   const rect = getActionRect(media);
@@ -751,6 +779,7 @@ function positionActionGroup(group, media) {
   group.style.left = `${Math.max(0, left)}px`;
 }
 
+/** Reposition any currently visible action groups (on scroll/resize). */
 function repositionOpenControls() {
   mediaControls.forEach((group, media) => {
     if (!media.isConnected) {
@@ -781,6 +810,7 @@ document.addEventListener(
   true
 );
 
+/** Schedule a pointer reconciliation on the next animation frame. */
 function schedulePointerReconciliation() {
   if (!lastPointerPosition) return;
   if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
@@ -790,6 +820,7 @@ function schedulePointerReconciliation() {
   });
 }
 
+/** Show the action group for the topmost media at the given pointer coordinates. */
 function reconcileControlsAtPoint(x, y) {
   const topMedia = findTopMediaAtPoint(x, y);
   mediaControls.forEach((group, media) => {
@@ -806,6 +837,7 @@ function reconcileControlsAtPoint(x, y) {
   });
 }
 
+/** Find the topmost visible media element at the given coordinates. */
 function findTopMediaAtPoint(x, y) {
   const stack = document.elementsFromPoint(x, y);
   const { hasModal, modal } = getModalAtPoint(x, y, stack);
@@ -841,6 +873,7 @@ function findTopMediaAtPoint(x, y) {
   return bestMedia;
 }
 
+/** Check if a media element is actually visible (not hidden, opacity 0, etc.). */
 function isMediaActuallyVisible(media) {
   const hasBackgroundProxy = hasVisibleBackgroundProxy(media);
   if (
@@ -874,6 +907,7 @@ function isMediaActuallyVisible(media) {
   return true;
 }
 
+/** Check if the media has a visible background proxy element (e.g. Instagram reel thumb). */
 function hasVisibleBackgroundProxy(media) {
   if (!media.parentElement) return false;
   const mediaRect = media.getBoundingClientRect();
@@ -910,6 +944,7 @@ function hasVisibleBackgroundProxy(media) {
   });
 }
 
+/** Find the topmost modal at a point, or determine if one exists. */
 function getModalAtPoint(x, y, stack) {
   const modals = Array.from(
     document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]')
@@ -938,6 +973,7 @@ function getModalAtPoint(x, y, stack) {
   return { hasModal: true, modal: containsPoint || null };
 }
 
+/** Create an action button element with an SVG icon. */
 function createActionButton(className, title, icon) {
   const button = document.createElement("button");
   button.type = "button";
@@ -948,9 +984,10 @@ function createActionButton(className, title, icon) {
   return button;
 }
 
+/** Preview media in the background tab (uses highest resolution for images/videos). */
 async function previewMedia(media) {
   if (media.tagName === "VIDEO") {
-    const url = getVideoUrl(media);
+    const url = resolveHighestResolutionVideoUrl(media);
     if (url) openPreviewInBackground(url);
     return;
   }
@@ -963,6 +1000,7 @@ async function previewMedia(media) {
   }
 }
 
+/** Open a URL in the background preview tab via the extension runtime. */
 function openPreviewInBackground(url) {
   const runtime = globalThis.chrome?.runtime;
   if (typeof runtime?.sendMessage !== "function") {
@@ -983,6 +1021,7 @@ function openPreviewInBackground(url) {
   });
 }
 
+/** Open a full-size lightbox overlay for an image (or a captured video frame). */
 function openLightbox(media, url) {
   if (media.tagName !== "IMG" && !url) return;
   if (lightboxOpen) return;
@@ -1076,6 +1115,7 @@ function openLightbox(media, url) {
   });
 }
 
+/** Get the best resolution image URL from srcset descriptors without measurement. */
 function getHighestResolutionImageUrl(img) {
   const candidates = parseSrcset(img.getAttribute("srcset"));
   if (candidates.length > 0) {
@@ -1085,6 +1125,7 @@ function getHighestResolutionImageUrl(img) {
   return img.currentSrc || img.src;
 }
 
+/** Find the highest resolution image URL by measuring actual pixel area of candidates. */
 async function resolveHighestResolutionImageUrl(img) {
   const candidates = collectImageCandidates(img);
   if (!candidates.length) return getHighestResolutionImageUrl(img);
@@ -1102,6 +1143,7 @@ async function resolveHighestResolutionImageUrl(img) {
     : getHighestResolutionImageUrl(img);
 }
 
+/** Collect all candidate URLs for an image (src, srcset, nearby siblings). */
 function collectImageCandidates(img) {
   const urls = new Set();
   const addUrl = (value) => {
@@ -1152,6 +1194,7 @@ function collectImageCandidates(img) {
   return Array.from(urls);
 }
 
+/** Measure the pixel area of an image by loading it in an off-screen probe. */
 function measureImageArea(url) {
   return new Promise((resolve) => {
     const probe = new Image();
@@ -1173,6 +1216,7 @@ function measureImageArea(url) {
   });
 }
 
+/** Get the currently active source URL from a video element. */
 function getVideoUrl(video) {
   if (video.currentSrc) return video.currentSrc;
   if (video.src) return video.src;
@@ -1183,6 +1227,60 @@ function getVideoUrl(video) {
   return source ? source.src : "";
 }
 
+/** Find the highest quality video source URL among all candidates. */
+function resolveHighestResolutionVideoUrl(video) {
+  const candidates = collectVideoCandidates(video);
+  if (candidates.length === 0) return getVideoUrl(video);
+  if (candidates.length === 1) return candidates[0].url;
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].url;
+}
+
+/** Collect all non-blob source URLs from a video and its source elements. */
+function collectVideoCandidates(video) {
+  const seen = new Map();
+
+  const add = (url, source) => {
+    if (!url || url.startsWith("blob:") || seen.has(url)) return;
+    seen.set(url, source);
+  };
+
+  add(video.currentSrc, null);
+  add(video.src, null);
+
+  video.querySelectorAll("source").forEach((el) => {
+    if (el.src) add(el.src, el);
+  });
+
+  return Array.from(seen.entries()).map(([url, source]) => ({
+    url,
+    score: scoreVideoSource(url, source),
+  }));
+}
+
+/** Score a video source URL by resolution hints (media queries, labels, dimensions). */
+function scoreVideoSource(url, source) {
+  let score = 1;
+
+  if (source) {
+    const media = source.getAttribute("media") || "";
+    const mw = media.match(/min-width\s*:\s*(\d+)/);
+    if (mw) score = Math.max(score, parseInt(mw[1], 10));
+    const mh = media.match(/min-height\s*:\s*(\d+)/);
+    if (mh) score = Math.max(score, parseInt(mh[1], 10));
+  }
+
+  const res = url.match(/(\d{3,4})p/i);
+  if (res) score = Math.max(score, parseInt(res[1], 10) * 1.78);
+
+  const dims = url.match(/(\d{3,4})x(\d{3,4})/);
+  if (dims) score = Math.max(score, parseInt(dims[1], 10));
+
+  return score;
+}
+
+/** Parse an HTML srcset string into URL/score candidates. */
 function parseSrcset(srcset) {
   if (!srcset) return [];
 
@@ -1200,11 +1298,12 @@ function parseSrcset(srcset) {
     .filter((candidate) => candidate.url);
 }
 
+/** Download the highest resolution version of an image or video. */
 async function downloadMedia(media) {
   const src =
     media.tagName === "IMG"
       ? await resolveHighestResolutionImageUrl(media)
-      : getVideoUrl(media);
+      : resolveHighestResolutionVideoUrl(media);
   if (!src) {
     console.error("Media has no source.");
     return;
@@ -1224,6 +1323,7 @@ async function downloadMedia(media) {
   });
 }
 
+/** Start streaming a blob video for download via the media bridge. */
 function streamBlobVideo(video, url) {
   const detail = {
     url,
@@ -1239,6 +1339,7 @@ function streamBlobVideo(video, url) {
   );
 }
 
+/** Capture the current video frame and trigger a download, returning the blob URL. */
 async function captureVideoFrame(video) {
   if (!video.videoWidth || !video.videoHeight) {
     throw new Error("Video frame is not ready.");
@@ -1282,6 +1383,7 @@ async function captureVideoFrame(video) {
   return url;
 }
 
+/** Toggle Picture-in-Picture mode for a video element. */
 function togglePictureInPicture(video) {
   if (document.pictureInPictureElement === video) {
     document.exitPictureInPicture().catch(console.error);
@@ -1290,6 +1392,7 @@ function togglePictureInPicture(video) {
   }
 }
 
+/** Generate a suggested filename for a video from its source URL. */
 function getSuggestedVideoName(video) {
   const source = video.currentSrc || video.src;
   if (source && !source.startsWith("blob:")) {
