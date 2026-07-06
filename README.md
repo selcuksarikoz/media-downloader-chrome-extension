@@ -10,9 +10,10 @@ directly to page media.
 - Action buttons are circular with no transition delay for instant feedback.
 - Video controls include a Picture-in-Picture button (when supported).
 - Click the bolt icon on images to open them in a full-size lightbox overlay with
-  download and preview buttons fixed at the top-right corner.
-- Click the lightbox image to toggle zoom (natural size); buttons stay fixed in
-  place even when scrolling a zoomed image. Click outside or press ESC to close.
+  download and preview buttons fixed at the bottom center.
+- Click the lightbox image to zoom in at the clicked point (2x). Click again to
+  zoom out. Use Ctrl+scroll for smooth zoom (1x–10x). Scroll or use the scrollbar
+  to pan when zoomed. Click outside the image or press ESC to close.
 - Regular image and video URLs use `chrome.downloads`.
 - Blob URLs are copied directly when readable.
 - Single-buffer MediaSource streams reuse captured segments.
@@ -21,6 +22,10 @@ directly to page media.
   concurrency limit and require the tab to remain open.
 - The capture button saves the video's current frame as JPG, PNG, or WebP. It
   does not start a video recording.
+- The **Trim** button (scissors icon) records a video segment starting from the
+  current playback position. Click once to begin recording, click again (or let
+  the video reach the end) to save the trimmed segment as MP4. The button shows
+  the elapsed recording time. Works on both blob and regular videos.
 - DRM-protected media is not supported.
 
 ## Settings
@@ -29,6 +34,7 @@ directly to page media.
 - Minimum media size
 - Simultaneous video download limit
 - Download subfolder and save prompt
+- Always ask where to save (show "Save As" dialog)
 - Preview button visibility
 - Native video controls
 - Frame capture type: JPG (default), PNG, or WebP

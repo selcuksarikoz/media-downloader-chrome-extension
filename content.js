@@ -1235,9 +1235,12 @@ function openLightbox(media, url) {
 
         container.style.width = (nw * scale) + "px";
         container.style.height = (nh * scale) + "px";
-
+        img.style.width = nw + "px";
+        img.style.height = nh + "px";
         img.style.transformOrigin = "0 0";
         img.style.transform = `scale(${scale})`;
+        container.style.justifyContent = "flex-start";
+        container.style.alignItems = "flex-start";
 
         container.classList.add("imd-lightbox-fullwidth");
         overlay.classList.add("imd-lightbox-zoomed");
@@ -1247,18 +1250,21 @@ function openLightbox(media, url) {
           overlay.scrollTop = 0;
           void overlay.offsetHeight;
 
-          const rect = img.getBoundingClientRect();
           const imgX = origin.x / 100 * nw;
           const imgY = origin.y / 100 * nh;
 
-          overlay.scrollLeft = Math.max(0, rect.left + imgX * scale - overlay.clientWidth / 2);
-          overlay.scrollTop = Math.max(0, rect.top + imgY * scale - overlay.clientHeight / 2);
+          overlay.scrollLeft = Math.max(0, imgX * scale - overlay.clientWidth / 2);
+          overlay.scrollTop = Math.max(0, imgY * scale - overlay.clientHeight / 2);
         }
       } else {
         container.style.width = "";
         container.style.height = "";
+        img.style.width = "";
+        img.style.height = "";
         img.style.transform = "";
         img.style.transformOrigin = "";
+        container.style.justifyContent = "";
+        container.style.alignItems = "";
         container.classList.remove("imd-lightbox-fullwidth");
         overlay.classList.remove("imd-lightbox-zoomed");
       }
@@ -1269,7 +1275,11 @@ function openLightbox(media, url) {
         lightboxZoomLevel = 1;
         applyZoom();
       } else {
-        lightboxZoomLevel = 2;
+        const viewportFit = Math.min(
+          overlay.clientWidth / img.naturalWidth,
+          overlay.clientHeight / img.naturalHeight
+        );
+        lightboxZoomLevel = Math.max(1.1, Math.min(2, 1 / viewportFit * 0.9));
         applyZoom(getZoomOrigin(e));
       }
     }
@@ -1281,7 +1291,7 @@ function openLightbox(media, url) {
 
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        const delta = e.deltaY > 0 ? 1 / 1.2 : 1.2;
+        const delta = e.deltaY > 0 ? 1 / 1.15 : 1.15;
         lightboxZoomLevel = Math.min(Math.max(lightboxZoomLevel * delta, 1), 10);
         applyZoom(e.deltaY < 0 ? getZoomOrigin(e) : null);
       }
@@ -1633,17 +1643,17 @@ async function captureVideoFrame(video) {
     }
   });
   const url = URL.createObjectURL(blob);
-  const filename = getSuggestedVideoName(video).replace(
-    /\.[^.]+$/,
-    `-frame-${Math.round(video.currentTime * 1000)}ms.${format.extension}`
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.hidden = true;
-  document.documentElement.appendChild(link);
-  link.click();
-  link.remove();
+  // const filename = getSuggestedVideoName(video).replace(
+  //   /\.[^.]+$/,
+  //   `-frame-${Math.round(video.currentTime * 1000)}ms.${format.extension}`
+  // );
+  // const link = document.createElement("a");
+  // link.href = url;
+  // link.download = filename;
+  // link.hidden = true;
+  // document.documentElement.appendChild(link);
+  // link.click();
+  // link.remove();
   return url;
 }
 
