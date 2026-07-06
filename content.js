@@ -35,7 +35,9 @@ const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const pipState = new WeakMap();
 const mediaHoverListeners = new WeakMap();
+const videoTrimRecordings = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
+const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 let lightboxOpen = false;
@@ -76,17 +78,31 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
   const video = capturedVideos.get(videoId);
-  const buttons = video
-    ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn")
-    : [];
+  const allBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-action-btn") : [];
+  const downBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn") : [];
+  const trimBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-trim-btn") : [];
 
-  if (buttons?.length) {
+  if (downBtns?.length) {
     const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
-    buttons.forEach((button) => {
+    downBtns.forEach((button) => {
       button.title = isActive ? "Video download in progress" : "Download Video";
       button.setAttribute("aria-label", button.title);
       button.classList.toggle("imd-recording", isActive);
       button.disabled = isActive;
+    });
+  }
+
+  if (trimBtns?.length) {
+    const isActive = status === "recording" || status === "progress";
+    const elapsed = status === "progress" && message ? message.replace("Recording ", "").replace("…", "") : "";
+    trimBtns.forEach((button) => {
+      if (status === "complete" || status === "error" || status === "canceled") {
+        button.title = "Trim from current time";
+        button.innerHTML = TRIM_ICON;
+      } else if (isActive) {
+        button.title = elapsed ? `Save (${elapsed})` : "Save trim";
+        button.innerHTML = STOP_ICON;
+      }
     });
   }
 
@@ -227,6 +243,24 @@ const PIP_ICON = `
 const LIGHTBOX_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M13 2L4 14h6l-2 8 9-12h-6l2-8z"/>
+</svg>
+`;
+
+const TRIM_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z"/>
+</svg>
+`;
+
+const SAVE_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+</svg>
+`;
+
+const STOP_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M6 6h12v12H6z"/>
 </svg>
 `;
 
@@ -480,9 +514,13 @@ function processMedia(media) {
   const pipBtn = !isImage && document.pictureInPictureEnabled
     ? createActionButton("imd-pip-btn", "Picture-in-Picture", PIP_ICON)
     : null;
+  const trimBtn = !isImage
+    ? createActionButton("imd-trim-btn", "Trim from current time", TRIM_ICON)
+    : null;
   const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
   previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
   const buttons = [downloadBtn, previewBtn];
+  if (trimBtn) buttons.push(trimBtn);
   if (lightboxBtn) buttons.push(lightboxBtn);
   if (captureBtn) buttons.push(captureBtn);
   if (pipBtn) buttons.push(pipBtn);
@@ -525,6 +563,83 @@ function processMedia(media) {
     e.preventDefault();
     e.stopPropagation();
     togglePictureInPicture(media);
+  });
+
+  trimBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const recording = videoTrimRecordings.get(media);
+    if (recording) {
+      recording.save();
+      return;
+    }
+
+    const isBlob = getVideoUrl(media).startsWith("blob:");
+    if (isBlob) {
+      if (trimBtn.dataset.recording === "true") {
+        window.dispatchEvent(new CustomEvent(BLOB_CONTROL_EVENT, {
+          detail: { videoId: media.dataset.imdCaptureId, action: "save" },
+        }));
+      } else {
+        trimBtn.dataset.recording = "true";
+        trimBtn.title = "Save trim";
+        trimBtn.innerHTML = STOP_ICON;
+        window.dispatchEvent(new CustomEvent(BLOB_TRIM_EVENT, {
+          detail: {
+            url: getVideoUrl(media),
+            filename: getSuggestedVideoName(media),
+            videoId: media.dataset.imdCaptureId,
+            startTime: media.currentTime,
+            maxConcurrent: settings.maxConcurrentDownloads,
+          },
+        }));
+      }
+      return;
+    }
+
+    trimBtn.disabled = true;
+    try {
+      const rec = await startTrimRecording(media);
+      videoTrimRecordings.set(media, rec);
+      trimBtn.title = "Save trim";
+      trimBtn.innerHTML = STOP_ICON;
+      trimBtn.disabled = false;
+
+      let elapsedTimer = setInterval(() => {
+        const elapsed = media.currentTime - rec.startTime;
+        if (elapsed > 0) {
+          trimBtn.title = `Save (${elapsed.toFixed(1)}s)`;
+        }
+      }, 500);
+
+      rec.promise.then((blob) => {
+        clearInterval(elapsedTimer);
+        if (!blob || !blob.size) return;
+        const url = URL.createObjectURL(blob);
+        const ext = (blob.type.includes("webm") ? "webm" : "mp4");
+        const filename = getSuggestedVideoName(media).replace(
+          /\.[^.]+$/, `-trim-${Math.round(rec.startTime)}.${ext}`
+        );
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.hidden = true;
+        document.documentElement.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }).finally(() => {
+        clearInterval(elapsedTimer);
+        videoTrimRecordings.delete(media);
+        trimBtn.title = "Trim from current time";
+        trimBtn.innerHTML = TRIM_ICON;
+        trimBtn.dataset.recording = "false";
+      });
+    } catch (error) {
+      console.error("Trim recording failed:", error);
+      trimBtn.disabled = false;
+    }
   });
 
   const showButtons = () => {
@@ -1406,6 +1521,86 @@ function streamBlobVideo(video, url) {
       detail,
     })
   );
+}
+
+/** Start recording a video segment from the current playback position. */
+function startTrimRecording(video) {
+  if (typeof video.captureStream !== "function" || typeof MediaRecorder === "undefined") {
+    throw new Error("This browser does not support video recording.");
+  }
+
+  const stream = video.captureStream();
+  if (!stream.getVideoTracks().length) {
+    throw new Error("The video has no capturable video track.");
+  }
+
+  const mimeType = [
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1.64003E,mp4a.40.2",
+    "video/mp4",
+  ].find((t) => MediaRecorder.isTypeSupported(t));
+  if (!mimeType) {
+    throw new Error("No supported recording MIME type found.");
+  }
+
+  const pixels = (video.videoWidth || 1920) * (video.videoHeight || 1080);
+  const bitrate = pixels >= 3840 * 2160 ? 30_000_000
+    : pixels >= 2560 * 1440 ? 20_000_000
+    : pixels >= 1920 * 1080 ? 12_000_000
+    : 8_000_000;
+
+  const recorder = new MediaRecorder(stream, {
+    mimeType,
+    videoBitsPerSecond: bitrate,
+    audioBitsPerSecond: 256_000,
+  });
+
+  const startTime = video.currentTime;
+  const chunks = [];
+  let rejectPromise = null;
+
+  recorder.addEventListener("dataavailable", (e) => {
+    if (e.data.size) chunks.push(e.data);
+  });
+
+  const promise = new Promise((resolve, reject) => {
+    rejectPromise = reject;
+    recorder.addEventListener("stop", () => {
+      const blob = new Blob(chunks, { type: recorder.mimeType });
+      resolve(blob);
+    });
+    recorder.addEventListener("error", () => reject(recorder.error), { once: true });
+  });
+
+  if (video.paused) {
+    video.play().catch(() => {});
+  }
+
+  recorder.start(1000);
+
+  const endCheck = () => {
+    if (video.currentTime >= video.duration - 0.15) {
+      if (recorder.state !== "inactive") recorder.stop();
+    }
+  };
+  video.addEventListener("timeupdate", endCheck, { passive: true });
+
+  return {
+    startTime,
+    promise,
+    save: () => {
+      video.removeEventListener("timeupdate", endCheck);
+      if (recorder.state !== "inactive") recorder.stop();
+    },
+    cancel: () => {
+      video.removeEventListener("timeupdate", endCheck);
+      if (recorder.state !== "inactive") {
+        recorder.removeEventListener("stop", () => {});
+        recorder.stop();
+        rejectPromise?.(new Error("Recording cancelled."));
+      }
+    },
+  };
 }
 
 /** Capture the current video frame and trigger a download, returning the blob URL. */

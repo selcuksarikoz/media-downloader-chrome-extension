@@ -1,4 +1,5 @@
 const DOWNLOAD_EVENT = "imd:download-blob-video";
+const TRIM_EVENT = "imd:trim-blob-video";
 const CONTROL_EVENT = "imd:control-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const blobKinds = new Map();
@@ -147,6 +148,47 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
   }
 
   startJob(job);
+});
+
+window.addEventListener(TRIM_EVENT, (event) => {
+  const { url, filename, videoId, startTime, maxConcurrent } = event.detail || {};
+  if (!url || !videoId) return;
+
+  maxConcurrentJobs = Math.min(
+    10,
+    Math.max(1, Number.parseInt(maxConcurrent, 10) || 5)
+  );
+
+  const video = document.querySelector(
+    `video[data-imd-capture-id="${CSS.escape(videoId)}"]`
+  );
+  if (!video) return;
+
+  if (activeJobs.has(videoId) || queuedVideoIds.has(videoId)) return;
+
+  if (activeJobs.size >= maxConcurrentJobs) {
+    queuedJobs.push({ url, filename, videoId, video, startTime });
+    queuedVideoIds.add(videoId);
+    updateQueueStatuses();
+    return;
+  }
+
+  const controller = new AbortController();
+  activeJobs.add(videoId);
+  activeJobControllers.set(videoId, controller);
+  emitStatus(videoId, "recording", "Recording trimmed video…", 0);
+
+  recordMediaSource(video, videoId, filename, controller.signal, startTime)
+    .catch((error) => {
+      if (error && error.name === "AbortError") return;
+      console.error("[Media Downloader] Trim failed:", error);
+      emitStatus(videoId, "error", error.message || String(error));
+    })
+    .finally(() => {
+      activeJobs.delete(videoId);
+      activeJobControllers.delete(videoId);
+      startQueuedJobs();
+    });
 });
 
 window.addEventListener(CONTROL_EVENT, (event) => {
@@ -374,7 +416,7 @@ function waitForMediaCompletion(video, videoId, signal) {
   });
 }
 
-async function recordMediaSource(video, videoId, filename, signal) {
+async function recordMediaSource(video, videoId, filename, signal, startTime) {
   signal.throwIfAborted();
   if (typeof video.captureStream !== "function" || !window.MediaRecorder) {
     throw new Error("This browser cannot record MediaSource video streams.");
@@ -398,20 +440,23 @@ async function recordMediaSource(video, videoId, filename, signal) {
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
   const wasLooping = video.loop;
-  let targetDuration =
+  const hasStartTime = startTime != null && Number.isFinite(startTime) && startTime > 0;
+  const recordDuration =
     Number.isFinite(video.duration) && video.duration > 0
-      ? video.duration
+      ? video.duration - (hasStartTime ? startTime : 0)
       : null;
+  let targetDuration = recordDuration;
   const chunks = [];
   let safetyTimer;
   let reachedEndAt = null;
   let releasePlaybackLock = () => {};
+  let recordingElapsed = 0;
   const reportProgress = () => {
-    const progress =
-      targetDuration
-        ? (video.currentTime / targetDuration) * 100
-        : undefined;
-    emitStatus(videoId, "progress", "Recording video stream…", progress);
+    const elapsed = video.currentTime - (hasStartTime ? startTime : 0);
+    recordingElapsed = Math.max(0, elapsed);
+    const progress = targetDuration ? (recordingElapsed / targetDuration) * 100 : undefined;
+    const label = `Recording ${recordingElapsed.toFixed(1)}s…`;
+    emitStatus(videoId, "progress", label, progress);
   };
 
   const completion = new Promise((resolve, reject) => {
@@ -438,20 +483,22 @@ async function recordMediaSource(video, videoId, filename, signal) {
 
   try {
     if (video.seekable.length && video.duration !== Infinity) {
-      video.currentTime = 0;
+      video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
     }
     video.loop = false;
     releasePlaybackLock = keepVideoPlaying(video);
     recorder.start(1000);
     await video.play();
     const recordingStartedAt = performance.now();
+    const recordStartTime = video.currentTime;
     safetyTimer = setInterval(() => {
       if (!targetDuration && Number.isFinite(video.duration) && video.duration > 0) {
-        targetDuration = video.duration;
+        targetDuration = recordDuration ?? video.duration - (hasStartTime ? startTime : 0);
       }
       if (!targetDuration) return;
-      const lastRenderedFrame = renderedFrameTimes.get(video) ?? 0;
-      const playbackReachedEnd = video.currentTime >= targetDuration - 0.15;
+      const currentPos = video.currentTime - (hasStartTime ? startTime : 0);
+      const lastRenderedFrame = (renderedFrameTimes.get(video) ?? 0) - (hasStartTime ? startTime : 0);
+      const playbackReachedEnd = currentPos >= targetDuration - 0.15;
       const videoReachedEnd = lastRenderedFrame >= targetDuration - 0.5;
       if (playbackReachedEnd && videoReachedEnd) {
         reachedEndAt ??= performance.now();
@@ -465,7 +512,7 @@ async function recordMediaSource(video, videoId, filename, signal) {
         stop();
       }
     }, 250);
-    emitStatus(videoId, "recording", "Recording video stream…", 0);
+    emitStatus(videoId, "recording", hasStartTime ? `Recording from ${startTime}s…` : "Recording video stream…", 0);
     video.addEventListener("timeupdate", reportProgress);
     await completion;
     signal.throwIfAborted();
