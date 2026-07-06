@@ -76,6 +76,7 @@ const mediaControls = new Map();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const pipState = new WeakMap();
+const mediaHoverListeners = new WeakMap();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
@@ -402,6 +403,15 @@ function cleanupMedia(media) {
     media.removeEventListener("leavepictureinpicture", pipListeners.onLeavePip);
     pipState.delete(media);
   }
+  const hoverData = mediaHoverListeners.get(media);
+  if (hoverData) {
+    if (hoverData.hideTimer.id) clearTimeout(hoverData.hideTimer.id);
+    hoverData.hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
+      target.removeEventListener("mouseenter", mouseenter);
+      target.removeEventListener("mouseleave", mouseleave);
+    });
+    mediaHoverListeners.delete(media);
+  }
   mediaControls.delete(media);
   visibleMedia.delete(media);
   mediaIntersectionObserver.unobserve(media);
@@ -521,7 +531,10 @@ function processMedia(media) {
     e.preventDefault();
     e.stopPropagation();
     captureVideoFrame(media).then((blobUrl) => {
-      if (blobUrl) openLightbox(media, blobUrl);
+      if (blobUrl) {
+        openLightbox(media, blobUrl);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
+      }
     }).catch((error) => {
       console.error("Video frame capture failed:", error);
     });
@@ -550,8 +563,11 @@ function processMedia(media) {
   const hideButtons = () => hideActionGroup(actionGroup);
 
   const hoverTargets = getMediaHoverTargets(media);
+  const hideTimer = { id: null };
   const scheduleHide = () => {
-    setTimeout(() => {
+    if (hideTimer.id) clearTimeout(hideTimer.id);
+    hideTimer.id = setTimeout(() => {
+      hideTimer.id = null;
       const stillHoveringMedia = hoverTargets.some((target) =>
         target.matches(":hover")
       );
@@ -561,10 +577,17 @@ function processMedia(media) {
     }, 100);
   };
 
-  hoverTargets.forEach((target) => {
-    target.addEventListener("mouseenter", showButtons);
-    target.addEventListener("mouseleave", scheduleHide);
+  const hoverEntries = hoverTargets.map((target) => ({
+    target,
+    mouseenter: showButtons,
+    mouseleave: scheduleHide,
+  }));
+  hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
+    target.addEventListener("mouseenter", mouseenter);
+    target.addEventListener("mouseleave", mouseleave);
   });
+
+  mediaHoverListeners.set(media, { hoverEntries, hideTimer });
 
   actionGroup.addEventListener("mouseenter", showButtons);
   actionGroup.addEventListener("mouseleave", scheduleHide);
@@ -1058,6 +1081,9 @@ function openLightbox(media, url) {
       overlay.remove();
       actions.remove();
       lightboxOpen = false;
+      if (resolvedUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(resolvedUrl);
+      }
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = false;
       });
@@ -1171,14 +1197,19 @@ function collectImageCandidates(img) {
 function measureImageArea(url) {
   return new Promise((resolve) => {
     const probe = new Image();
-    const timeout = setTimeout(() => resolve(0), 5000);
+    let settled = false;
+    const finish = (area) => { if (!settled) { settled = true; resolve(area); } };
+    const timeout = setTimeout(() => {
+      finish(0);
+      probe.src = "";
+    }, 5000);
     probe.onload = () => {
       clearTimeout(timeout);
-      resolve(probe.naturalWidth * probe.naturalHeight);
+      finish(probe.naturalWidth * probe.naturalHeight);
     };
     probe.onerror = () => {
       clearTimeout(timeout);
-      resolve(0);
+      finish(0);
     };
     probe.src = url;
   });
@@ -1290,7 +1321,6 @@ async function captureVideoFrame(video) {
   document.documentElement.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return url;
 }
 
