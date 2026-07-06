@@ -1199,6 +1199,7 @@ function openLightbox(media, url) {
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = false;
       });
+      lightboxZoomed = false;
       lightboxZoomLevel = 1;
 
     };
@@ -1208,6 +1209,7 @@ function openLightbox(media, url) {
       cleanup();
     };
 
+    let lightboxZoomed = false;
     let lightboxZoomLevel = 1;
     overlay.addEventListener("click", (e) => {
       if (e.target !== overlay) return;
@@ -1228,7 +1230,7 @@ function openLightbox(media, url) {
     }
 
     function applyZoom(origin) {
-      if (lightboxZoomLevel > 1) {
+      if (lightboxZoomed) {
         const scale = lightboxZoomLevel;
         const nw = img.naturalWidth;
         const nh = img.naturalHeight;
@@ -1238,7 +1240,7 @@ function openLightbox(media, url) {
         img.style.width = nw + "px";
         img.style.height = nh + "px";
         img.style.transformOrigin = "0 0";
-        img.style.transform = `scale(${scale})`;
+        img.style.transform = scale !== 1 ? `scale(${scale})` : "";
         container.style.justifyContent = "flex-start";
         container.style.alignItems = "flex-start";
 
@@ -1271,15 +1273,13 @@ function openLightbox(media, url) {
     }
 
     function toggleZoom(e) {
-      if (lightboxZoomLevel > 1) {
+      if (lightboxZoomed) {
+        lightboxZoomed = false;
         lightboxZoomLevel = 1;
         applyZoom();
       } else {
-        const viewportFit = Math.min(
-          overlay.clientWidth / img.naturalWidth,
-          overlay.clientHeight / img.naturalHeight
-        );
-        lightboxZoomLevel = Math.max(1.1, Math.min(2, 1 / viewportFit * 0.9));
+        lightboxZoomed = true;
+        lightboxZoomLevel = 1;
         applyZoom(getZoomOrigin(e));
       }
     }
@@ -1291,6 +1291,10 @@ function openLightbox(media, url) {
 
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        if (!lightboxZoomed) {
+          lightboxZoomed = true;
+          lightboxZoomLevel = 1;
+        }
         const delta = e.deltaY > 0 ? 1 / 1.15 : 1.15;
         lightboxZoomLevel = Math.min(Math.max(lightboxZoomLevel * delta, 1), 10);
         applyZoom(e.deltaY < 0 ? getZoomOrigin(e) : null);
