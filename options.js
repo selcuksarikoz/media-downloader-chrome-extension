@@ -137,7 +137,11 @@ function addBlacklistDomain() {
     get("status").textContent = "Enter a valid domain, such as example.com.";
     return;
   }
-  if (!blacklistedDomains.includes(domain)) blacklistedDomains.push(domain);
+  if (blacklistedDomains.includes(domain)) {
+    get("status").textContent = `"${domain}" is already blacklisted.`;
+    return;
+  }
+  blacklistedDomains.push(domain);
   blacklistedDomains.sort();
   input.value = "";
   renderBlacklist();
