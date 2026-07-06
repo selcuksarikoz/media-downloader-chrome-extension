@@ -22,6 +22,7 @@ const blobDownloadRequests = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
+let lightboxOpen = false;
 const visibleMedia = new WeakSet();
 const mediaIntersectionObserver = new IntersectionObserver(
   (entries) => {
@@ -194,6 +195,12 @@ const PREVIEW_ICON = `
 const CAPTURE_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M17 7h-1.2l-1.1-2H9.3L8.2 7H7a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-6a3 3 0 0 0-3-3zm-5 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/>
+</svg>
+`;
+
+const LIGHTBOX_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M13 2L4 14h6l-2 8 9-12h-6l2-8z"/>
 </svg>
 `;
 
@@ -412,10 +419,15 @@ function processMedia(media) {
         "Capture Frame",
         CAPTURE_ICON
       );
+  const lightboxBtn = isImage && !media.closest(".imd-lightbox-overlay")
+    ? createActionButton("imd-lightbox-btn", "View full-size image", LIGHTBOX_ICON)
+    : null;
   const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
   previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
-  actionGroup.append(downloadBtn, previewBtn);
-  if (captureBtn) actionGroup.append(captureBtn);
+  const buttons = [downloadBtn, previewBtn];
+  if (lightboxBtn) buttons.push(lightboxBtn);
+  if (captureBtn) buttons.push(captureBtn);
+  actionGroup.append(...buttons);
 
   downloadBtn.addEventListener("click", (e) => {
     e.preventDefault();
@@ -437,6 +449,12 @@ function processMedia(media) {
     captureVideoFrame(media).catch((error) => {
       console.error("Video frame capture failed:", error);
     });
+  });
+
+  lightboxBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openLightbox(media);
   });
 
   const showButtons = () => {
@@ -970,6 +988,65 @@ function openPreviewInBackground(url) {
     if (response?.ok === false) {
       console.warn("[Media Downloader] Preview failed:", response.error);
     }
+  });
+}
+
+function openLightbox(media) {
+  if (media.tagName !== "IMG") return;
+  if (lightboxOpen) return;
+
+  resolveHighestResolutionImageUrl(media).then((url) => {
+    if (!url) return;
+
+    lightboxOpen = true;
+    document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
+      btn.hidden = true;
+    });
+    document.body.style.overflow = "hidden";
+
+    const overlay = document.createElement("div");
+    overlay.className = "imd-lightbox-overlay";
+
+    const container = document.createElement("div");
+    container.className = "imd-lightbox-container";
+
+    const img = document.createElement("img");
+    img.className = "imd-lightbox-image";
+    img.src = url;
+    img.alt = media.alt || "";
+
+    container.appendChild(img);
+    overlay.appendChild(container);
+    document.body.appendChild(overlay);
+
+    const close = () => {
+      overlay.remove();
+      lightboxOpen = false;
+      document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
+        btn.hidden = false;
+      });
+      document.body.style.overflow = "";
+    };
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close();
+    });
+
+    img.addEventListener("click", (e) => {
+      if (e.target === img) {
+        container.classList.toggle("imd-lightbox-fullwidth");
+      }
+    });
+
+    const escHandler = (e) => {
+      if (e.key === "Escape") {
+        close();
+        document.removeEventListener("keydown", escHandler);
+      }
+    };
+    document.addEventListener("keydown", escHandler);
+  }).catch((error) => {
+    console.error("Lightbox failed to load image:", error);
   });
 }
 

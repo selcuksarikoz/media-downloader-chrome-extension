@@ -215,7 +215,8 @@ body.options-page {
   }
 }
 
-.imd-preview-btn[hidden] {
+.imd-preview-btn[hidden],
+.imd-lightbox-btn[hidden] {
   display: none;
 }
 
@@ -319,5 +320,50 @@ body.options-page {
   }
   to {
     width: 75%;
+  }
+}
+
+.imd-lightbox {
+  &-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 2147483646;
+    cursor: pointer;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 95vw;
+    max-height: 95vh;
+    transition: max-width 0.2s ease, max-height 0.2s ease;
+
+    &.imd-lightbox-fullwidth {
+      max-width: 100vw;
+      max-height: 100vh;
+    }
+  }
+
+  &-image {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: max-width 0.2s ease, max-height 0.2s ease, border-radius 0.2s ease;
+
+    .imd-lightbox-fullwidth & {
+      max-width: 100vw;
+      max-height: 100vh;
+      border-radius: 0;
+    }
   }
 }
