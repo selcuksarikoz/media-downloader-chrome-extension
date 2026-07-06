@@ -1035,6 +1035,7 @@ function openLightbox(media) {
     img.addEventListener("click", (e) => {
       if (e.target === img) {
         container.classList.toggle("imd-lightbox-fullwidth");
+        overlay.classList.toggle("imd-lightbox-zoomed");
       }
     });
 
