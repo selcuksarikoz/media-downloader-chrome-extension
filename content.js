@@ -1418,6 +1418,42 @@ function measureImageArea(url) {
   });
 }
 
+/** Measure the pixel resolution of a video by probing its metadata. */
+function measureVideoResolution(url) {
+  return new Promise((resolve) => {
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.muted = true;
+    probe.playsInline = true;
+    probe.crossOrigin = "anonymous";
+    let settled = false;
+    const finish = (w, h) => {
+      if (settled) return;
+      settled = true;
+      probe.removeAttribute("src");
+      probe.load();
+      resolve(w * h);
+    };
+    const timeout = setTimeout(() => finish(0, 0), 15000);
+    probe.onloadeddata = () => {
+      clearTimeout(timeout);
+      finish(probe.videoWidth, probe.videoHeight);
+    };
+    probe.onloadedmetadata = () => {
+      if (probe.videoWidth > 0 && probe.videoHeight > 0) {
+        clearTimeout(timeout);
+        finish(probe.videoWidth, probe.videoHeight);
+      }
+    };
+    probe.onerror = () => {
+      clearTimeout(timeout);
+      finish(0, 0);
+    };
+    probe.src = url;
+    probe.load();
+  });
+}
+
 /** Get the currently active source URL from a video element. */
 function getVideoUrl(video) {
   if (video.currentSrc) return video.currentSrc;
@@ -1430,13 +1466,21 @@ function getVideoUrl(video) {
 }
 
 /** Find the highest quality video source URL among all candidates. */
-function resolveHighestResolutionVideoUrl(video) {
+async function resolveHighestResolutionVideoUrl(video) {
   const candidates = collectVideoCandidates(video);
   if (candidates.length === 0) return getVideoUrl(video);
   if (candidates.length === 1) return candidates[0].url;
 
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0].url;
+  const measured = await Promise.all(
+    candidates.map(async ({ url }) => ({
+      url,
+      pixels: await measureVideoResolution(url),
+    }))
+  );
+  const best = measured.reduce((a, b) => (a.pixels >= b.pixels ? a : b));
+  return best.pixels > 0
+    ? best.url
+    : candidates.sort((a, b) => b.score - a.score)[0].url;
 }
 
 /** Collect all non-blob source URLs from a video and its source elements. */
@@ -1505,7 +1549,7 @@ async function downloadMedia(media) {
   const src =
     media.tagName === "IMG"
       ? await resolveHighestResolutionImageUrl(media)
-      : resolveHighestResolutionVideoUrl(media);
+      : await resolveHighestResolutionVideoUrl(media);
   if (!src) {
     console.error("Media has no source.");
     return;

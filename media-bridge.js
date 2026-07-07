@@ -805,10 +805,10 @@ function validateVideoBlob(blob, signal) {
 
 function getRecordingBitrate(video) {
   const pixels = (video.videoWidth || 1920) * (video.videoHeight || 1080);
-  if (pixels >= 3840 * 2160) return 30_000_000;
-  if (pixels >= 2560 * 1440) return 20_000_000;
-  if (pixels >= 1920 * 1080) return 12_000_000;
-  return 8_000_000;
+  if (pixels >= 3840 * 2160) return 50_000_000;
+  if (pixels >= 2560 * 1440) return 30_000_000;
+  if (pixels >= 1920 * 1080) return 20_000_000;
+  return 12_000_000;
 }
 
 function replaceExtension(filename, extension) {
