@@ -88,7 +88,10 @@ function downloadMedia({ url, folder, saveAs, mediaType }) {
 
   if (typeof folder === "string") {
     folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
-    if (folder && !hasForbiddenFolder(folder)) filename = `${folder}/${filename}`;
+    if (folder && !hasForbiddenFolder(folder)) {
+      filename = `${folder}/${filename}`;
+      saveAs = false;
+    }
   }
 
   chrome.downloads.download(
