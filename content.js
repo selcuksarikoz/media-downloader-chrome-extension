@@ -127,20 +127,28 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
     }
   }
 
-  chrome.downloads.download(
-    {
-      url: blobUrl,
-      filename: downloadFilename,
-      saveAs: settings.showSaveAs,
-      conflictAction: "overwrite",
-    },
-    () => {
-      if (chrome.runtime.lastError) {
-        console.error("Blob download failed:", chrome.runtime.lastError.message);
+  if (typeof chrome !== "undefined" && chrome.downloads) {
+    chrome.downloads.download(
+      {
+        url: blobUrl,
+        filename: downloadFilename,
+        saveAs: settings.showSaveAs,
+        conflictAction: "overwrite",
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.error("Blob download failed:", chrome.runtime.lastError.message);
+        }
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
       }
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    }
-  );
+    );
+  } else {
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = downloadFilename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  }
 });
 
 let blobDownloadStack;
