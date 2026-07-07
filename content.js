@@ -1279,15 +1279,6 @@ function openLightbox(media, url) {
         container.style.height = "";
 
         container.classList.add("imd-lightbox-fullwidth");
-        overlay.classList.add("imd-lightbox-zoomed");
-
-        if (displayW > overlay.clientWidth || displayH > overlay.clientHeight) {
-          overlay.style.justifyContent = "flex-start";
-          overlay.style.alignItems = "flex-start";
-        } else {
-          overlay.style.justifyContent = "";
-          overlay.style.alignItems = "";
-        }
 
         if (origin) {
           overlay.scrollLeft = 0;
@@ -1305,11 +1296,8 @@ function openLightbox(media, url) {
         img.style.height = "";
         container.style.width = "";
         container.style.height = "";
-        overlay.style.justifyContent = "";
-        overlay.style.alignItems = "";
 
         container.classList.remove("imd-lightbox-fullwidth");
-        overlay.classList.remove("imd-lightbox-zoomed");
       }
     }
 

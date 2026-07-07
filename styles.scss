@@ -325,8 +325,6 @@ body.options-page {
     cursor: pointer;
     overflow: auto;
     display: flex;
-    align-items: center;
-    justify-content: center;
 
     &.imd-lightbox-open {
       background: rgba(0, 0, 0, 0.85);
@@ -334,6 +332,7 @@ body.options-page {
   }
 
   &-container {
+    margin: auto;
     position: relative;
     display: flex;
     align-items: center;
@@ -373,8 +372,4 @@ body.options-page {
   display: flex;
   gap: 8px;
   z-index: 1001;
-}
-
-.imd-lightbox-zoomed {
-  cursor: default;
 }
