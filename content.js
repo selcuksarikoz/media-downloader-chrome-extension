@@ -630,6 +630,9 @@ function processMedia(media) {
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }).catch((error) => {
+        clearInterval(elapsedTimer);
+        console.error("Trim recording failed:", error);
       }).finally(() => {
         clearInterval(elapsedTimer);
         videoTrimRecordings.delete(media);
@@ -1584,7 +1587,7 @@ function startTrimRecording(video) {
       const blob = new Blob(chunks, { type: recorder.mimeType });
       resolve(blob);
     });
-    recorder.addEventListener("error", () => reject(recorder.error), { once: true });
+    recorder.addEventListener("error", () => reject(recorder.error || new DOMException("Recording failed", "MediaRecorderError")), { once: true });
   });
 
   if (video.paused) {

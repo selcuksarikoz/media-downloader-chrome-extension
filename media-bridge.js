@@ -182,7 +182,7 @@ window.addEventListener(TRIM_EVENT, (event) => {
     .catch((error) => {
       if (error && error.name === "AbortError") return;
       console.error("[Media Downloader] Trim failed:", error);
-      emitStatus(videoId, "error", error.message || String(error));
+      emitStatus(videoId, "error", (error && error.message) || String(error || "Unknown error"));
     })
     .finally(() => {
       activeJobs.delete(videoId);
@@ -250,7 +250,7 @@ function startJob(job) {
     .catch((error) => {
       if (error && error.name === "AbortError") return;
       console.error("[Media Downloader] Video download failed:", error);
-      emitStatus(videoId, "error", error.message || String(error));
+      emitStatus(videoId, "error", (error && error.message) || String(error || "Unknown error"));
     })
     .finally(() => {
       releaseMediaSourceLock(source);
@@ -427,11 +427,13 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     throw new Error("The video stream has no capturable video track.");
   }
 
-  const mimeType = getRecorderMimeType();
+  const hdr = isHdrVideo(video);
+  const mimeType = getRecorderMimeType(hdr);
   if (!mimeType) {
-    throw new Error("This Chrome build cannot record MP4 video.");
+    throw new Error("This Chrome build cannot record this video.");
   }
-  const outputName = replaceExtension(filename, "mp4");
+  const ext = mimeType.includes("webm") ? "webm" : "mp4";
+  const outputName = replaceExtension(filename, ext);
   const recorder = new MediaRecorder(stream, {
     mimeType,
     videoBitsPerSecond: getRecordingBitrate(video),
@@ -464,9 +466,11 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
       if (event.data.size) chunks.push(event.data);
     });
     recorder.addEventListener("stop", resolve, { once: true });
-    recorder.addEventListener("error", () => reject(recorder.error), {
-      once: true,
-    });
+    recorder.addEventListener(
+      "error",
+      () => reject(recorder.error || new DOMException("Recording failed", "MediaRecorderError")),
+      { once: true }
+    );
   });
 
   const stop = () => {
@@ -584,8 +588,8 @@ function getCaptureRenderHost() {
   captureRenderHost = document.createElement("div");
   captureRenderHost.setAttribute("aria-hidden", "true");
   captureRenderHost.style.cssText =
-    "position:fixed;top:0;left:0;width:100vw;min-height:90px;display:flex;" +
-    "flex-wrap:wrap;overflow:hidden;" +
+    "position:fixed;top:0;left:0;width:100vw;min-height:400px;display:flex;" +
+    "flex-wrap:wrap;overflow:hidden;align-items:flex-start;" +
     "opacity:.01;pointer-events:none;z-index:2147483646;transform:translateZ(0)";
   document.documentElement.appendChild(captureRenderHost);
   return captureRenderHost;
@@ -636,10 +640,12 @@ function hostVideoForCapture(video) {
   originalParent.insertBefore(placeholder, video);
   getCaptureRenderHost().appendChild(video);
   video.muted = true;
+  const capW = Math.min(video.videoWidth || 640, 640);
+  const capH = Math.min(video.videoHeight || 360, 360);
   video.style.cssText =
-    "position:relative;display:block;flex:0 0 160px;width:160px;height:90px;" +
-    "min-width:160px;min-height:90px;opacity:1;pointer-events:none;" +
-    "transform:translateZ(0)";
+    `position:relative;display:block;flex:0 0 ${capW}px;width:${capW}px;height:${capH}px;` +
+    `min-width:${capW}px;min-height:${capH}px;opacity:1;pointer-events:none;` +
+    "transform:translateZ(0);will-change:transform,opacity";
 
   if (typeof video.requestVideoFrameCallback === "function") {
     frameCallbackId = video.requestVideoFrameCallback(paintFrame);
@@ -724,12 +730,27 @@ function keepVideoFramesDecoded(video) {
   };
 }
 
-function getRecorderMimeType() {
-  return [
+function isHdrVideo(video) {
+  const cs = video.videoColorSpace;
+  if (!cs) return false;
+  return cs.transfer === "pq" || cs.transfer === "hlg";
+}
+
+function getRecorderMimeType(isHdr) {
+  const candidates = [
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4;codecs=avc1.64003E,mp4a.40.2",
     "video/mp4",
-  ].find((type) => MediaRecorder.isTypeSupported(type));
+  ];
+  if (isHdr) {
+    candidates.unshift(
+      "video/mp4;codecs=hvc1.2.4.L150.90,mp4a.40.2",
+      "video/mp4;codecs=hev1.2.4.L150.90,mp4a.40.2",
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp9"
+    );
+  }
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type));
 }
 
 function validateVideoBlob(blob, signal) {
