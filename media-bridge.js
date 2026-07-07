@@ -2,6 +2,7 @@ const DOWNLOAD_EVENT = "imd:download-blob-video";
 const TRIM_EVENT = "imd:trim-blob-video";
 const CONTROL_EVENT = "imd:control-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
+const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 const blobKinds = new Map();
 const activeRecordings = new Map();
 const activeJobs = new Set();
@@ -291,6 +292,18 @@ function updateQueueStatuses() {
   });
 }
 
+function sendBlobForDownload(blob, filename, videoId) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent(BLOB_DATA_EVENT, {
+        detail: { blob, filename, videoId },
+      })
+    );
+  } catch (error) {
+    emitStatus(videoId, "error", error.message || "Failed to prepare download.");
+  }
+}
+
 async function downloadKnownBlob(url, filename, videoId, signal) {
   const response = await fetch(url, { signal });
   const blob = await response.blob();
@@ -298,9 +311,7 @@ async function downloadKnownBlob(url, filename, videoId, signal) {
   if (!blob.size) throw new Error("The Blob video contains no data.");
   await validateVideoBlob(blob, signal);
   signal.throwIfAborted();
-  const downloadUrl = nativeCreateObjectURL(blob);
-  triggerDownload(downloadUrl, filename);
-  setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
+  sendBlobForDownload(blob, filename, videoId);
   emitStatus(videoId, "complete", "Blob video downloaded.", 100);
 }
 
@@ -341,9 +352,7 @@ async function downloadCapturedMediaSource(
     await validateVideoBlob(blob, signal);
     signal.throwIfAborted();
 
-    const downloadUrl = nativeCreateObjectURL(blob);
-    triggerDownload(downloadUrl, replaceExtension(filename, extension));
-    setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
+    sendBlobForDownload(blob, replaceExtension(filename, extension), videoId);
     emitStatus(
       videoId,
       "complete",
@@ -527,9 +536,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     }
     await validateVideoBlob(recordedBlob, signal);
     signal.throwIfAborted();
-    const downloadUrl = nativeCreateObjectURL(recordedBlob);
-    triggerDownload(downloadUrl, outputName);
-    setTimeout(() => nativeRevokeObjectURL(downloadUrl), 60_000);
+    sendBlobForDownload(recordedBlob, outputName, videoId);
     emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
     completed = true;
   } finally {
@@ -814,16 +821,6 @@ function getRecordingBitrate(video) {
 function replaceExtension(filename, extension) {
   const base = (filename || `video-${Date.now()}`).replace(/\.[^.]+$/, "");
   return `${base}.${extension}`;
-}
-
-function triggerDownload(url, filename) {
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.style.display = "none";
-  document.documentElement.appendChild(link);
-  link.click();
-  link.remove();
 }
 
 function emitStatus(videoId, status, message, progress) {

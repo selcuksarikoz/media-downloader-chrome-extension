@@ -40,6 +40,7 @@ const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
+const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 let lightboxOpen = false;
 const visibleMedia = new WeakSet();
 const mediaIntersectionObserver = new IntersectionObserver(
@@ -110,6 +111,36 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   updateBlobDownloadPanel(videoId, status, message, progress);
 
   if (status === "error") console.error(message);
+});
+
+window.addEventListener(BLOB_DATA_EVENT, (event) => {
+  const { blob, filename, videoId } = event.detail || {};
+  if (!blob || !blob.size) return;
+
+  const blobUrl = URL.createObjectURL(blob);
+
+  let downloadFilename = filename;
+  if (settings.downloadFolder) {
+    const folder = settings.downloadFolder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    if (folder && !hasForbiddenFolder(folder)) {
+      downloadFilename = `${folder}/${filename}`;
+    }
+  }
+
+  chrome.downloads.download(
+    {
+      url: blobUrl,
+      filename: downloadFilename,
+      saveAs: settings.showSaveAs,
+      conflictAction: "overwrite",
+    },
+    () => {
+      if (chrome.runtime.lastError) {
+        console.error("Blob download failed:", chrome.runtime.lastError.message);
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    }
+  );
 });
 
 let blobDownloadStack;
@@ -1239,14 +1270,13 @@ function openLightbox(media, url) {
         const nw = img.naturalWidth;
         const nh = img.naturalHeight;
 
-        container.style.width = (nw * scale) + "px";
-        container.style.height = (nh * scale) + "px";
-        img.style.width = nw + "px";
-        img.style.height = nh + "px";
-        img.style.transformOrigin = "0 0";
-        img.style.transform = scale !== 1 ? `scale(${scale})` : "";
-        container.style.justifyContent = "flex-start";
-        container.style.alignItems = "flex-start";
+        const displayW = Math.round(nw * scale);
+        const displayH = Math.round(nh * scale);
+
+        img.style.width = displayW + "px";
+        img.style.height = displayH + "px";
+        container.style.width = "";
+        container.style.height = "";
 
         container.classList.add("imd-lightbox-fullwidth");
         overlay.classList.add("imd-lightbox-zoomed");
@@ -1256,21 +1286,18 @@ function openLightbox(media, url) {
           overlay.scrollTop = 0;
           void overlay.offsetHeight;
 
-          const imgX = origin.x / 100 * nw;
-          const imgY = origin.y / 100 * nh;
+          const imgX = (origin.x / 100) * nw;
+          const imgY = (origin.y / 100) * nh;
 
-          overlay.scrollLeft = Math.max(0, imgX * scale - overlay.clientWidth / 2);
-          overlay.scrollTop = Math.max(0, imgY * scale - overlay.clientHeight / 2);
+          overlay.scrollLeft = Math.max(0, Math.round(imgX * scale - overlay.clientWidth / 2));
+          overlay.scrollTop = Math.max(0, Math.round(imgY * scale - overlay.clientHeight / 2));
         }
       } else {
-        container.style.width = "";
-        container.style.height = "";
         img.style.width = "";
         img.style.height = "";
-        img.style.transform = "";
-        img.style.transformOrigin = "";
-        container.style.justifyContent = "";
-        container.style.alignItems = "";
+        container.style.width = "";
+        container.style.height = "";
+
         container.classList.remove("imd-lightbox-fullwidth");
         overlay.classList.remove("imd-lightbox-zoomed");
       }

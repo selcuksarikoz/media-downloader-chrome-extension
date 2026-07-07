@@ -180,11 +180,11 @@ body.options-page {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   appearance: none;
 
   &:hover {
     background-color: rgba(50, 50, 50, 0.95);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   }
 
   &.imd-recording {
@@ -358,6 +358,7 @@ body.options-page {
     .imd-lightbox-fullwidth & {
       max-width: none;
       max-height: none;
+      object-fit: none;
       border-radius: 0;
       cursor: zoom-out;
     }
@@ -376,5 +377,5 @@ body.options-page {
 
 .imd-lightbox-zoomed {
   align-items: flex-start !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
 }
