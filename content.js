@@ -387,6 +387,7 @@ function trackMedia(media) {
     media.tagName === "VIDEO" ? "video" : "image";
   if (media.tagName === "VIDEO") {
     media.controls = settings.showVideoControls;
+    applyStoryVideoFix(media);
   }
   mediaResizeObserver.observe(media);
   mediaIntersectionObserver.observe(media);
@@ -397,6 +398,7 @@ function trackMedia(media) {
 function updateVideoControls() {
   document.querySelectorAll("video").forEach((video) => {
     video.controls = settings.showVideoControls;
+    applyStoryVideoFix(video);
   });
 }
 
@@ -460,6 +462,7 @@ function cleanupMedia(media) {
     mediaHoverListeners.delete(media);
   }
   mediaControls.delete(media);
+  removeStoryVideoFix(media);
   visibleMedia.delete(media);
   mediaIntersectionObserver.unobserve(media);
   mediaResizeObserver.unobserve(media);
@@ -798,6 +801,88 @@ function getActionRect(media) {
   return media.getBoundingClientRect();
 }
 
+/** Check if a video is inside an Instagram Story viewer. */
+function isInstagramStoryContext(video) {
+  if (!/(^|\.)instagram\.com$/.test(location.hostname)) return false;
+  return /\/stories\//.test(location.pathname);
+}
+
+/** Get the height of the Instagram Story reply bar overlapping the video bottom. */
+function getStoryReplyBarHeight(video) {
+  const videoRect = video.getBoundingClientRect();
+  if (videoRect.height < window.innerHeight * 0.5) return 0;
+
+  const dialog = video.closest('[role="dialog"]');
+  if (!dialog) return 0;
+
+  const viewportBottom = window.innerHeight;
+  let maxOverlap = 0;
+
+  const candidates = dialog.querySelectorAll(
+    'form, [role="group"], [data-testid]'
+  );
+  for (const el of candidates) {
+    const rect = el.getBoundingClientRect();
+    if (rect.height < 10) continue;
+    if (rect.top < viewportBottom * 0.6) continue;
+    const input = el.querySelector('input, textarea, [contenteditable="true"], [placeholder]');
+    if (!input) continue;
+    const overlap = videoRect.bottom - rect.top;
+    if (overlap > maxOverlap) maxOverlap = overlap;
+  }
+
+  if (maxOverlap > 0) return maxOverlap;
+
+  const centerX = videoRect.left + videoRect.width / 2;
+  const bottomY = viewportBottom - 5;
+  const elements = document.elementsFromPoint(centerX, bottomY);
+
+  for (const el of elements) {
+    if (el === video || video.contains(el) || el.tagName === "HTML" || el.tagName === "BODY") continue;
+    const hasInput = el.querySelector('input, textarea, [contenteditable="true"], [placeholder]');
+    if (hasInput) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height > 10) {
+        const overlap = videoRect.bottom - rect.top;
+        if (overlap > 0) return overlap;
+      }
+    }
+  }
+
+  return 0;
+}
+
+/** Apply or remove the story push-up fix so native controls are above the reply bar. */
+function applyStoryVideoFix(video) {
+  if (video.tagName !== "VIDEO") return;
+  if (settings.showVideoControls && isInstagramStoryContext(video)) {
+    const replyBarHeight = getStoryReplyBarHeight(video) || 60;
+    const existing = video.style.transform || "";
+    const cleaned = existing.replace(/translateY\([^)]*\)/g, "").trim();
+    const translateY = `translateY(-${replyBarHeight}px)`;
+    video.style.transform = cleaned ? `${cleaned} ${translateY}` : translateY;
+    video.style.zIndex = "9999";
+    video.dataset.imdStoryFix = "true";
+    return;
+  }
+  removeStoryVideoFix(video);
+}
+
+/** Remove the story push-up fix from a video element. */
+function removeStoryVideoFix(video) {
+  if (video.dataset.imdStoryFix) {
+    const existing = video.style.transform || "";
+    const cleaned = existing.replace(/translateY\([^)]*\)/g, "").trim();
+    if (cleaned) {
+      video.style.transform = cleaned;
+    } else {
+      video.style.removeProperty("transform");
+    }
+    video.style.removeProperty("z-index");
+    delete video.dataset.imdStoryFix;
+  }
+}
+
 /** Prevent action group events from propagating to the underlying page. */
 function isolateActionGroupEvents(group) {
   const eventTypes = [
@@ -946,6 +1031,7 @@ function repositionOpenControls() {
       cleanupMedia(media);
       return;
     }
+    if (media.tagName === "VIDEO") applyStoryVideoFix(media);
     const inLightbox = media.closest(".imd-lightbox-overlay");
     if (!visibleMedia.has(media) && !inLightbox) {
       hideActionGroup(group);
