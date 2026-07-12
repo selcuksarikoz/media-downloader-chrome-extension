@@ -1280,12 +1280,8 @@ function openLightbox(media, url) {
 
     lightboxOpen = true;
 
-    let pausedVideo = null;
     const activeVideo = document.querySelector("video:not([paused])");
-    if (activeVideo) {
-      pausedVideo = activeVideo;
-      pausedVideo.pause();
-    }
+    if (activeVideo) activeVideo.pause();
 
     document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
       btn.hidden = true;
@@ -1334,7 +1330,6 @@ function openLightbox(media, url) {
       overlay.remove();
       actions.remove();
       lightboxOpen = false;
-      if (pausedVideo) pausedVideo.play().catch(() => {});
       if (resolvedUrl.startsWith("blob:")) {
         URL.revokeObjectURL(resolvedUrl);
       }
