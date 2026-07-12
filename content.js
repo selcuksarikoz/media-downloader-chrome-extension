@@ -41,6 +41,8 @@ const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
+const CAPTURE_BLOCK_EVENT = "imd:capture-block";
+const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 let lightboxOpen = false;
 const visibleMedia = new WeakSet();
 const mediaIntersectionObserver = new IntersectionObserver(
@@ -1277,6 +1279,14 @@ function openLightbox(media, url) {
     if (!resolvedUrl) return;
 
     lightboxOpen = true;
+
+    let pausedVideo = null;
+    const activeVideo = document.querySelector("video:not([paused])");
+    if (activeVideo) {
+      pausedVideo = activeVideo;
+      pausedVideo.pause();
+    }
+
     document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
       btn.hidden = true;
     });
@@ -1324,6 +1334,7 @@ function openLightbox(media, url) {
       overlay.remove();
       actions.remove();
       lightboxOpen = false;
+      if (pausedVideo) pausedVideo.play().catch(() => {});
       if (resolvedUrl.startsWith("blob:")) {
         URL.revokeObjectURL(resolvedUrl);
       }
@@ -1332,7 +1343,6 @@ function openLightbox(media, url) {
       });
       lightboxZoomed = false;
       lightboxZoomLevel = 1;
-
     };
 
     const close = () => {
@@ -1791,43 +1801,37 @@ async function captureVideoFrame(video) {
   if (!video.videoWidth || !video.videoHeight) {
     throw new Error("Video frame is not ready.");
   }
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Canvas is unavailable.");
-  context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const captureFormats = {
-    jpg: { mimeType: "image/jpeg", extension: "jpg", quality: 0.92 },
-    png: { mimeType: "image/png", extension: "png" },
-    webp: { mimeType: "image/webp", extension: "webp", quality: 0.92 },
-  };
-  const format = captureFormats[settings.captureType] ?? captureFormats.jpg;
-  const blob = await new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob(
-        (result) =>
-          result ? resolve(result) : reject(new Error("Frame encoding failed.")),
-        format.mimeType,
-        format.quality
-      );
-    } catch (error) {
-      reject(error);
-    }
-  });
-  const url = URL.createObjectURL(blob);
-  // const filename = getSuggestedVideoName(video).replace(
-  //   /\.[^.]+$/,
-  //   `-frame-${Math.round(video.currentTime * 1000)}ms.${format.extension}`
-  // );
-  // const link = document.createElement("a");
-  // link.href = url;
-  // link.download = filename;
-  // link.hidden = true;
-  // document.documentElement.appendChild(link);
-  // link.click();
-  // link.remove();
-  return url;
+  window.dispatchEvent(new CustomEvent(CAPTURE_BLOCK_EVENT, { detail: { video } }));
+  video.pause();
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas is unavailable.");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const captureFormats = {
+      jpg: { mimeType: "image/jpeg", extension: "jpg", quality: 0.92 },
+      png: { mimeType: "image/png", extension: "png" },
+      webp: { mimeType: "image/webp", extension: "webp", quality: 0.92 },
+    };
+    const format = captureFormats[settings.captureType] ?? captureFormats.jpg;
+    const blob = await new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob(
+          (result) =>
+            result ? resolve(result) : reject(new Error("Frame encoding failed.")),
+          format.mimeType,
+          format.quality
+        );
+      } catch (error) {
+        reject(error);
+      }
+    });
+    return URL.createObjectURL(blob);
+  } finally {
+    window.dispatchEvent(new CustomEvent(CAPTURE_UNBLOCK_EVENT, { detail: { video } }));
+  }
 }
 
 /** Toggle Picture-in-Picture mode for a video element. */

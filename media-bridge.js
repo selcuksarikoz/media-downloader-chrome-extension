@@ -3,6 +3,8 @@ const TRIM_EVENT = "imd:trim-blob-video";
 const CONTROL_EVENT = "imd:control-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
+const CAPTURE_BLOCK_EVENT = "imd:capture-block";
+const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const blobKinds = new Map();
 const activeRecordings = new Map();
 const activeJobs = new Set();
@@ -13,11 +15,17 @@ let maxConcurrentJobs = 5;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
 const protectedVideos = new WeakSet();
+const captureBlockedVideos = new WeakSet();
 const renderedFrameTimes = new WeakMap();
 
 const nativePause = HTMLMediaElement.prototype.pause;
 HTMLMediaElement.prototype.pause = function () {
   if (!protectedVideos.has(this)) return nativePause.call(this);
+};
+const nativePlay = HTMLMediaElement.prototype.play;
+HTMLMediaElement.prototype.play = function () {
+  if (captureBlockedVideos.has(this)) return Promise.resolve();
+  return nativePlay.call(this);
 };
 const nativeLoad = HTMLMediaElement.prototype.load;
 HTMLMediaElement.prototype.load = function () {
@@ -216,6 +224,16 @@ window.addEventListener(CONTROL_EVENT, (event) => {
   if (activeJobs.has(videoId)) {
     emitStatus(videoId, "canceled", "Video download canceled.");
   }
+});
+
+window.addEventListener(CAPTURE_BLOCK_EVENT, (event) => {
+  const video = event.detail?.video;
+  if (video instanceof HTMLMediaElement) captureBlockedVideos.add(video);
+});
+
+window.addEventListener(CAPTURE_UNBLOCK_EVENT, (event) => {
+  const video = event.detail?.video;
+  if (video instanceof HTMLMediaElement) captureBlockedVideos.delete(video);
 });
 
 function startJob(job) {
