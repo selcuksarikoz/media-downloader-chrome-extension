@@ -1304,9 +1304,36 @@ function openLightbox(media, url) {
     const actions = document.createElement("div");
     actions.className = "imd-lightbox-actions";
     actions.innerHTML = `
-      <button type="button" class="imd-action-btn imd-down-btn" title="Download Image" aria-label="Download Image">${DOWNLOAD_ICON}</button>
-      <button type="button" class="imd-action-btn imd-preview-btn" title="Preview image" aria-label="Preview image">${PREVIEW_ICON}</button>
+      <div class="imd-lightbox-actions-row">
+        <button type="button" class="imd-action-btn imd-down-btn" title="Download Image" aria-label="Download Image">${DOWNLOAD_ICON}</button>
+        <button type="button" class="imd-action-btn imd-preview-btn" title="Preview image" aria-label="Preview image">${PREVIEW_ICON}</button>
+      </div>
+      <span class="imd-lightbox-info"></span>
     `;
+    const infoEl = actions.querySelector(".imd-lightbox-info");
+    img.addEventListener("load", () => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const ext = (resolvedUrl.match(/\.(\w+)(?:\?|$)/)?.[1] || "").toLowerCase();
+      const format = ext === "png" ? "PNG" : ext === "webp" ? "WebP" : "JPG";
+      infoEl.textContent = `${w} × ${h} · ${format}`;
+      fetch(resolvedUrl, { method: "HEAD" }).then((res) => {
+        const ct = res.headers.get("Content-Type");
+        if (ct) {
+          const m = ct.match(/image\/(\w+)/);
+          if (m) {
+            const f = m[1].toLowerCase();
+            const label = f === "jpeg" ? "JPG" : f === "png" ? "PNG" : f === "webp" ? "WebP" : f.toUpperCase();
+            infoEl.textContent = `${w} × ${h} · ${label}`;
+          }
+        }
+        const len = res.headers.get("Content-Length");
+        if (len) {
+          const mb = (Number(len) / (1024 * 1024)).toFixed(1);
+          infoEl.textContent += ` · ${mb} MB`;
+        }
+      }).catch(() => {});
+    }, { once: true });
     actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
