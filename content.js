@@ -35,6 +35,7 @@ const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const pipState = new WeakMap();
 const mediaHoverListeners = new WeakMap();
+const instagramNativeControlState = new WeakMap();
 const videoTrimRecordings = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_TRIM_EVENT = "imd:trim-blob-video";
@@ -390,6 +391,7 @@ function trackMedia(media) {
   if (media.tagName === "VIDEO") {
     media.controls = settings.showVideoControls;
     applyStoryVideoFix(media);
+    syncInstagramNativeVideoControls(media);
   }
   mediaResizeObserver.observe(media);
   mediaIntersectionObserver.observe(media);
@@ -401,6 +403,7 @@ function updateVideoControls() {
   document.querySelectorAll("video").forEach((video) => {
     video.controls = settings.showVideoControls;
     applyStoryVideoFix(video);
+    syncInstagramNativeVideoControls(video);
   });
 }
 
@@ -463,6 +466,7 @@ function cleanupMedia(media) {
     });
     mediaHoverListeners.delete(media);
   }
+  removeInstagramNativeVideoControls(media);
   mediaControls.delete(media);
   removeStoryVideoFix(media);
   visibleMedia.delete(media);
@@ -530,6 +534,7 @@ function processMedia(media) {
     media.dataset.imdCaptureId = crypto.randomUUID();
   }
   if (!isImage) capturedVideos.set(media.dataset.imdCaptureId, media);
+  if (!isImage) syncInstagramNativeVideoControls(media);
 
   const actionGroup = document.createElement("div");
   actionGroup.className = "imd-action-group";
@@ -868,6 +873,118 @@ function applyStoryVideoFix(video) {
     return;
   }
   removeStoryVideoFix(video);
+}
+
+/** Attach a hover lift for Instagram videos so native controls receive pointer events. */
+function syncInstagramNativeVideoControls(video) {
+  if (video.tagName !== "VIDEO") return;
+  if (
+    !settings.showVideoControls ||
+    !isInstagramVideoPlayerMedia(video) ||
+    isInstagramStoryContext(video)
+  ) {
+    removeInstagramNativeVideoControls(video);
+    return;
+  }
+  if (instagramNativeControlState.has(video)) return;
+
+  const state = {
+    active: false,
+    original: null,
+    hideTimer: { id: null },
+    hoverEntries: [],
+    showControls: null,
+    scheduleRestore: null,
+  };
+
+  state.showControls = () => {
+    if (!settings.showVideoControls || !video.isConnected) return;
+    if (state.hideTimer.id) clearTimeout(state.hideTimer.id);
+    state.hideTimer.id = null;
+    liftInstagramVideoForNativeControls(video, state);
+  };
+
+  state.scheduleRestore = () => {
+    if (state.hideTimer.id) clearTimeout(state.hideTimer.id);
+    state.hideTimer.id = setTimeout(() => {
+      state.hideTimer.id = null;
+      const stillHovering = state.hoverEntries.some(({ target }) =>
+        target.matches(":hover")
+      );
+      if (!stillHovering && !video.matches(":hover")) {
+        restoreInstagramVideoAfterNativeControls(video, state);
+      }
+    }, 250);
+  };
+
+  state.hoverEntries = getInstagramNativeControlHoverTargets(video).map(
+    (target) => ({
+      target,
+      mouseenter: state.showControls,
+      mouseleave: state.scheduleRestore,
+    })
+  );
+  state.hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
+    target.addEventListener("mouseenter", mouseenter);
+    target.addEventListener("mouseleave", mouseleave);
+  });
+  video.addEventListener("mouseenter", state.showControls);
+  video.addEventListener("mouseleave", state.scheduleRestore);
+  instagramNativeControlState.set(video, state);
+}
+
+/** Remove Instagram native-controls hover handling and restore inline styles. */
+function removeInstagramNativeVideoControls(video) {
+  const state = instagramNativeControlState.get(video);
+  if (!state) return;
+  if (state.hideTimer.id) clearTimeout(state.hideTimer.id);
+  state.hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
+    target.removeEventListener("mouseenter", mouseenter);
+    target.removeEventListener("mouseleave", mouseleave);
+  });
+  video.removeEventListener("mouseenter", state.showControls);
+  video.removeEventListener("mouseleave", state.scheduleRestore);
+  restoreInstagramVideoAfterNativeControls(video, state);
+  instagramNativeControlState.delete(video);
+}
+
+/** Collect Instagram player surfaces that represent hovering the video. */
+function getInstagramNativeControlHoverTargets(video) {
+  const targets = [
+    getAssociatedVideoPlayer(video),
+    getInstagramReelLink(video),
+    ...getMediaHoverTargets(video),
+  ].filter(Boolean);
+  return [...new Set(targets)];
+}
+
+/** Temporarily raise the video above Instagram overlays so browser controls can appear. */
+function liftInstagramVideoForNativeControls(video, state) {
+  if (state.active) return;
+  state.original = {
+    position: video.style.position,
+    zIndex: video.style.zIndex,
+    pointerEvents: video.style.pointerEvents,
+    isolation: video.style.isolation,
+  };
+  if (getComputedStyle(video).position === "static") {
+    video.style.position = "relative";
+  }
+  video.style.zIndex = "2147483646";
+  video.style.pointerEvents = "auto";
+  video.style.isolation = "isolate";
+  state.active = true;
+}
+
+/** Restore the video styles changed while exposing native controls. */
+function restoreInstagramVideoAfterNativeControls(video, state) {
+  if (!state.active || !state.original) return;
+  video.style.position = state.original.position;
+  video.style.zIndex = state.original.zIndex;
+  video.style.pointerEvents = state.original.pointerEvents;
+  video.style.isolation = state.original.isolation;
+  state.original = null;
+  state.active = false;
 }
 
 /** Remove the story push-up fix from a video element. */
