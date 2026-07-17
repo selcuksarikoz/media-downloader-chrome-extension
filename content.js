@@ -1454,8 +1454,10 @@ function openLightbox(media, url) {
     actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      downloadMedia(img);
-      close();
+      // downloadMedia is async; for blob: URLs it dispatches the download
+      // request and the media bridge fetches the blob. Close only after it
+      // resolves so the blob URL is not revoked before the fetch completes.
+      downloadMedia(img).finally(() => close());
     });
     actions.querySelector(".imd-preview-btn").addEventListener("click", (e) => {
       e.preventDefault();
@@ -1477,7 +1479,9 @@ function openLightbox(media, url) {
       actions.remove();
       lightboxOpen = false;
       if (resolvedUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(resolvedUrl);
+        // Defer revocation so the in-flight download fetch (handled by the
+        // media bridge) has time to read the blob before it is released.
+        setTimeout(() => URL.revokeObjectURL(resolvedUrl), 60_000);
       }
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = false;
@@ -1948,8 +1952,19 @@ async function captureVideoFrame(video) {
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const context = canvas.getContext("2d");
+    const isHdr =
+      video.videoColorSpace &&
+      (video.videoColorSpace.transfer === "pq" ||
+        video.videoColorSpace.transfer === "hlg");
+    const contextOptions = isHdr && "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
+      ? { colorSpace: "display-p3" }
+      : undefined;
+    const context = canvas.getContext("2d", contextOptions);
     if (!context) throw new Error("Canvas is unavailable.");
+    // HDR frames are tone-mapped to SDR by the canvas; draw at native
+    // resolution and disable smoothing so the captured pixels stay as close to
+    // the source as the canvas can represent.
+    context.imageSmoothingEnabled = false;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const captureFormats = {
       jpg: { mimeType: "image/jpeg", extension: "jpg", quality: 0.92 },

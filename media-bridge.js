@@ -672,14 +672,20 @@ function hostVideoForCapture(video) {
     `min-width:${capW}px;min-height:${capH}px;opacity:1;pointer-events:none;` +
     "transform:translateZ(0);will-change:transform,opacity";
 
-  if (typeof video.requestVideoFrameCallback === "function") {
+  const supportsRvfc = typeof video.requestVideoFrameCallback === "function";
+  if (supportsRvfc) {
     frameCallbackId = video.requestVideoFrameCallback(paintFrame);
   }
-  const paintInterval = setInterval(paintPlaceholder, 100);
+  // Continuous per-frame repainting is expensive on HDR/4K streams and causes
+  // jank on the page. Only fall back to a timer when requestVideoFrameCallback
+  // is unavailable, and throttle it so it stays gentle.
+  const paintInterval = supportsRvfc
+    ? null
+    : setInterval(paintPlaceholder, 250);
 
   return () => {
     stopped = true;
-    clearInterval(paintInterval);
+    if (paintInterval) clearInterval(paintInterval);
     if (frameCallbackId !== undefined) {
       video.cancelVideoFrameCallback?.(frameCallbackId);
     }
@@ -732,23 +738,29 @@ function keepVideoFramesDecoded(video) {
     callbackId = video.requestVideoFrameCallback?.(onFrame);
   };
 
-  if (typeof video.requestVideoFrameCallback === "function") {
+  const supportsRvfc = typeof video.requestVideoFrameCallback === "function";
+  if (supportsRvfc) {
     callbackId = video.requestVideoFrameCallback(onFrame);
   }
-  const intervalId = setInterval(() => {
-    paint();
-    const currentTime = video.currentTime;
-    const frameCount =
-      video.getVideoPlaybackQuality?.().totalVideoFrames ?? lastFrameCount;
-    if (frameCount > lastFrameCount) {
-      renderedFrameTimes.set(video, currentTime);
-    }
-    lastFrameCount = frameCount;
-  }, 250);
+  // Throttle the timer fallback: on HDR/4K streams a tight repaint interval is
+  // the main source of page jank during recording. requestVideoFrameCallback
+  // already paints once per rendered frame where supported.
+  const intervalId = supportsRvfc
+    ? null
+    : setInterval(() => {
+        paint();
+        const currentTime = video.currentTime;
+        const frameCount =
+          video.getVideoPlaybackQuality?.().totalVideoFrames ?? lastFrameCount;
+        if (frameCount > lastFrameCount) {
+          renderedFrameTimes.set(video, currentTime);
+        }
+        lastFrameCount = frameCount;
+      }, 250);
 
   return () => {
     stopped = true;
-    clearInterval(intervalId);
+    if (intervalId) clearInterval(intervalId);
     if (callbackId !== undefined) video.cancelVideoFrameCallback?.(callbackId);
     renderedFrameTimes.delete(video);
     canvas.remove();
