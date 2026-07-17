@@ -1455,11 +1455,13 @@ function openLightbox(media, url) {
       e.preventDefault();
       e.stopPropagation();
       downloadMedia(img);
+      close();
     });
     actions.querySelector(".imd-preview-btn").addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       previewMedia(img);
+      close();
     });
     document.body.appendChild(overlay);
     document.body.appendChild(actions);
