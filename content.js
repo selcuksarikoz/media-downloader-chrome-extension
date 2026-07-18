@@ -1843,7 +1843,7 @@ function startTrimRecording(video) {
   const recorder = new MediaRecorder(stream, {
     mimeType,
     videoBitsPerSecond: bitrate,
-    audioBitsPerSecond: 256_000,
+    audioBitsPerSecond: 128_000,
   });
 
   const startTime = video.currentTime;
@@ -2105,6 +2105,7 @@ document.addEventListener(
   "contextmenu",
   (event) => {
     if (!settings.useContextMenu || !extensionActive) return;
+    if (event.target?.closest?.("a[href]")) return;
     const media = getMediaAtPoint(event.clientX, event.clientY);
     if (!media) return;
     event.preventDefault();

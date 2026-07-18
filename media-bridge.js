@@ -19,9 +19,6 @@ const captureBlockedVideos = new WeakSet();
 const renderedFrameTimes = new WeakMap();
 
 const nativePause = HTMLMediaElement.prototype.pause;
-HTMLMediaElement.prototype.pause = function () {
-  if (!protectedVideos.has(this)) return nativePause.call(this);
-};
 const nativePlay = HTMLMediaElement.prototype.play;
 HTMLMediaElement.prototype.play = function () {
   if (captureBlockedVideos.has(this)) return Promise.resolve();
@@ -32,7 +29,7 @@ HTMLMediaElement.prototype.load = function () {
   if (!protectedVideos.has(this)) return nativeLoad.call(this);
 };
 
-for (const property of ["src", "srcObject", "currentTime"]) {
+for (const property of ["src", "srcObject"]) {
   const descriptor = Object.getOwnPropertyDescriptor(
     HTMLMediaElement.prototype,
     property
@@ -340,16 +337,12 @@ async function downloadCapturedMediaSource(
   bufferRecord,
   signal
 ) {
-  const originalTime = video.currentTime;
   const wasPaused = video.paused;
   const wasLooping = video.loop;
 
   try {
     if (!isMediaFullyBuffered(video)) {
       video.loop = false;
-      if (video.seekable.length && Number.isFinite(video.duration)) {
-        video.currentTime = 0;
-      }
       emitStatus(
         videoId,
         "recording",
@@ -379,7 +372,6 @@ async function downloadCapturedMediaSource(
     );
   } finally {
     activeRecordings.delete(videoId);
-    if (Number.isFinite(originalTime)) video.currentTime = originalTime;
     video.loop = wasLooping;
     if (wasPaused) video.pause();
   }
@@ -448,12 +440,9 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   if (typeof video.captureStream !== "function" || !window.MediaRecorder) {
     throw new Error("This browser cannot record MediaSource video streams.");
   }
-
-  const stream = video.captureStream();
-  if (!stream.getVideoTracks().length) {
-    throw new Error("The video stream has no capturable video track.");
-  }
-
+  const hasStartTime = startTime != null && Number.isFinite(startTime) && startTime > 0;
+  const url = video.currentSrc || video.src;
+  const source = blobKinds.get(url);
   const hdr = isHdrVideo(video);
   const mimeType = getRecorderMimeType(hdr);
   if (!mimeType) {
@@ -461,31 +450,58 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   }
   const ext = mimeType.includes("webm") ? "webm" : "mp4";
   const outputName = replaceExtension(filename, ext);
-  const recorder = new MediaRecorder(stream, {
+  const hasChunks = source?.kind === "media-source" && source.record.buffers.some((b) => b.chunks.length);
+
+  let captureVideo = video;
+  let isClone = false;
+  if (hasChunks) {
+    captureVideo = document.createElement("video");
+    captureVideo.muted = true;
+    captureVideo.playsInline = true;
+    captureVideo.preload = "auto";
+    captureVideo.loop = false;
+    getCaptureRenderHost().appendChild(captureVideo);
+    isClone = true;
+    captureVideo.src = URL.createObjectURL(buildChunkBlob(source.record));
+    await waitForLoadedMetadata(captureVideo, signal);
+    if (hasStartTime && Number.isFinite(captureVideo.duration) && captureVideo.duration > 0) {
+      captureVideo.currentTime = Math.min(startTime, captureVideo.duration);
+    }
+  } else if (video.seekable.length && video.duration !== Infinity) {
+    video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
+  }
+
+  if (signal.aborted) throw new DOMException("Canceled", "AbortError");
+  const cloneStream = captureVideo.captureStream();
+  if (!cloneStream.getVideoTracks().length) {
+    throw new Error("The video stream has no capturable video track.");
+  }
+  let recordStream;
+  if (isClone) {
+    const originalStream = video.captureStream();
+    const audioTracks = originalStream.getAudioTracks();
+    recordStream = new MediaStream([
+      ...cloneStream.getVideoTracks(),
+      ...audioTracks,
+    ]);
+  } else {
+    recordStream = cloneStream;
+  }
+
+  const recorder = new MediaRecorder(recordStream, {
     mimeType,
-    videoBitsPerSecond: getRecordingBitrate(video),
-    audioBitsPerSecond: 256_000,
+    videoBitsPerSecond: getRecordingBitrate(isClone ? captureVideo : video),
+    audioBitsPerSecond: 128_000,
   });
-  const originalTime = video.currentTime;
-  const wasPaused = video.paused;
-  const wasLooping = video.loop;
-  const hasStartTime = startTime != null && Number.isFinite(startTime) && startTime > 0;
-  const recordDuration =
-    Number.isFinite(video.duration) && video.duration > 0
-      ? video.duration - (hasStartTime ? startTime : 0)
-      : null;
-  let targetDuration = recordDuration;
   const chunks = [];
   let safetyTimer;
-  let reachedEndAt = null;
-  let releasePlaybackLock = () => {};
+  let releaseFramePump = () => {};
+  let recordingStartPos = 0;
   let recordingElapsed = 0;
   const reportProgress = () => {
-    const elapsed = video.currentTime - (hasStartTime ? startTime : 0);
-    recordingElapsed = Math.max(0, elapsed);
-    const progress = targetDuration ? (recordingElapsed / targetDuration) * 100 : undefined;
+    recordingElapsed = Math.max(0, captureVideo.currentTime - recordingStartPos);
     const label = `Recording ${recordingElapsed.toFixed(1)}s…`;
-    emitStatus(videoId, "progress", label, progress);
+    emitStatus(videoId, "progress", label, recordingElapsed);
   };
 
   const completion = new Promise((resolve, reject) => {
@@ -514,38 +530,20 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
 
   let completed = false;
   try {
-    if (video.seekable.length && video.duration !== Infinity) {
-      video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
+    if (isClone) {
+      releaseFramePump = keepVideoFramesDecoded(captureVideo);
     }
-    video.loop = false;
-    releasePlaybackLock = keepVideoPlaying(video);
-    recorder.start(1000);
-    await video.play();
-    const recordingStartedAt = performance.now();
-    const recordStartTime = video.currentTime;
+    recordingStartPos = captureVideo.currentTime;
+    recorder.start(5000);
+    await captureVideo.play();
     safetyTimer = setInterval(() => {
-      if (!targetDuration && Number.isFinite(video.duration) && video.duration > 0) {
-        targetDuration = recordDuration ?? video.duration - (hasStartTime ? startTime : 0);
-      }
-      if (!targetDuration) return;
-      const currentPos = video.currentTime - (hasStartTime ? startTime : 0);
-      const lastRenderedFrame = (renderedFrameTimes.get(video) ?? 0) - (hasStartTime ? startTime : 0);
-      const playbackReachedEnd = currentPos >= targetDuration - 0.15;
-      const videoReachedEnd = lastRenderedFrame >= targetDuration - 0.5;
-      if (playbackReachedEnd && videoReachedEnd) {
-        reachedEndAt ??= performance.now();
-        if (performance.now() - reachedEndAt >= 250) stop();
-        return;
-      }
-      reachedEndAt = null;
-      const expectedDuration =
-        (targetDuration / Math.max(video.playbackRate, 0.1)) * 1000;
-      if (performance.now() - recordingStartedAt > expectedDuration + 15_000) {
+      if (captureVideo.ended || (Number.isFinite(captureVideo.duration) && captureVideo.duration > 0 && captureVideo.currentTime >= captureVideo.duration - 0.15)) {
         stop();
       }
     }, 250);
     emitStatus(videoId, "recording", hasStartTime ? `Recording from ${startTime}s…` : "Recording video stream…", 0);
-    video.addEventListener("timeupdate", reportProgress);
+    captureVideo.addEventListener("ended", stop, { once: true });
+    captureVideo.addEventListener("timeupdate", reportProgress);
     await completion;
     signal.throwIfAborted();
     const recordedBlob = new Blob(chunks, { type: recorder.mimeType });
@@ -559,51 +557,52 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     completed = true;
   } finally {
     clearInterval(safetyTimer);
-    releasePlaybackLock();
+    releaseFramePump();
     activeRecordings.delete(videoId);
     signal.removeEventListener("abort", cancel);
-    video.removeEventListener("timeupdate", reportProgress);
-    if (!completed && Number.isFinite(originalTime)) video.currentTime = originalTime;
-    video.loop = wasLooping;
-    if (wasPaused) video.pause();
+    captureVideo.removeEventListener("ended", stop);
+    captureVideo.removeEventListener("timeupdate", reportProgress);
+    captureVideo.pause();
+    if (isClone) captureVideo.remove();
   }
 }
 
+function buildChunkBlob(mediaRecord) {
+  const allChunks = [];
+  for (const buffer of mediaRecord.buffers) {
+    for (const chunk of buffer.chunks) allChunks.push(chunk);
+  }
+  const type = mediaRecord.buffers.find((b) => b.mimeType)?.mimeType || "video/mp4";
+  return new Blob(allChunks, { type });
+}
+
+function waitForLoadedMetadata(video, signal) {
+  return new Promise((resolve, reject) => {
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) { resolve(); return; }
+    const onMeta = () => { cleanup(); resolve(); };
+    const onError = () => { cleanup(); reject(new Error("Video metadata load failed")); };
+    const onAbort = () => { cleanup(); reject(new DOMException("Canceled", "AbortError")); };
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", onMeta);
+      video.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    video.addEventListener("loadedmetadata", onMeta, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function keepVideoPlaying(video) {
-  let disposed = false;
-  let resumePending = false;
   const previousPreload = video.preload;
   protectedVideos.add(video);
-  const releaseRenderHost = hostVideoForCapture(video);
   const releaseFramePump = keepVideoFramesDecoded(video);
   video.preload = "auto";
 
-  const resume = () => {
-    if (disposed || resumePending) return;
-    if (!video.isConnected) getCaptureRenderHost().appendChild(video);
-    if (video.ended || video.error) return;
-    resumePending = true;
-    queueMicrotask(() => {
-      resumePending = false;
-      if (!disposed && video.paused && !video.ended) {
-        video.play().catch(() => {});
-      }
-    });
-  };
-
-  video.addEventListener("pause", resume);
-  const watchdog = setInterval(resume, 500);
-  resume();
-
   return () => {
-    if (disposed) return;
-    disposed = true;
-    clearInterval(watchdog);
-    video.removeEventListener("pause", resume);
     protectedVideos.delete(video);
     video.preload = previousPreload;
     releaseFramePump();
-    releaseRenderHost();
   };
 }
 
@@ -621,94 +620,7 @@ function getCaptureRenderHost() {
 }
 
 function hostVideoForCapture(video) {
-  const originalParent = video.parentNode;
-  const originalNextSibling = video.nextSibling;
-  const originalStyle = video.getAttribute("style");
-  const originalMuted = video.muted;
-  if (!originalParent) return () => {};
-
-  const rect = video.getBoundingClientRect();
-  const placeholder = document.createElement("canvas");
-  placeholder.width = video.videoWidth || Math.max(1, Math.round(rect.width));
-  placeholder.height = video.videoHeight || Math.max(1, Math.round(rect.height));
-  placeholder.setAttribute("aria-hidden", "true");
-  placeholder.style.cssText =
-    `display:${getComputedStyle(video).display};width:${rect.width}px;` +
-    `height:${rect.height}px;object-fit:cover`;
-  try {
-    placeholder
-      .getContext("2d")
-      .drawImage(video, 0, 0, placeholder.width, placeholder.height);
-  } catch {}
-
-  const placeholderContext = placeholder.getContext("2d");
-  let stopped = false;
-  let frameCallbackId;
-  const paintPlaceholder = () => {
-    if (stopped || !placeholder.isConnected) return;
-    try {
-      placeholderContext?.drawImage(
-        video,
-        0,
-        0,
-        placeholder.width,
-        placeholder.height
-      );
-    } catch {}
-  };
-  const paintFrame = () => {
-    if (stopped) return;
-    paintPlaceholder();
-    frameCallbackId = video.requestVideoFrameCallback?.(paintFrame);
-  };
-
-  originalParent.insertBefore(placeholder, video);
-  getCaptureRenderHost().appendChild(video);
-  video.muted = true;
-  const capW = Math.min(video.videoWidth || 640, 640);
-  const capH = Math.min(video.videoHeight || 360, 360);
-  video.style.cssText =
-    `position:relative;display:block;flex:0 0 ${capW}px;width:${capW}px;height:${capH}px;` +
-    `min-width:${capW}px;min-height:${capH}px;opacity:1;pointer-events:none;` +
-    "transform:translateZ(0);will-change:transform,opacity";
-
-  const supportsRvfc = typeof video.requestVideoFrameCallback === "function";
-  if (supportsRvfc) {
-    frameCallbackId = video.requestVideoFrameCallback(paintFrame);
-  }
-  // Continuous per-frame repainting is expensive on HDR/4K streams and causes
-  // jank on the page. Only fall back to a timer when requestVideoFrameCallback
-  // is unavailable, and throttle it so it stays gentle.
-  const paintInterval = supportsRvfc
-    ? null
-    : setInterval(paintPlaceholder, 250);
-
-  return () => {
-    stopped = true;
-    if (paintInterval) clearInterval(paintInterval);
-    if (frameCallbackId !== undefined) {
-      video.cancelVideoFrameCallback?.(frameCallbackId);
-    }
-    const targetParent = placeholder.isConnected
-      ? placeholder.parentNode
-      : originalParent.isConnected
-        ? originalParent
-        : null;
-    if (targetParent) {
-      const anchor = placeholder.isConnected
-        ? placeholder
-        : originalNextSibling?.parentNode === targetParent
-          ? originalNextSibling
-          : null;
-      targetParent.insertBefore(video, anchor);
-    } else {
-      video.remove();
-    }
-    placeholder.remove();
-    if (originalStyle === null) video.removeAttribute("style");
-    else video.setAttribute("style", originalStyle);
-    video.muted = originalMuted;
-  };
+  return () => {};
 }
 
 function keepVideoFramesDecoded(video) {
