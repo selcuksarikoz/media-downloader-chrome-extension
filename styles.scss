@@ -1,3 +1,64 @@
+// ---------------------------------------------------------------------------
+// Design tokens (shared by the extension overlay UI)
+// ---------------------------------------------------------------------------
+$imd-accent: #3498db;
+$imd-accent-hover: #2980b9;
+$imd-accent-error: #be2323;
+$imd-accent-error-hover: #c0392b;
+
+$imd-panel-bg: rgba(24, 24, 27, 0.97);
+$imd-btn-bg: rgba(30, 30, 30, 0.85);
+$imd-btn-bg-hover: rgba(50, 50, 50, 0.95);
+$imd-border: rgba(255, 255, 255, 0.12);
+$imd-text: #fff;
+$imd-text-muted: #d4d4d8;
+$imd-text-subtle: rgba(255, 255, 255, 0.7);
+
+$imd-radius-full: 100%;
+$imd-radius-panel: 12px;
+$imd-radius-control: 6px;
+$imd-radius-small: 4px;
+
+$imd-shadow: 0 10px 35px rgba(0, 0, 0, 0.5);
+
+$imd-btn-size: 40px;
+$imd-icon-size: 24px;
+$imd-gap: 6px;
+
+// z-index layers
+$imd-z-action: 999;
+$imd-z-panel: 1002;
+$imd-z-lightbox: 9999;
+$imd-z-menu: 10000;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Shared floating panel surface (context menu, download panel).
+@mixin imd-panel($radius: $imd-radius-panel) {
+  background: $imd-panel-bg;
+  border: 1px solid $imd-border;
+  border-radius: $radius;
+  box-shadow: $imd-shadow;
+  color: $imd-text;
+}
+
+// Shared circular action button.
+@mixin imd-action-button {
+  width: $imd-btn-size;
+  height: $imd-btn-size;
+  padding: 0;
+  border: none;
+  background-color: $imd-btn-bg;
+  border-radius: $imd-radius-full;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+}
+
 body.options-page {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background-color: #f4f4f9;
@@ -157,9 +218,9 @@ body.options-page {
   padding: 0;
   border: 0;
   background: transparent;
-  z-index: 999;
+  z-index: $imd-z-action;
   display: flex;
-  gap: 6px;
+  gap: $imd-gap;
   opacity: 0;
   pointer-events: none;
 
@@ -169,26 +230,36 @@ body.options-page {
   }
 }
 
-.imd-action-btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: none;
-  background-color: rgba(30, 30, 30, 0.85);
-  border-radius: 50%;
-  cursor: pointer;
+.imd-context-menu {
+  position: fixed;
+  z-index: $imd-z-menu;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  appearance: none;
+  gap: $imd-gap;
+  margin: 0;
+  padding: $imd-gap;
+  @include imd-panel($imd-radius-full);
+  opacity: 0;
+  transform: scale(0.96);
+  transform-origin: top left;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: auto;
+
+  &.imd-context-menu-open {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.imd-action-btn {
+  @include imd-action-button;
 
   &:hover {
-    background-color: rgba(50, 50, 50, 0.95);
+    background-color: $imd-btn-bg-hover;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   }
 
   &.imd-recording {
-    background-color: rgba(190, 35, 35, 0.95);
+    background-color: $imd-accent-error;
   }
 
   &:disabled {
@@ -201,9 +272,9 @@ body.options-page {
   }
 
   svg {
-    width: 24px;
-    height: 24px;
-    fill: #ffffff;
+    width: $imd-icon-size;
+    height: $imd-icon-size;
+    fill: $imd-text;
     pointer-events: none;
   }
 }
@@ -227,7 +298,7 @@ body.options-page {
     overflow-y: auto;
     border: 0;
     background: transparent;
-    z-index: 1002;
+    z-index: $imd-z-panel;
   }
 
   &-panel {
@@ -235,10 +306,7 @@ body.options-page {
     margin: 0;
     padding: 16px;
     border: 0;
-    border-radius: 12px;
-    background: rgba(24, 24, 27, 0.97);
-    color: #fff;
-    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.4);
+    @include imd-panel;
     font: 13px/1.4 system-ui, sans-serif;
   }
 
@@ -250,19 +318,19 @@ body.options-page {
 
   &-message {
     margin-bottom: 10px;
-    color: #d4d4d8;
+    color: $imd-text-muted;
   }
 
   &-progress {
     height: 7px;
     overflow: hidden;
-    border-radius: 999px;
+    border-radius: $imd-radius-full;
     background: #3f3f46;
 
     &-fill {
       height: 100%;
       border-radius: inherit;
-      background: #3498db;
+      background: $imd-accent;
 
       &.imd-indeterminate {
         animation: imd-progress-pulse 1.2s ease-in-out infinite alternate;
@@ -280,7 +348,7 @@ body.options-page {
   }
 
   &-percent {
-    color: #fff;
+    color: $imd-text;
     font-weight: 700;
   }
 }
@@ -288,16 +356,16 @@ body.options-page {
 .imd-download-actions {
   margin-left: auto;
   display: flex;
-  gap: 6px;
+  gap: $imd-gap;
 }
 
 .imd-save-download,
 .imd-cancel-download {
   padding: 4px 8px;
   border: 1px solid #52525b;
-  border-radius: 6px;
+  border-radius: $imd-radius-control;
   background: #27272a;
-  color: #fff;
+  color: $imd-text;
   cursor: pointer;
   font: inherit;
 }
@@ -321,7 +389,7 @@ body.options-page {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0);
-    z-index: 9999;
+    z-index: $imd-z-lightbox;
     cursor: pointer;
     overflow: auto;
     display: flex;
@@ -350,7 +418,7 @@ body.options-page {
     max-width: 95vw;
     max-height: 95vh;
     object-fit: contain;
-    border-radius: 4px;
+    border-radius: $imd-radius-small;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
     cursor: zoom-in;
 
@@ -373,11 +441,11 @@ body.options-page {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  z-index: 10000;
+  z-index: $imd-z-menu;
 }
 
 .imd-lightbox-info {
-  color: rgba(255, 255, 255, 0.7);
+  color: $imd-text-subtle;
   font-size: 12px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   white-space: nowrap;

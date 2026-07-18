@@ -10,6 +10,7 @@ const DEFAULTS = {
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
   maxConcurrentDownloads: 5,
+  useContextMenu: false,
 };
 const get = (id) => document.getElementById(id);
 let blacklistedDomains = [...DEFAULTS.blacklistedDomains];
@@ -25,6 +26,7 @@ function saveOptions() {
       showSaveAs: get("saveAs").checked,
       showPreviewButton: get("showPreview").checked,
       showVideoControls: get("showVideoControls").checked,
+      useContextMenu: get("useContextMenu").checked,
       captureType: get("captureType").value,
       blacklistedDomains,
       minWidth: parseInt(get("minWidth").value, 10) || DEFAULTS.minWidth,
@@ -54,6 +56,7 @@ function restoreOptions() {
     get("saveAs").checked = items.showSaveAs;
     get("showPreview").checked = items.showPreviewButton;
     get("showVideoControls").checked = items.showVideoControls;
+    get("useContextMenu").checked = items.useContextMenu;
     get("captureType").value = ["jpg", "png", "webp"].includes(
       items.captureType
     )

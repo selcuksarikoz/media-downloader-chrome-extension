@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
   maxConcurrentDownloads: 5,
+  useContextMenu: false,
 };
 const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "recording", "progress"]);
 let settings = { ...DEFAULT_SETTINGS };
@@ -31,6 +32,7 @@ let extensionActive = false;
 let mediaMutationObserver = null;
 
 const mediaControls = new Map();
+const trackedMedia = new Map();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
 const pipState = new WeakMap();
@@ -329,7 +331,18 @@ function init() {
     if (changes.showPreviewButton) updatePreviewButtonVisibility();
     if (changes.showVideoControls) updateVideoControls();
     if (changes.blacklistedDomains) applyDomainAccess();
+    if (changes.useContextMenu) rebuildAllMedia();
   });
+}
+
+/** Remove and re-create all media controls/tracking (e.g. after mode switch). */
+function rebuildAllMedia() {
+  document.querySelectorAll("img, video").forEach((media) => {
+    if (mediaControls.has(media) || trackedMedia.has(media)) {
+      cleanupMedia(media);
+    }
+  });
+  processAllMedia();
 }
 
 /** Check if the current domain is in the blacklist. */
@@ -468,6 +481,7 @@ function cleanupMedia(media) {
   }
   removeInstagramNativeVideoControls(media);
   mediaControls.delete(media);
+  trackedMedia.delete(media);
   removeStoryVideoFix(media);
   visibleMedia.delete(media);
   mediaIntersectionObserver.unobserve(media);
@@ -536,6 +550,14 @@ function processMedia(media) {
   if (!isImage) capturedVideos.set(media.dataset.imdCaptureId, media);
   if (!isImage) syncInstagramNativeVideoControls(media);
 
+  trackedMedia.set(media, isImage ? "image" : "video");
+
+  if (settings.useContextMenu) {
+    // When the context menu is enabled, no hover action buttons are shown.
+    // The tracked media is still registered so the context menu can act on it.
+    return;
+  }
+
   const actionGroup = document.createElement("div");
   actionGroup.className = "imd-action-group";
   if (isInstagramVideoPlayerMedia(media)) {
@@ -543,159 +565,10 @@ function processMedia(media) {
     actionGroup.popover = "manual";
   }
   isolateActionGroupEvents(actionGroup);
-  const downloadBtn = createActionButton(
-    "imd-down-btn",
-    `Download ${isImage ? "Image" : "Video"}`,
-    DOWNLOAD_ICON
-  );
-  const previewBtn = createActionButton(
-    "imd-preview-btn",
-    `Preview ${isImage ? "highest-resolution image" : "video"}`,
-    PREVIEW_ICON
-  );
-  const captureBtn = isImage
-    ? null
-      : createActionButton(
-        "imd-capture-btn",
-        "Capture Frame",
-        CAPTURE_ICON
-      );
-  const lightboxBtn = isImage && !media.closest(".imd-lightbox-overlay")
-    ? createActionButton("imd-lightbox-btn", "View full-size image", LIGHTBOX_ICON)
-    : null;
-  const pipBtn = !isImage && document.pictureInPictureEnabled
-    ? createActionButton("imd-pip-btn", "Picture-in-Picture", PIP_ICON)
-    : null;
-  const trimBtn = !isImage
-    ? createActionButton("imd-trim-btn", "Trim from current time", TRIM_ICON)
-    : null;
-  const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
-  previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
-  const buttons = [downloadBtn, previewBtn];
-  if (trimBtn) buttons.push(trimBtn);
-  if (lightboxBtn) buttons.push(lightboxBtn);
-  if (captureBtn) buttons.push(captureBtn);
-  if (pipBtn) buttons.push(pipBtn);
-  actionGroup.append(...buttons);
-
-  downloadBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    downloadMedia(media).catch((error) => {
-      console.error("Media download failed:", error);
-    });
-  });
-
-  previewBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    previewMedia(media);
-  });
-
-  captureBtn?.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    captureVideoFrame(media).then((blobUrl) => {
-      if (blobUrl) {
-        openLightbox(media, blobUrl);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
-      }
-    }).catch((error) => {
-      console.error("Video frame capture failed:", error);
-    });
-  });
-
-  lightboxBtn?.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openLightbox(media);
-  });
-
-  pipBtn?.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    togglePictureInPicture(media);
-  });
-
-  trimBtn?.addEventListener("click", async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const recording = videoTrimRecordings.get(media);
-    if (recording) {
-      recording.save();
-      return;
-    }
-
-    const isBlob = getVideoUrl(media).startsWith("blob:");
-    if (isBlob) {
-      if (trimBtn.dataset.recording === "true") {
-        window.dispatchEvent(new CustomEvent(BLOB_CONTROL_EVENT, {
-          detail: { videoId: media.dataset.imdCaptureId, action: "save" },
-        }));
-      } else {
-        trimBtn.dataset.recording = "true";
-        trimBtn.title = "Save trim";
-        trimBtn.innerHTML = STOP_ICON;
-        window.dispatchEvent(new CustomEvent(BLOB_TRIM_EVENT, {
-          detail: {
-            url: getVideoUrl(media),
-            filename: getSuggestedVideoName(media),
-            videoId: media.dataset.imdCaptureId,
-            startTime: media.currentTime,
-            maxConcurrent: settings.maxConcurrentDownloads,
-          },
-        }));
-      }
-      return;
-    }
-
-    trimBtn.disabled = true;
-    try {
-      const rec = await startTrimRecording(media);
-      videoTrimRecordings.set(media, rec);
-      trimBtn.title = "Save trim";
-      trimBtn.innerHTML = STOP_ICON;
-      trimBtn.disabled = false;
-
-      let elapsedTimer = setInterval(() => {
-        const elapsed = media.currentTime - rec.startTime;
-        if (elapsed > 0) {
-          trimBtn.title = `Save (${elapsed.toFixed(1)}s)`;
-        }
-      }, 500);
-
-      rec.promise.then((blob) => {
-        clearInterval(elapsedTimer);
-        if (!blob || !blob.size) return;
-        const url = URL.createObjectURL(blob);
-        const ext = (blob.type.includes("webm") ? "webm" : "mp4");
-        const filename = getSuggestedVideoName(media).replace(
-          /\.[^.]+$/, `-trim-${Math.round(rec.startTime)}.${ext}`
-        );
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        link.hidden = true;
-        document.documentElement.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      }).catch((error) => {
-        clearInterval(elapsedTimer);
-        console.error("Trim recording failed:", error);
-      }).finally(() => {
-        clearInterval(elapsedTimer);
-        videoTrimRecordings.delete(media);
-        trimBtn.title = "Trim from current time";
-        trimBtn.innerHTML = TRIM_ICON;
-        trimBtn.dataset.recording = "false";
-      });
-    } catch (error) {
-      console.error("Trim recording failed:", error);
-      trimBtn.disabled = false;
-    }
-  });
+  const btns = buildMediaActionButtons(media);
+  const { downloadBtn, previewBtn, captureBtn, lightboxBtn, pipBtn, trimBtn } = btns;
+  attachMediaActionHandlers(media, btns);
+  actionGroup.append(...btns.buttons);
 
   const showButtons = () => {
     if (
@@ -1347,6 +1220,86 @@ function createActionButton(className, title, icon) {
   button.setAttribute("aria-label", title);
   button.innerHTML = icon;
   return button;
+}
+
+/** Build the action buttons for a media element (hover group and context menu). */
+function buildMediaActionButtons(media) {
+  const isImage = media.tagName === "IMG";
+  const downloadBtn = createActionButton(
+    "imd-down-btn",
+    `Download ${isImage ? "Image" : "Video"}`,
+    DOWNLOAD_ICON
+  );
+  const previewBtn = createActionButton(
+    "imd-preview-btn",
+    `Preview ${isImage ? "highest-resolution image" : "video"}`,
+    PREVIEW_ICON
+  );
+  const captureBtn = isImage
+    ? null
+    : createActionButton("imd-capture-btn", "Capture Frame", CAPTURE_ICON);
+  const lightboxBtn = isImage && !media.closest(".imd-lightbox-overlay")
+    ? createActionButton("imd-lightbox-btn", "View full-size image", LIGHTBOX_ICON)
+    : null;
+  const pipBtn = !isImage && document.pictureInPictureEnabled
+    ? createActionButton("imd-pip-btn", "Picture-in-Picture", PIP_ICON)
+    : null;
+  const trimBtn = !isImage
+    ? createActionButton("imd-trim-btn", "Trim from current time", TRIM_ICON)
+    : null;
+  const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
+  previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
+  const buttons = [downloadBtn, previewBtn];
+  if (trimBtn) buttons.push(trimBtn);
+  if (lightboxBtn) buttons.push(lightboxBtn);
+  if (captureBtn) buttons.push(captureBtn);
+  if (pipBtn) buttons.push(pipBtn);
+  return { downloadBtn, previewBtn, captureBtn, lightboxBtn, pipBtn, trimBtn, buttons };
+}
+
+/** Attach the click handlers for the media action buttons. */
+function attachMediaActionHandlers(media, btns) {
+  btns.downloadBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    downloadMedia(media).catch((error) => {
+      console.error("Media download failed:", error);
+    });
+  });
+  btns.previewBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    previewMedia(media);
+  });
+  btns.captureBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    captureVideoFrame(media)
+      .then((blobUrl) => {
+        if (blobUrl) {
+          openLightbox(media, blobUrl);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
+        }
+      })
+      .catch((error) => {
+        console.error("Video frame capture failed:", error);
+      });
+  });
+  btns.lightboxBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openLightbox(media);
+  });
+  btns.pipBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePictureInPicture(media);
+  });
+  btns.trimBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    triggerTrim(media, null);
+  });
 }
 
 /** Preview media in the background tab (uses highest resolution for images/videos). */
@@ -2012,6 +1965,190 @@ function getSuggestedVideoName(video) {
 
   return `video-${Date.now()}.mp4`;
 }
+
+/** Start or stop a trim recording for a video (used by button and context menu). */
+function triggerTrim(media, trimBtn) {
+  const recording = videoTrimRecordings.get(media);
+  if (recording) {
+    recording.save();
+    return;
+  }
+
+  const isBlob = getVideoUrl(media).startsWith("blob:");
+  if (isBlob) {
+    if (trimBtn && trimBtn.dataset.recording === "true") {
+      window.dispatchEvent(new CustomEvent(BLOB_CONTROL_EVENT, {
+        detail: { videoId: media.dataset.imdCaptureId, action: "save" },
+      }));
+    } else {
+      if (trimBtn) {
+        trimBtn.dataset.recording = "true";
+        trimBtn.title = "Save trim";
+        trimBtn.innerHTML = STOP_ICON;
+      }
+      window.dispatchEvent(new CustomEvent(BLOB_TRIM_EVENT, {
+        detail: {
+          url: getVideoUrl(media),
+          filename: getSuggestedVideoName(media),
+          videoId: media.dataset.imdCaptureId,
+          startTime: media.currentTime,
+          maxConcurrent: settings.maxConcurrentDownloads,
+        },
+      }));
+    }
+    return;
+  }
+
+  if (trimBtn) trimBtn.disabled = true;
+  startTrimRecording(media)
+    .then((rec) => {
+      videoTrimRecordings.set(media, rec);
+      if (trimBtn) {
+        trimBtn.title = "Save trim";
+        trimBtn.innerHTML = STOP_ICON;
+        trimBtn.disabled = false;
+      }
+
+      let elapsedTimer = setInterval(() => {
+        const elapsed = media.currentTime - rec.startTime;
+        if (elapsed > 0 && trimBtn) {
+          trimBtn.title = `Save (${elapsed.toFixed(1)}s)`;
+        }
+      }, 500);
+
+      rec.promise.then((blob) => {
+        clearInterval(elapsedTimer);
+        if (!blob || !blob.size) return;
+        const url = URL.createObjectURL(blob);
+        const ext = (blob.type.includes("webm") ? "webm" : "mp4");
+        const filename = getSuggestedVideoName(media).replace(
+          /\.[^.]+$/, `-trim-${Math.round(rec.startTime)}.${ext}`
+        );
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.hidden = true;
+        document.documentElement.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }).catch((error) => {
+        clearInterval(elapsedTimer);
+        console.error("Trim recording failed:", error);
+      }).finally(() => {
+        clearInterval(elapsedTimer);
+        videoTrimRecordings.delete(media);
+        if (trimBtn) {
+          trimBtn.title = "Trim from current time";
+          trimBtn.innerHTML = TRIM_ICON;
+          trimBtn.dataset.recording = "false";
+        }
+      });
+    })
+    .catch((error) => {
+      console.error("Trim recording failed:", error);
+      if (trimBtn) trimBtn.disabled = false;
+    });
+}
+
+/** Find a tracked media element at the given viewport coordinates. */
+function getMediaAtPoint(x, y) {
+  const stack = document.elementsFromPoint(x, y);
+  for (const el of stack) {
+    let node = el;
+    while (node) {
+      if (trackedMedia.has(node)) return node;
+      node = node.parentElement;
+    }
+  }
+  return null;
+}
+
+let contextMenuEl = null;
+let contextMenuMedia = null;
+
+/** Close and remove the custom right-click menu if it is open. */
+function closeContextMenu() {
+  if (contextMenuEl) {
+    contextMenuEl.remove();
+    contextMenuEl = null;
+    contextMenuMedia = null;
+  }
+}
+
+/** Open the custom right-click menu for a media element near the cursor. */
+function openContextMenu(media, x, y) {
+  closeContextMenu();
+  const btns = buildMediaActionButtons(media);
+  attachMediaActionHandlers(media, btns);
+  const menu = document.createElement("div");
+  menu.className = "imd-context-menu";
+  menu.setAttribute("role", "menu");
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  btns.buttons.forEach((button) => {
+    button.addEventListener("click", closeContextMenu);
+    menu.appendChild(button);
+  });
+  document.body.appendChild(menu);
+  contextMenuEl = menu;
+  contextMenuMedia = media;
+
+  const rect = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - 8;
+  const maxY = window.innerHeight - rect.height - 8;
+  menu.style.left = `${Math.min(Math.max(8, x), Math.max(8, maxX))}px`;
+  menu.style.top = `${Math.min(Math.max(8, y), Math.max(8, maxY))}px`;
+  requestAnimationFrame(() => menu.classList.add("imd-context-menu-open"));
+}
+
+document.addEventListener(
+  "contextmenu",
+  (event) => {
+    if (!settings.useContextMenu || !extensionActive) return;
+    const media = getMediaAtPoint(event.clientX, event.clientY);
+    if (!media) return;
+    event.preventDefault();
+    openContextMenu(media, event.clientX, event.clientY);
+  },
+  true
+);
+
+document.addEventListener("click", (event) => {
+  if (contextMenuEl && !contextMenuEl.contains(event.target)) {
+    closeContextMenu();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeContextMenu();
+});
+window.addEventListener("blur", closeContextMenu);
+window.addEventListener("scroll", closeContextMenu, true);
+window.addEventListener("resize", closeContextMenu);
+
+window.addEventListener(BLOB_STATUS_EVENT, (event) => {
+  if (!contextMenuEl || !contextMenuMedia) return;
+  const { videoId, status } = event.detail || {};
+  if (contextMenuMedia.dataset.imdCaptureId !== videoId) return;
+  const downBtns = contextMenuEl.querySelectorAll(".imd-down-btn");
+  const trimBtns = contextMenuEl.querySelectorAll(".imd-trim-btn");
+  const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
+  downBtns.forEach((button) => {
+    button.title = isActive ? "Video download in progress" : "Download Video";
+    button.setAttribute("aria-label", button.title);
+    button.classList.toggle("imd-recording", isActive);
+    button.disabled = isActive;
+  });
+  trimBtns.forEach((button) => {
+    const recording = status === "recording" || status === "progress";
+    if (status === "complete" || status === "error" || status === "canceled") {
+      button.title = "Trim from current time";
+      button.innerHTML = TRIM_ICON;
+    } else if (recording) {
+      button.title = "Save trim";
+      button.innerHTML = STOP_ICON;
+    }
+  });
+});
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
