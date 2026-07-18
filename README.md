@@ -28,6 +28,24 @@ directly to page media.
   the elapsed recording time. Works on both blob and regular videos.
 - DRM-protected media is not supported.
 
+## Right-click Context Menu
+
+Instead of the hover action buttons, the extension can show a custom in-page menu
+when you right-click media. Enable **Use right-click menu instead of hover buttons**
+in the settings.
+
+- Right-clicking an image or video opens a floating, pill-shaped menu with the same
+  circular action buttons that normally appear on hover (download, preview, capture
+  frame, open full size, picture-in-picture, trim).
+- The menu respects the same visibility rules as the hover buttons (for example, the
+  preview button is hidden when disabled or for blob videos, and PiP only shows when
+  supported).
+- The native browser context menu is suppressed over media while this mode is on.
+- The menu closes on outside click, `Escape`, scroll, resize, or when the window
+  loses focus.
+- Download and trim buttons reflect live recording status (spinner/disabled state)
+  just like the hover buttons.
+
 ## Settings
 
 - Overlay button position
@@ -38,6 +56,7 @@ directly to page media.
 - Preview button visibility
 - Native video controls
 - Frame capture type: JPG (default), PNG, or WebP
+- Use right-click menu instead of hover buttons
 - Domain blacklist with subdomain matching
 
 ## Development
