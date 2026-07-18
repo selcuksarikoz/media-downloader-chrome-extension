@@ -18,6 +18,8 @@ $imd-radius-full: 100%;
 $imd-radius-panel: 12px;
 $imd-radius-control: 6px;
 $imd-radius-small: 4px;
+// Pill radius for the horizontal context menu (half its rendered height).
+$imd-radius-pill: 26px;
 
 $imd-shadow: 0 10px 35px rgba(0, 0, 0, 0.5);
 
@@ -237,11 +239,13 @@ body.options-page {
   gap: $imd-gap;
   margin: 0;
   padding: $imd-gap;
-  @include imd-panel($imd-radius-full);
+  @include imd-panel($imd-radius-pill);
   opacity: 0;
   transform: scale(0.96);
   transform-origin: top left;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
   pointer-events: auto;
 
   &.imd-context-menu-open {
@@ -307,7 +311,9 @@ body.options-page {
     padding: 16px;
     border: 0;
     @include imd-panel;
-    font: 13px/1.4 system-ui, sans-serif;
+    font:
+      13px/1.4 system-ui,
+      sans-serif;
   }
 
   &-title {
@@ -324,7 +330,7 @@ body.options-page {
   &-progress {
     height: 7px;
     overflow: hidden;
-    border-radius: $imd-radius-full;
+    border-radius: 7px;
     background: #3f3f46;
 
     &-fill {
@@ -447,7 +453,8 @@ body.options-page {
 .imd-lightbox-info {
   color: $imd-text-subtle;
   font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   white-space: nowrap;
   user-select: none;
 }
