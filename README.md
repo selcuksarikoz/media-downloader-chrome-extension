@@ -26,6 +26,8 @@ directly to page media.
   current playback position. Click once to begin recording, click again (or let
   the video reach the end) to save the trimmed segment as MP4. The button shows
   the elapsed recording time. Works on both blob and regular videos.
+- The **Copy** button (clipboard icon) copies the image to the clipboard in
+  highest resolution so you can paste it directly into any application.
 - DRM-protected media is not supported.
 
 ## Right-click Context Menu
@@ -36,7 +38,9 @@ in the settings.
 
 - Right-clicking an image or video opens a floating, pill-shaped menu with the same
   circular action buttons that normally appear on hover (download, preview, capture
-  frame, open full size, picture-in-picture, trim).
+  frame, open full size, picture-in-picture, trim, copy to clipboard).
+- Right-clicking a link that wraps media shows an "Open link in new tab" button at
+  the top of the menu, opening the link in a background tab.
 - The menu respects the same visibility rules as the hover buttons (for example, the
   preview button is hidden when disabled or for blob videos, and PiP only shows when
   supported).

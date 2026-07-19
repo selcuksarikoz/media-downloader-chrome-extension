@@ -3,7 +3,7 @@
   "name": "Media Downloader",
   "version": "1.12.1",
   "description": "Download images and videos with overlay controls.",
-  "permissions": ["storage", "downloads", "activeTab", "scripting"],
+  "permissions": ["storage", "downloads", "activeTab", "scripting", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

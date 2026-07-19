@@ -63,7 +63,7 @@ const mediaIntersectionObserver = new IntersectionObserver(
       if (group) hideActionGroup(group);
     });
   },
-  { root: null, threshold: [0, 0.01] }
+  { root: null, threshold: [0, 0.01] },
 );
 const mediaResizeObserver = new ResizeObserver((entries) => {
   entries.forEach(({ target }) => {
@@ -72,10 +72,7 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
       return;
     }
     const group = mediaControls.get(target);
-    if (
-      visibleMedia.has(target) &&
-      group?.classList.contains("imd-show")
-    ) {
+    if (visibleMedia.has(target) && group?.classList.contains("imd-show")) {
       positionActionGroup(group, target);
     }
   });
@@ -84,9 +81,15 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
   const video = capturedVideos.get(videoId);
-  const allBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-action-btn") : [];
-  const downBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn") : [];
-  const trimBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-trim-btn") : [];
+  const allBtns = video
+    ? mediaControls.get(video)?.querySelectorAll(".imd-action-btn")
+    : [];
+  const downBtns = video
+    ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn")
+    : [];
+  const trimBtns = video
+    ? mediaControls.get(video)?.querySelectorAll(".imd-trim-btn")
+    : [];
 
   if (downBtns?.length) {
     const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
@@ -100,9 +103,16 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
 
   if (trimBtns?.length) {
     const isActive = status === "recording" || status === "progress";
-    const elapsed = status === "progress" && message ? message.replace("Recording ", "").replace("…", "") : "";
+    const elapsed =
+      status === "progress" && message
+        ? message.replace("Recording ", "").replace("…", "")
+        : "";
     trimBtns.forEach((button) => {
-      if (status === "complete" || status === "error" || status === "canceled") {
+      if (
+        status === "complete" ||
+        status === "error" ||
+        status === "canceled"
+      ) {
         button.title = "Trim from current time";
         button.innerHTML = TRIM_ICON;
         button.dataset.recording = "false";
@@ -127,7 +137,9 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
   let downloadFilename = filename;
   let saveAs = settings.showSaveAs;
   if (settings.downloadFolder) {
-    const folder = settings.downloadFolder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    const folder = settings.downloadFolder
+      .trim()
+      .replace(/^[\/\\]+|[\/\\]+$/g, "");
     if (folder && !hasForbiddenFolder(folder)) {
       downloadFilename = `${folder}/${filename}`;
       saveAs = false;
@@ -144,10 +156,13 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
       },
       () => {
         if (chrome.runtime.lastError) {
-          console.error("Blob download failed:", chrome.runtime.lastError.message);
+          console.error(
+            "Blob download failed:",
+            chrome.runtime.lastError.message,
+          );
         }
         setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-      }
+      },
     );
   } else {
     const a = document.createElement("a");
@@ -202,19 +217,22 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
 
   if (!isActive) {
     blobDownloadRequests.delete(videoId);
-    setTimeout(() => {
-      const currentPanel = blobDownloadPanels.get(videoId);
-      if (currentPanel === panel) {
-        currentPanel.remove();
-        blobDownloadPanels.delete(videoId);
-      }
-      if (
-        blobDownloadPanels.size === 0 &&
-        blobDownloadStack.matches(":popover-open")
-      ) {
-        blobDownloadStack.hidePopover();
-      }
-    }, status === "error" ? 6000 : 2500);
+    setTimeout(
+      () => {
+        const currentPanel = blobDownloadPanels.get(videoId);
+        if (currentPanel === panel) {
+          currentPanel.remove();
+          blobDownloadPanels.delete(videoId);
+        }
+        if (
+          blobDownloadPanels.size === 0 &&
+          blobDownloadStack.matches(":popover-open")
+        ) {
+          blobDownloadStack.hidePopover();
+        }
+      },
+      status === "error" ? 6000 : 2500,
+    );
   }
 }
 
@@ -259,7 +277,7 @@ function dispatchBlobControl(videoId, action) {
   window.dispatchEvent(
     new CustomEvent(BLOB_CONTROL_EVENT, {
       detail: { videoId, action },
-    })
+    }),
   );
 }
 
@@ -314,6 +332,12 @@ const STOP_ICON = `
 const OPEN_LINK_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>
+</svg>
+`;
+
+const COPY_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
 </svg>
 `;
 
@@ -405,8 +429,7 @@ function processAllMedia() {
 function trackMedia(media) {
   if (!extensionActive) return;
   if (media.closest(".imd-lightbox-overlay")) return;
-  media.dataset.imdMediaType =
-    media.tagName === "VIDEO" ? "video" : "image";
+  media.dataset.imdMediaType = media.tagName === "VIDEO" ? "video" : "image";
   if (media.tagName === "VIDEO") {
     media.controls = settings.showVideoControls;
     applyStoryVideoFix(media);
@@ -444,9 +467,9 @@ function startObserver() {
       mutation.removedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
         if (node.matches("img, video")) removedMedia.add(node);
-        node.querySelectorAll("img, video").forEach((media) =>
-          removedMedia.add(media)
-        );
+        node
+          .querySelectorAll("img, video")
+          .forEach((media) => removedMedia.add(media));
       });
     });
     queueMicrotask(() => {
@@ -519,8 +542,7 @@ function updatePreviewButtonVisibility() {
 function isValidMedia(media) {
   const width = media.clientWidth || media.width;
   const height = media.clientHeight || media.height;
-  if (width < settings.minWidth || height < settings.minWidth)
-    return false;
+  if (width < settings.minWidth || height < settings.minWidth) return false;
   if (media.dataset.imdProcessed) return false;
   return true;
 }
@@ -572,14 +594,16 @@ function processMedia(media) {
   }
   isolateActionGroupEvents(actionGroup);
   const btns = buildMediaActionButtons(media);
-  const { downloadBtn, previewBtn, captureBtn, lightboxBtn, pipBtn, trimBtn } = btns;
+  const { downloadBtn, previewBtn, captureBtn, lightboxBtn, pipBtn, trimBtn } =
+    btns;
   attachMediaActionHandlers(media, btns);
   actionGroup.append(...btns.buttons);
 
   const showButtons = () => {
     if (
       lastPointerPosition &&
-      findTopMediaAtPoint(lastPointerPosition.x, lastPointerPosition.y) === media
+      findTopMediaAtPoint(lastPointerPosition.x, lastPointerPosition.y) ===
+        media
     ) {
       showActionGroup(actionGroup, media);
     }
@@ -593,7 +617,7 @@ function processMedia(media) {
     hideTimer.id = setTimeout(() => {
       hideTimer.id = null;
       const stillHoveringMedia = hoverTargets.some((target) =>
-        target.matches(":hover")
+        target.matches(":hover"),
       );
       if (!stillHoveringMedia && !actionGroup.matches(":hover")) {
         hideButtons();
@@ -617,8 +641,12 @@ function processMedia(media) {
   actionGroup.addEventListener("mouseleave", scheduleHide);
 
   if (pipBtn) {
-    const onEnterPip = () => { pipBtn.hidden = true; };
-    const onLeavePip = () => { pipBtn.hidden = false; };
+    const onEnterPip = () => {
+      pipBtn.hidden = true;
+    };
+    const onLeavePip = () => {
+      pipBtn.hidden = false;
+    };
     media.addEventListener("enterpictureinpicture", onEnterPip);
     media.addEventListener("leavepictureinpicture", onLeavePip);
     pipState.set(media, { onEnterPip, onLeavePip });
@@ -633,7 +661,9 @@ function processMedia(media) {
 
 /** Check if media belongs to an Instagram video player context. */
 function isInstagramVideoPlayerMedia(media) {
-  return Boolean(getAssociatedVideoPlayer(media) || getInstagramReelLink(media));
+  return Boolean(
+    getAssociatedVideoPlayer(media) || getInstagramReelLink(media),
+  );
 }
 
 /** Get the closest Instagram reel link ancestor. */
@@ -648,7 +678,8 @@ function getAssociatedVideoPlayer(media) {
   const directPlayer = media.closest(selector);
   if (directPlayer) return directPlayer;
 
-  const reelLink = getInstagramReelLink(media) || media.closest('a[href*="/p/"]');
+  const reelLink =
+    getInstagramReelLink(media) || media.closest('a[href*="/p/"]');
   const linkedPlayer = reelLink?.querySelector(selector);
   if (linkedPlayer) return linkedPlayer;
 
@@ -705,13 +736,15 @@ function getStoryReplyBarHeight(video) {
   let maxOverlap = 0;
 
   const candidates = dialog.querySelectorAll(
-    'form, [role="group"], [data-testid]'
+    'form, [role="group"], [data-testid]',
   );
   for (const el of candidates) {
     const rect = el.getBoundingClientRect();
     if (rect.height < 10) continue;
     if (rect.top < viewportBottom * 0.6) continue;
-    const input = el.querySelector('input, textarea, [contenteditable="true"], [placeholder]');
+    const input = el.querySelector(
+      'input, textarea, [contenteditable="true"], [placeholder]',
+    );
     if (!input) continue;
     const overlap = videoRect.bottom - rect.top;
     if (overlap > maxOverlap) maxOverlap = overlap;
@@ -724,8 +757,16 @@ function getStoryReplyBarHeight(video) {
   const elements = document.elementsFromPoint(centerX, bottomY);
 
   for (const el of elements) {
-    if (el === video || video.contains(el) || el.tagName === "HTML" || el.tagName === "BODY") continue;
-    const hasInput = el.querySelector('input, textarea, [contenteditable="true"], [placeholder]');
+    if (
+      el === video ||
+      video.contains(el) ||
+      el.tagName === "HTML" ||
+      el.tagName === "BODY"
+    )
+      continue;
+    const hasInput = el.querySelector(
+      'input, textarea, [contenteditable="true"], [placeholder]',
+    );
     if (hasInput) {
       const rect = el.getBoundingClientRect();
       if (rect.height > 10) {
@@ -788,7 +829,7 @@ function syncInstagramNativeVideoControls(video) {
     state.hideTimer.id = setTimeout(() => {
       state.hideTimer.id = null;
       const stillHovering = state.hoverEntries.some(({ target }) =>
-        target.matches(":hover")
+        target.matches(":hover"),
       );
       if (!stillHovering && !video.matches(":hover")) {
         restoreInstagramVideoAfterNativeControls(video, state);
@@ -801,7 +842,7 @@ function syncInstagramNativeVideoControls(video) {
       target,
       mouseenter: state.showControls,
       mouseleave: state.scheduleRestore,
-    })
+    }),
   );
   state.hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
     target.addEventListener("mouseenter", mouseenter);
@@ -901,7 +942,7 @@ function isolateActionGroupEvents(group) {
         event.stopPropagation();
         event.stopImmediatePropagation();
       },
-      { passive: false }
+      { passive: false },
     );
   });
 }
@@ -1051,7 +1092,7 @@ document.addEventListener(
     lastPointerPosition = { x: event.clientX, y: event.clientY };
     schedulePointerReconciliation();
   },
-  true
+  true,
 );
 
 /** Schedule a pointer reconciliation on the next animation frame. */
@@ -1159,8 +1200,8 @@ function hasVisibleBackgroundProxy(media) {
     media.tagName === "VIDEO"
       ? Array.from(
           (getInstagramReelLink(media) || media.parentElement).querySelectorAll(
-            "img"
-          )
+            "img",
+          ),
         )
       : Array.from(media.parentElement.children);
   return candidates.some((element) => {
@@ -1191,7 +1232,9 @@ function hasVisibleBackgroundProxy(media) {
 /** Find the topmost modal at a point, or determine if one exists. */
 function getModalAtPoint(x, y, stack) {
   const modals = Array.from(
-    document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]')
+    document.querySelectorAll(
+      'dialog[open], [role="dialog"], [aria-modal="true"]',
+    ),
   ).filter((modal) => {
     const style = getComputedStyle(modal);
     const rect = modal.getBoundingClientRect();
@@ -1212,7 +1255,9 @@ function getModalAtPoint(x, y, stack) {
 
   const containsPoint = modals.find((candidate) => {
     const rect = candidate.getBoundingClientRect();
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    return (
+      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    );
   });
   return { hasModal: true, modal: containsPoint || null };
 }
@@ -1234,24 +1279,33 @@ function buildMediaActionButtons(media) {
   const downloadBtn = createActionButton(
     "imd-down-btn",
     `Download ${isImage ? "Image" : "Video"}`,
-    DOWNLOAD_ICON
+    DOWNLOAD_ICON,
   );
   const previewBtn = createActionButton(
     "imd-preview-btn",
     `Preview ${isImage ? "highest-resolution image" : "video"}`,
-    PREVIEW_ICON
+    PREVIEW_ICON,
   );
   const captureBtn = isImage
     ? null
     : createActionButton("imd-capture-btn", "Capture Frame", CAPTURE_ICON);
-  const lightboxBtn = isImage && !media.closest(".imd-lightbox-overlay")
-    ? createActionButton("imd-lightbox-btn", "View full-size image", LIGHTBOX_ICON)
-    : null;
-  const pipBtn = !isImage && document.pictureInPictureEnabled
-    ? createActionButton("imd-pip-btn", "Picture-in-Picture", PIP_ICON)
-    : null;
+  const lightboxBtn =
+    isImage && !media.closest(".imd-lightbox-overlay")
+      ? createActionButton(
+          "imd-lightbox-btn",
+          "View full-size image",
+          LIGHTBOX_ICON,
+        )
+      : null;
+  const pipBtn =
+    !isImage && document.pictureInPictureEnabled
+      ? createActionButton("imd-pip-btn", "Picture-in-Picture", PIP_ICON)
+      : null;
   const trimBtn = !isImage
     ? createActionButton("imd-trim-btn", "Trim from current time", TRIM_ICON)
+    : null;
+  const copyBtn = isImage
+    ? createActionButton("imd-copy-btn", "Copy image to clipboard", COPY_ICON)
     : null;
   const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
   previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
@@ -1259,8 +1313,18 @@ function buildMediaActionButtons(media) {
   if (trimBtn) buttons.push(trimBtn);
   if (lightboxBtn) buttons.push(lightboxBtn);
   if (captureBtn) buttons.push(captureBtn);
+  if (copyBtn) buttons.push(copyBtn);
   if (pipBtn) buttons.push(pipBtn);
-  return { downloadBtn, previewBtn, captureBtn, lightboxBtn, pipBtn, trimBtn, buttons };
+  return {
+    downloadBtn,
+    previewBtn,
+    captureBtn,
+    lightboxBtn,
+    pipBtn,
+    trimBtn,
+    copyBtn,
+    buttons,
+  };
 }
 
 /** Attach the click handlers for the media action buttons. */
@@ -1306,6 +1370,38 @@ function attachMediaActionHandlers(media, btns) {
     e.stopPropagation();
     triggerTrim(media, null);
   });
+  btns.copyBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const url = await resolveHighestResolutionImageUrl(media);
+      const blob = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext("2d").drawImage(img, 0, 0);
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error("Canvas toBlob failed"))),
+            "image/png"
+          );
+        };
+        img.onerror = () => reject(new Error("Image load failed"));
+        img.src = url;
+      });
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob }),
+      ]);
+      btns.copyBtn.title = "Copied!";
+      setTimeout(() => {
+        btns.copyBtn.title = "Copy image to clipboard";
+      }, 1500);
+    } catch (error) {
+      console.error("Copy to clipboard failed:", error);
+    }
+  });
 }
 
 /** Preview media in the background tab (uses highest resolution for images/videos). */
@@ -1329,14 +1425,17 @@ function openPreviewInBackground(url) {
   const runtime = globalThis.chrome?.runtime;
   if (typeof runtime?.sendMessage !== "function") {
     console.warn(
-      "[Media Downloader] Extension context is unavailable. Reload the page."
+      "[Media Downloader] Extension context is unavailable. Reload the page.",
     );
     return;
   }
 
   runtime.sendMessage({ action: "preview", url }, (response) => {
     if (runtime.lastError) {
-      console.warn("[Media Downloader] Preview failed:", runtime.lastError.message);
+      console.warn(
+        "[Media Downloader] Preview failed:",
+        runtime.lastError.message,
+      );
       return;
     }
     if (response?.ok === false) {
@@ -1350,206 +1449,247 @@ function openLightbox(media, url) {
   if (media.tagName !== "IMG" && !url) return;
   if (lightboxOpen) return;
 
-  const promise = url ? Promise.resolve(url) : resolveHighestResolutionImageUrl(media);
-  promise.then((resolvedUrl) => {
-    if (!resolvedUrl) return;
+  const promise = url
+    ? Promise.resolve(url)
+    : resolveHighestResolutionImageUrl(media);
+  promise
+    .then((resolvedUrl) => {
+      if (!resolvedUrl) return;
 
-    lightboxOpen = true;
+      lightboxOpen = true;
 
-    const activeVideo = document.querySelector("video:not([paused])");
-    if (activeVideo) activeVideo.pause();
+      const activeVideo = document.querySelector("video:not([paused])");
+      if (activeVideo) activeVideo.pause();
 
-    document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
-      btn.hidden = true;
-    });
+      document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
+        btn.hidden = true;
+      });
 
-    const overlay = document.createElement("div");
-    overlay.className = "imd-lightbox-overlay";
+      const overlay = document.createElement("div");
+      overlay.className = "imd-lightbox-overlay";
 
-    const container = document.createElement("div");
-    container.className = "imd-lightbox-container";
+      const container = document.createElement("div");
+      container.className = "imd-lightbox-container";
 
-    const img = document.createElement("img");
-    img.className = "imd-lightbox-image";
-    img.src = resolvedUrl;
-    img.alt = media.alt || "";
+      const img = document.createElement("img");
+      img.className = "imd-lightbox-image";
+      img.src = resolvedUrl;
+      img.alt = media.alt || "";
 
-    container.appendChild(img);
-    overlay.appendChild(container);
+      container.appendChild(img);
+      overlay.appendChild(container);
 
-    const actions = document.createElement("div");
-    actions.className = "imd-lightbox-actions";
-    actions.innerHTML = `
+      const actions = document.createElement("div");
+      actions.className = "imd-lightbox-actions";
+      actions.innerHTML = `
       <div class="imd-lightbox-actions-row">
         <button type="button" class="imd-action-btn imd-down-btn" title="Download Image" aria-label="Download Image">${DOWNLOAD_ICON}</button>
         <button type="button" class="imd-action-btn imd-preview-btn" title="Preview image" aria-label="Preview image">${PREVIEW_ICON}</button>
       </div>
       <span class="imd-lightbox-info"></span>
     `;
-    const infoEl = actions.querySelector(".imd-lightbox-info");
-    img.addEventListener("load", () => {
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      const ext = (resolvedUrl.match(/\.(\w+)(?:\?|$)/)?.[1] || "").toLowerCase();
-      const format = ext === "png" ? "PNG" : ext === "webp" ? "WebP" : "JPG";
-      infoEl.textContent = `${w} × ${h} · ${format}`;
-      fetch(resolvedUrl, { method: "HEAD" }).then((res) => {
-        const ct = res.headers.get("Content-Type");
-        if (ct) {
-          const m = ct.match(/image\/(\w+)/);
-          if (m) {
-            const f = m[1].toLowerCase();
-            const label = f === "jpeg" ? "JPG" : f === "png" ? "PNG" : f === "webp" ? "WebP" : f.toUpperCase();
-            infoEl.textContent = `${w} × ${h} · ${label}`;
-          }
-        }
-        const len = res.headers.get("Content-Length");
-        if (len) {
-          const mb = (Number(len) / (1024 * 1024)).toFixed(1);
-          infoEl.textContent += ` · ${mb} MB`;
-        }
-      }).catch(() => {});
-    }, { once: true });
-    actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // downloadMedia is async; for blob: URLs it dispatches the download
-      // request and the media bridge fetches the blob. Close only after it
-      // resolves so the blob URL is not revoked before the fetch completes.
-      downloadMedia(img).finally(() => close());
-    });
-    actions.querySelector(".imd-preview-btn").addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      previewMedia(img);
-      close();
-    });
-    document.body.appendChild(overlay);
-    document.body.appendChild(actions);
-
-    requestAnimationFrame(() => {
-      overlay.classList.add("imd-lightbox-open");
-    });
-
-    overlay.addEventListener("scroll", repositionOpenControls, { passive: true });
-
-    const cleanup = () => {
-      overlay.remove();
-      actions.remove();
-      lightboxOpen = false;
-      if (resolvedUrl.startsWith("blob:")) {
-        // Defer revocation so the in-flight download fetch (handled by the
-        // media bridge) has time to read the blob before it is released.
-        setTimeout(() => URL.revokeObjectURL(resolvedUrl), 60_000);
-      }
-      document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
-        btn.hidden = false;
+      const infoEl = actions.querySelector(".imd-lightbox-info");
+      img.addEventListener(
+        "load",
+        () => {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          const ext = (
+            resolvedUrl.match(/\.(\w+)(?:\?|$)/)?.[1] || ""
+          ).toLowerCase();
+          const format =
+            ext === "png" ? "PNG" : ext === "webp" ? "WebP" : "JPG";
+          infoEl.textContent = `${w} × ${h} · ${format}`;
+          fetch(resolvedUrl, { method: "HEAD" })
+            .then((res) => {
+              const ct = res.headers.get("Content-Type");
+              if (ct) {
+                const m = ct.match(/image\/(\w+)/);
+                if (m) {
+                  const f = m[1].toLowerCase();
+                  const label =
+                    f === "jpeg"
+                      ? "JPG"
+                      : f === "png"
+                        ? "PNG"
+                        : f === "webp"
+                          ? "WebP"
+                          : f.toUpperCase();
+                  infoEl.textContent = `${w} × ${h} · ${label}`;
+                }
+              }
+              const len = res.headers.get("Content-Length");
+              if (len) {
+                const mb = (Number(len) / (1024 * 1024)).toFixed(1);
+                infoEl.textContent += ` · ${mb} MB`;
+              }
+            })
+            .catch(() => {});
+        },
+        { once: true },
+      );
+      actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // downloadMedia is async; for blob: URLs it dispatches the download
+        // request and the media bridge fetches the blob. Close only after it
+        // resolves so the blob URL is not revoked before the fetch completes.
+        downloadMedia(img).finally(() => close());
       });
-      lightboxZoomed = false;
-      lightboxZoomLevel = 1;
-    };
+      actions
+        .querySelector(".imd-preview-btn")
+        .addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          previewMedia(img);
+          close();
+        });
+      document.body.appendChild(overlay);
+      document.body.appendChild(actions);
 
-    const close = () => {
-      overlay.removeEventListener("scroll", repositionOpenControls);
-      cleanup();
-    };
+      requestAnimationFrame(() => {
+        overlay.classList.add("imd-lightbox-open");
+      });
 
-    let lightboxZoomed = false;
-    let lightboxZoomLevel = 1;
-    overlay.addEventListener("click", (e) => {
-      if (e.target !== overlay) return;
-      if (overlay.scrollWidth > overlay.clientWidth || overlay.scrollHeight > overlay.clientHeight) {
-        const rect = overlay.getBoundingClientRect();
-        const sw = overlay.offsetWidth - overlay.clientWidth;
-        const sh = overlay.offsetHeight - overlay.clientHeight;
-        if (e.clientX > rect.right - sw || e.clientY > rect.bottom - sh) return;
-      }
-      close();
-    });
+      overlay.addEventListener("scroll", repositionOpenControls, {
+        passive: true,
+      });
 
-    function getZoomOrigin(e) {
-      const rect = img.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-      return { x, y };
-    }
-
-    function applyZoom(origin) {
-      if (lightboxZoomed) {
-        const scale = lightboxZoomLevel;
-        const nw = img.naturalWidth;
-        const nh = img.naturalHeight;
-
-        const displayW = Math.round(nw * scale);
-        const displayH = Math.round(nh * scale);
-
-        img.style.width = displayW + "px";
-        img.style.height = displayH + "px";
-        container.style.width = "";
-        container.style.height = "";
-
-        container.classList.add("imd-lightbox-fullwidth");
-
-        if (origin) {
-          overlay.scrollLeft = 0;
-          overlay.scrollTop = 0;
-          void overlay.offsetHeight;
-
-          const imgX = (origin.x / 100) * nw;
-          const imgY = (origin.y / 100) * nh;
-
-          overlay.scrollLeft = Math.max(0, Math.round(imgX * scale - overlay.clientWidth / 2));
-          overlay.scrollTop = Math.max(0, Math.round(imgY * scale - overlay.clientHeight / 2));
+      const cleanup = () => {
+        overlay.remove();
+        actions.remove();
+        lightboxOpen = false;
+        if (resolvedUrl.startsWith("blob:")) {
+          // Defer revocation so the in-flight download fetch (handled by the
+          // media bridge) has time to read the blob before it is released.
+          setTimeout(() => URL.revokeObjectURL(resolvedUrl), 60_000);
         }
-      } else {
-        img.style.width = "";
-        img.style.height = "";
-        container.style.width = "";
-        container.style.height = "";
-
-        container.classList.remove("imd-lightbox-fullwidth");
-      }
-    }
-
-    function toggleZoom(e) {
-      if (lightboxZoomed) {
+        document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
+          btn.hidden = false;
+        });
         lightboxZoomed = false;
         lightboxZoomLevel = 1;
-        applyZoom();
-      } else {
-        lightboxZoomed = true;
-        lightboxZoomLevel = 1;
-        applyZoom(getZoomOrigin(e));
+      };
+
+      const close = () => {
+        overlay.removeEventListener("scroll", repositionOpenControls);
+        cleanup();
+      };
+
+      let lightboxZoomed = false;
+      let lightboxZoomLevel = 1;
+      overlay.addEventListener("click", (e) => {
+        if (e.target !== overlay) return;
+        if (
+          overlay.scrollWidth > overlay.clientWidth ||
+          overlay.scrollHeight > overlay.clientHeight
+        ) {
+          const rect = overlay.getBoundingClientRect();
+          const sw = overlay.offsetWidth - overlay.clientWidth;
+          const sh = overlay.offsetHeight - overlay.clientHeight;
+          if (e.clientX > rect.right - sw || e.clientY > rect.bottom - sh)
+            return;
+        }
+        close();
+      });
+
+      function getZoomOrigin(e) {
+        const rect = img.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        return { x, y };
       }
-    }
 
-    img.addEventListener("click", toggleZoom);
+      function applyZoom(origin) {
+        if (lightboxZoomed) {
+          const scale = lightboxZoomLevel;
+          const nw = img.naturalWidth;
+          const nh = img.naturalHeight;
 
-    overlay.addEventListener("wheel", (e) => {
-      if (e.target.closest(".imd-lightbox-actions")) return;
+          const displayW = Math.round(nw * scale);
+          const displayH = Math.round(nh * scale);
 
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        if (!lightboxZoomed) {
+          img.style.width = displayW + "px";
+          img.style.height = displayH + "px";
+          container.style.width = "";
+          container.style.height = "";
+
+          container.classList.add("imd-lightbox-fullwidth");
+
+          if (origin) {
+            overlay.scrollLeft = 0;
+            overlay.scrollTop = 0;
+            void overlay.offsetHeight;
+
+            const imgX = (origin.x / 100) * nw;
+            const imgY = (origin.y / 100) * nh;
+
+            overlay.scrollLeft = Math.max(
+              0,
+              Math.round(imgX * scale - overlay.clientWidth / 2),
+            );
+            overlay.scrollTop = Math.max(
+              0,
+              Math.round(imgY * scale - overlay.clientHeight / 2),
+            );
+          }
+        } else {
+          img.style.width = "";
+          img.style.height = "";
+          container.style.width = "";
+          container.style.height = "";
+
+          container.classList.remove("imd-lightbox-fullwidth");
+        }
+      }
+
+      function toggleZoom(e) {
+        if (lightboxZoomed) {
+          lightboxZoomed = false;
+          lightboxZoomLevel = 1;
+          applyZoom();
+        } else {
           lightboxZoomed = true;
           lightboxZoomLevel = 1;
+          applyZoom(getZoomOrigin(e));
         }
-        const delta = e.deltaY > 0 ? 1 / 1.15 : 1.15;
-        lightboxZoomLevel = Math.min(Math.max(lightboxZoomLevel * delta, 1), 10);
-        applyZoom(e.deltaY < 0 ? getZoomOrigin(e) : null);
       }
-    }, { passive: false });
 
-    const escHandler = (e) => {
-      if (e.key === "Escape") {
-        close();
-        document.removeEventListener("keydown", escHandler);
-      }
-    };
-    document.addEventListener("keydown", escHandler);
-  }).catch((error) => {
-    console.error("Lightbox failed to load image:", error);
-  });
+      img.addEventListener("click", toggleZoom);
+
+      overlay.addEventListener(
+        "wheel",
+        (e) => {
+          if (e.target.closest(".imd-lightbox-actions")) return;
+
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (!lightboxZoomed) {
+              lightboxZoomed = true;
+              lightboxZoomLevel = 1;
+            }
+            const delta = e.deltaY > 0 ? 1 / 1.15 : 1.15;
+            lightboxZoomLevel = Math.min(
+              Math.max(lightboxZoomLevel * delta, 1),
+              10,
+            );
+            applyZoom(e.deltaY < 0 ? getZoomOrigin(e) : null);
+          }
+        },
+        { passive: false },
+      );
+
+      const escHandler = (e) => {
+        if (e.key === "Escape") {
+          close();
+          document.removeEventListener("keydown", escHandler);
+        }
+      };
+      document.addEventListener("keydown", escHandler);
+    })
+    .catch((error) => {
+      console.error("Lightbox failed to load image:", error);
+    });
 }
 
 /** Get the best resolution image URL from srcset descriptors without measurement. */
@@ -1572,7 +1712,7 @@ async function resolveHighestResolutionImageUrl(img) {
     candidates.map(async (url) => ({
       url,
       area: await measureImageArea(url),
-    }))
+    })),
   );
   measured.sort((a, b) => b.area - a.area);
   return measured[0]?.area > 0
@@ -1601,11 +1741,12 @@ function collectImageCandidates(img) {
     return Array.from(urls);
   }
 
-  const container = img.closest("article, [role='dialog']") || img.parentElement;
+  const container =
+    img.closest("article, [role='dialog']") || img.parentElement;
   container?.querySelectorAll("img").forEach((candidate) => {
     const values = [candidate.currentSrc, candidate.src];
     parseSrcset(candidate.getAttribute("srcset")).forEach(({ url }) =>
-      values.push(url)
+      values.push(url),
     );
     values.forEach((value) => {
       try {
@@ -1636,7 +1777,12 @@ function measureImageArea(url) {
   return new Promise((resolve) => {
     const probe = new Image();
     let settled = false;
-    const finish = (area) => { if (!settled) { settled = true; resolve(area); } };
+    const finish = (area) => {
+      if (!settled) {
+        settled = true;
+        resolve(area);
+      }
+    };
     const timeout = setTimeout(() => {
       finish(0);
       probe.src = "";
@@ -1695,7 +1841,7 @@ function getVideoUrl(video) {
   if (video.src) return video.src;
 
   const source = Array.from(video.querySelectorAll("source[src]")).find(
-    (item) => item.src
+    (item) => item.src,
   );
   return source ? source.src : "";
 }
@@ -1710,7 +1856,7 @@ async function resolveHighestResolutionVideoUrl(video) {
     candidates.map(async ({ url }) => ({
       url,
       pixels: await measureVideoResolution(url),
-    }))
+    })),
   );
   const best = measured.reduce((a, b) => (a.pixels >= b.pixels ? a : b));
   return best.pixels > 0
@@ -1816,13 +1962,16 @@ function streamBlobVideo(video, url) {
   window.dispatchEvent(
     new CustomEvent(BLOB_DOWNLOAD_EVENT, {
       detail,
-    })
+    }),
   );
 }
 
 /** Start recording a video segment from the current playback position. */
 function startTrimRecording(video) {
-  if (typeof video.captureStream !== "function" || typeof MediaRecorder === "undefined") {
+  if (
+    typeof video.captureStream !== "function" ||
+    typeof MediaRecorder === "undefined"
+  ) {
     throw new Error("This browser does not support video recording.");
   }
 
@@ -1841,10 +1990,14 @@ function startTrimRecording(video) {
   }
 
   const pixels = (video.videoWidth || 1920) * (video.videoHeight || 1080);
-  const bitrate = pixels >= 3840 * 2160 ? 30_000_000
-    : pixels >= 2560 * 1440 ? 20_000_000
-    : pixels >= 1920 * 1080 ? 12_000_000
-    : 8_000_000;
+  const bitrate =
+    pixels >= 3840 * 2160
+      ? 30_000_000
+      : pixels >= 2560 * 1440
+        ? 20_000_000
+        : pixels >= 1920 * 1080
+          ? 12_000_000
+          : 8_000_000;
 
   const recorder = new MediaRecorder(stream, {
     mimeType,
@@ -1866,7 +2019,15 @@ function startTrimRecording(video) {
       const blob = new Blob(chunks, { type: recorder.mimeType });
       resolve(blob);
     });
-    recorder.addEventListener("error", () => reject(recorder.error || new DOMException("Recording failed", "MediaRecorderError")), { once: true });
+    recorder.addEventListener(
+      "error",
+      () =>
+        reject(
+          recorder.error ||
+            new DOMException("Recording failed", "MediaRecorderError"),
+        ),
+      { once: true },
+    );
   });
 
   if (video.paused) {
@@ -1905,7 +2066,9 @@ async function captureVideoFrame(video) {
   if (!video.videoWidth || !video.videoHeight) {
     throw new Error("Video frame is not ready.");
   }
-  window.dispatchEvent(new CustomEvent(CAPTURE_BLOCK_EVENT, { detail: { video } }));
+  window.dispatchEvent(
+    new CustomEvent(CAPTURE_BLOCK_EVENT, { detail: { video } }),
+  );
   video.pause();
   try {
     const canvas = document.createElement("canvas");
@@ -1915,9 +2078,11 @@ async function captureVideoFrame(video) {
       video.videoColorSpace &&
       (video.videoColorSpace.transfer === "pq" ||
         video.videoColorSpace.transfer === "hlg");
-    const contextOptions = isHdr && "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
-      ? { colorSpace: "display-p3" }
-      : undefined;
+    const contextOptions =
+      isHdr &&
+      "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
+        ? { colorSpace: "display-p3" }
+        : undefined;
     const context = canvas.getContext("2d", contextOptions);
     if (!context) throw new Error("Canvas is unavailable.");
     // HDR frames are tone-mapped to SDR by the canvas; draw at native
@@ -1935,9 +2100,11 @@ async function captureVideoFrame(video) {
       try {
         canvas.toBlob(
           (result) =>
-            result ? resolve(result) : reject(new Error("Frame encoding failed.")),
+            result
+              ? resolve(result)
+              : reject(new Error("Frame encoding failed.")),
           format.mimeType,
-          format.quality
+          format.quality,
         );
       } catch (error) {
         reject(error);
@@ -1945,7 +2112,9 @@ async function captureVideoFrame(video) {
     });
     return URL.createObjectURL(blob);
   } finally {
-    window.dispatchEvent(new CustomEvent(CAPTURE_UNBLOCK_EVENT, { detail: { video } }));
+    window.dispatchEvent(
+      new CustomEvent(CAPTURE_UNBLOCK_EVENT, { detail: { video } }),
+    );
   }
 }
 
@@ -1983,24 +2152,28 @@ function triggerTrim(media, trimBtn) {
   const isBlob = getVideoUrl(media).startsWith("blob:");
   if (isBlob) {
     if (trimBtn && trimBtn.dataset.recording === "true") {
-      window.dispatchEvent(new CustomEvent(BLOB_CONTROL_EVENT, {
-        detail: { videoId: media.dataset.imdCaptureId, action: "save" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent(BLOB_CONTROL_EVENT, {
+          detail: { videoId: media.dataset.imdCaptureId, action: "save" },
+        }),
+      );
     } else {
       if (trimBtn) {
         trimBtn.dataset.recording = "true";
         trimBtn.title = "Save trim";
         trimBtn.innerHTML = STOP_ICON;
       }
-      window.dispatchEvent(new CustomEvent(BLOB_TRIM_EVENT, {
-        detail: {
-          url: getVideoUrl(media),
-          filename: getSuggestedVideoName(media),
-          videoId: media.dataset.imdCaptureId,
-          startTime: media.currentTime,
-          maxConcurrent: settings.maxConcurrentDownloads,
-        },
-      }));
+      window.dispatchEvent(
+        new CustomEvent(BLOB_TRIM_EVENT, {
+          detail: {
+            url: getVideoUrl(media),
+            filename: getSuggestedVideoName(media),
+            videoId: media.dataset.imdCaptureId,
+            startTime: media.currentTime,
+            maxConcurrent: settings.maxConcurrentDownloads,
+          },
+        }),
+      );
     }
     return;
   }
@@ -2022,34 +2195,38 @@ function triggerTrim(media, trimBtn) {
         }
       }, 500);
 
-      rec.promise.then((blob) => {
-        clearInterval(elapsedTimer);
-        if (!blob || !blob.size) return;
-        const url = URL.createObjectURL(blob);
-        const ext = (blob.type.includes("webm") ? "webm" : "mp4");
-        const filename = getSuggestedVideoName(media).replace(
-          /\.[^.]+$/, `-trim-${Math.round(rec.startTime)}.${ext}`
-        );
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        link.hidden = true;
-        document.documentElement.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      }).catch((error) => {
-        clearInterval(elapsedTimer);
-        console.error("Trim recording failed:", error);
-      }).finally(() => {
-        clearInterval(elapsedTimer);
-        videoTrimRecordings.delete(media);
-        if (trimBtn) {
-          trimBtn.title = "Trim from current time";
-          trimBtn.innerHTML = TRIM_ICON;
-          trimBtn.dataset.recording = "false";
-        }
-      });
+      rec.promise
+        .then((blob) => {
+          clearInterval(elapsedTimer);
+          if (!blob || !blob.size) return;
+          const url = URL.createObjectURL(blob);
+          const ext = blob.type.includes("webm") ? "webm" : "mp4";
+          const filename = getSuggestedVideoName(media).replace(
+            /\.[^.]+$/,
+            `-trim-${Math.round(rec.startTime)}.${ext}`,
+          );
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = filename;
+          link.hidden = true;
+          document.documentElement.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        })
+        .catch((error) => {
+          clearInterval(elapsedTimer);
+          console.error("Trim recording failed:", error);
+        })
+        .finally(() => {
+          clearInterval(elapsedTimer);
+          videoTrimRecordings.delete(media);
+          if (trimBtn) {
+            trimBtn.title = "Trim from current time";
+            trimBtn.innerHTML = TRIM_ICON;
+            trimBtn.dataset.recording = "false";
+          }
+        });
     })
     .catch((error) => {
       console.error("Trim recording failed:", error);
@@ -2094,7 +2271,7 @@ function openContextMenu(media, x, y, linkEl) {
     const openLinkBtn = createActionButton(
       "imd-open-link-btn",
       "Open link in new tab",
-      OPEN_LINK_ICON
+      OPEN_LINK_ICON,
     );
     openLinkBtn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -2131,12 +2308,24 @@ document.addEventListener(
   (event) => {
     if (!settings.useContextMenu || !extensionActive) return;
     const media = getMediaAtPoint(event.clientX, event.clientY);
-    if (!media) return;
-    const linkEl = event.target?.closest?.("a[href]");
-    event.preventDefault();
-    openContextMenu(media, event.clientX, event.clientY, linkEl);
+    const path = event.composedPath();
+    let linkEl =
+      path.find((el) => el.tagName === "A" && el.hasAttribute("href")) ||
+      event.target?.closest?.("a[href]");
+    if (!linkEl && media) {
+      let node = media;
+      while (node && node !== document.body) {
+        if (node.tagName === "A" && node.hasAttribute("href")) {
+          linkEl = node;
+          break;
+        }
+        node = node.parentElement || node.getRootNode()?.host;
+      }
+    }
+    if (!media && !linkEl) return;
+    openContextMenu(media, event.clientX, event.clientY - 64, linkEl);
   },
-  true
+  true,
 );
 
 document.addEventListener("click", (event) => {
