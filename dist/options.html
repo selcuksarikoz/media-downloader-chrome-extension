@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Media Downloader Settings</title>
+    <script type="module" crossorigin src="/options.js"></script>
+    <link rel="stylesheet" crossorigin href="/styles.css">
+  </head>
+  <body class="options-page">
+    <div class="options-container">
+      <div class="options-header">
+        <h1>Media Downloader Settings</h1>
+      </div>
+
+      <div class="form-group">
+        <label for="position">Button Position</label>
+        <select id="position" class="form-control">
+          <option value="top-right">Top-Right (Default)</option>
+          <option value="top-left">Top-Left</option>
+          <option value="bottom-right">Bottom-Right</option>
+          <option value="bottom-left">Bottom-Left</option>
+          <option value="center">Center</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="minWidth">Minimum Media Size (px)</label>
+        <input
+          type="number"
+          id="minWidth"
+          class="form-control"
+          min="0"
+          value="150"
+        />
+        <small class="field-help">
+          Images and videos smaller than this size will be ignored.
+        </small>
+      </div>
+
+      <div class="form-group">
+        <label for="maxConcurrent">Simultaneous Video Downloads</label>
+        <input
+          type="number"
+          id="maxConcurrent"
+          class="form-control"
+          min="1"
+          max="10"
+          value="5"
+        />
+        <small class="field-help">
+          Additional videos wait in the download queue.
+        </small>
+      </div>
+
+      <div class="form-group">
+        <label for="captureType">Capture Type</label>
+        <select id="captureType" class="form-control">
+          <option value="jpg">JPG (Default)</option>
+          <option value="png">PNG</option>
+          <option value="webp">WebP</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="folder">Download Sub-folder</label>
+        <input
+          type="text"
+          id="folder"
+          class="form-control"
+          placeholder="e.g. Media"
+        />
+        <small class="field-help">
+          Leave empty to save directly in the Downloads folder.
+        </small>
+      </div>
+
+      <div class="form-group">
+        <label for="blacklistDomain">Domain Blacklist</label>
+        <div class="domain-entry">
+          <input
+            type="text"
+            id="blacklistDomain"
+            class="form-control"
+            placeholder="e.g. netflix.com"
+          />
+          <button type="button" id="addBlacklistDomain" class="btn-secondary">
+            Add
+          </button>
+        </div>
+        <div
+          id="blacklist"
+          class="domain-list"
+          aria-label="Blacklisted domains"
+        ></div>
+        <small class="field-help">
+          The extension stays inactive on these domains and their subdomains.
+        </small>
+      </div>
+
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="saveAs" />
+        <label for="saveAs">Always ask where to save</label>
+      </div>
+
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="showPreview" />
+        <label for="showPreview">Show preview button</label>
+      </div>
+
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="showVideoControls" />
+        <label for="showVideoControls">Always show video controls</label>
+      </div>
+
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="useContextMenu" />
+        <label for="useContextMenu">
+          Use right-click menu instead of hover buttons
+        </label>
+      </div>
+
+      <button id="save" class="btn-save">Save Settings</button>
+      <div id="status"></div>
+    </div>
+
+  </body>
+</html>

@@ -59,6 +59,19 @@ in the settings.
 - Use right-click menu instead of hover buttons
 - Domain blacklist with subdomain matching
 
+## Installation
+
+1. Open `chrome://extensions` in Chrome.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the `dist` folder from this repository.
+
+After any updates, return to `chrome://extensions` and click the reload icon on
+the extension card to apply the changes.
+
+> **Note:** The `dist` folder is pre-built and ready to use. No build step is
+> required.
+
 ## Development
 
 ```bash
@@ -66,15 +79,7 @@ bun install
 bun run build
 ```
 
-After building:
-
-1. Open `chrome://extensions` in Chrome.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select the generated `dist` directory.
-
-After rebuilding the extension, return to `chrome://extensions` and reload it to
-apply the changes.
+After rebuilding, reload the extension from `chrome://extensions`.
 
 ## License
 
