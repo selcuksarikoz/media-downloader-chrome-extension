@@ -311,6 +311,12 @@ const STOP_ICON = `
 </svg>
 `;
 
+const OPEN_LINK_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>
+</svg>
+`;
+
 /** Initialize extension: load settings, apply domain access, listen for changes. */
 function init() {
   chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
@@ -2077,18 +2083,37 @@ function closeContextMenu() {
 }
 
 /** Open the custom right-click menu for a media element near the cursor. */
-function openContextMenu(media, x, y) {
+function openContextMenu(media, x, y, linkEl) {
   closeContextMenu();
-  const btns = buildMediaActionButtons(media);
-  attachMediaActionHandlers(media, btns);
   const menu = document.createElement("div");
   menu.className = "imd-context-menu";
   menu.setAttribute("role", "menu");
   menu.addEventListener("click", (e) => e.stopPropagation());
-  btns.buttons.forEach((button) => {
-    button.addEventListener("click", closeContextMenu);
-    menu.appendChild(button);
-  });
+
+  if (linkEl) {
+    const openLinkBtn = createActionButton(
+      "imd-open-link-btn",
+      "Open link in new tab",
+      OPEN_LINK_ICON
+    );
+    openLinkBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(linkEl.href, "_blank");
+      closeContextMenu();
+    });
+    menu.appendChild(openLinkBtn);
+  }
+
+  if (media) {
+    const btns = buildMediaActionButtons(media);
+    attachMediaActionHandlers(media, btns);
+    btns.buttons.forEach((button) => {
+      button.addEventListener("click", closeContextMenu);
+      menu.appendChild(button);
+    });
+  }
+
   document.body.appendChild(menu);
   contextMenuEl = menu;
   contextMenuMedia = media;
@@ -2105,11 +2130,11 @@ document.addEventListener(
   "contextmenu",
   (event) => {
     if (!settings.useContextMenu || !extensionActive) return;
-    if (event.target?.closest?.("a[href]")) return;
     const media = getMediaAtPoint(event.clientX, event.clientY);
     if (!media) return;
+    const linkEl = event.target?.closest?.("a[href]");
     event.preventDefault();
-    openContextMenu(media, event.clientX, event.clientY);
+    openContextMenu(media, event.clientX, event.clientY, linkEl);
   },
   true
 );
