@@ -2099,7 +2099,7 @@ function openContextMenu(media, x, y, linkEl) {
     openLinkBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      window.open(linkEl.href, "_blank");
+      chrome.runtime.sendMessage({ action: "openTab", url: linkEl.href });
       closeContextMenu();
     });
     menu.appendChild(openLinkBtn);

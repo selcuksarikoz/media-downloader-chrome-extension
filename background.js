@@ -16,6 +16,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+  if (message.action === "openTab") {
+    chrome.tabs.create({ url: message.url, active: false });
+    return;
+  }
 });
 
 async function openPreviewTab(url, sourceTabId) {
