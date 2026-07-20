@@ -2229,58 +2229,60 @@ function triggerTrim(media, trimBtn) {
   }
 
   if (trimBtn) trimBtn.disabled = true;
-  startTrimRecording(media)
-    .then((rec) => {
-      videoTrimRecordings.set(media, rec);
-      if (trimBtn) {
-        trimBtn.title = "Save trim";
-        trimBtn.innerHTML = STOP_ICON;
-        trimBtn.disabled = false;
-      }
+  let rec;
+  try {
+    rec = startTrimRecording(media);
+  } catch (error) {
+    console.error("Trim recording failed:", error);
+    if (trimBtn) trimBtn.disabled = false;
+    return;
+  }
 
-      let elapsedTimer = setInterval(() => {
-        const elapsed = media.currentTime - rec.startTime;
-        if (elapsed > 0 && trimBtn) {
-          trimBtn.title = `Save (${elapsed.toFixed(1)}s)`;
-        }
-      }, 500);
+  videoTrimRecordings.set(media, rec);
+  if (trimBtn) {
+    trimBtn.title = "Save trim";
+    trimBtn.innerHTML = STOP_ICON;
+    trimBtn.disabled = false;
+  }
 
-      rec.promise
-        .then((blob) => {
-          clearInterval(elapsedTimer);
-          if (!blob || !blob.size) return;
-          const url = URL.createObjectURL(blob);
-          const ext = blob.type.includes("webm") ? "webm" : "mp4";
-          const filename = getSuggestedVideoName(media).replace(
-            /\.[^.]+$/,
-            `-trim-${Math.round(rec.startTime)}.${ext}`,
-          );
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = filename;
-          link.hidden = true;
-          document.documentElement.appendChild(link);
-          link.click();
-          link.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        })
-        .catch((error) => {
-          clearInterval(elapsedTimer);
-          console.error("Trim recording failed:", error);
-        })
-        .finally(() => {
-          clearInterval(elapsedTimer);
-          videoTrimRecordings.delete(media);
-          if (trimBtn) {
-            trimBtn.title = "Trim from current time";
-            trimBtn.innerHTML = TRIM_ICON;
-            trimBtn.dataset.recording = "false";
-          }
-        });
+  let elapsedTimer = setInterval(() => {
+    const elapsed = media.currentTime - rec.startTime;
+    if (elapsed > 0 && trimBtn) {
+      trimBtn.title = `Save (${elapsed.toFixed(1)}s)`;
+    }
+  }, 500);
+
+  rec.promise
+    .then((blob) => {
+      clearInterval(elapsedTimer);
+      if (!blob || !blob.size) return;
+      const url = URL.createObjectURL(blob);
+      const ext = blob.type.includes("webm") ? "webm" : "mp4";
+      const filename = getSuggestedVideoName(media).replace(
+        /\.[^.]+$/,
+        `-trim-${Math.round(rec.startTime)}.${ext}`,
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.hidden = true;
+      document.documentElement.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     })
     .catch((error) => {
+      clearInterval(elapsedTimer);
       console.error("Trim recording failed:", error);
-      if (trimBtn) trimBtn.disabled = false;
+    })
+    .finally(() => {
+      clearInterval(elapsedTimer);
+      videoTrimRecordings.delete(media);
+      if (trimBtn) {
+        trimBtn.title = "Trim from current time";
+        trimBtn.innerHTML = TRIM_ICON;
+        trimBtn.dataset.recording = "false";
+      }
     });
 }
 
