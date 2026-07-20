@@ -2322,12 +2322,17 @@ document.addEventListener(
         node = node.parentElement || node.getRootNode()?.host;
       }
     }
-    if (!media && !linkEl) return;
+    if (!media) return;
     openContextMenu(media, event.clientX, event.clientY - 64, linkEl);
   },
   true,
 );
 
+document.addEventListener("pointerdown", (event) => {
+  if (contextMenuEl && !contextMenuEl.contains(event.target)) {
+    closeContextMenu();
+  }
+});
 document.addEventListener("click", (event) => {
   if (contextMenuEl && !contextMenuEl.contains(event.target)) {
     closeContextMenu();
