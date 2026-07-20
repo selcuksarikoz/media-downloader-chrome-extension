@@ -26,8 +26,9 @@ directly to page media.
   current playback position. Click once to begin recording, click again (or let
   the video reach the end) to save the trimmed segment as MP4. The button shows
   the elapsed recording time. Works on both blob and regular videos.
-- The **Copy** button (clipboard icon) copies the image to the clipboard in
-  highest resolution so you can paste it directly into any application.
+- The **Copy** button (clipboard icon) copies images in highest resolution and
+  video current frames using the selected frame capture format so you can paste
+  them directly into any application.
 - DRM-protected media is not supported.
 
 ## Right-click Context Menu
