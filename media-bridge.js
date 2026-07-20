@@ -441,8 +441,6 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     throw new Error("This browser cannot record MediaSource video streams.");
   }
   const hasStartTime = startTime != null && Number.isFinite(startTime) && startTime > 0;
-  const url = video.currentSrc || video.src;
-  const source = blobKinds.get(url);
   const hdr = isHdrVideo(video);
   const mimeType = getRecorderMimeType(hdr);
   if (!mimeType) {
@@ -450,47 +448,21 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   }
   const ext = mimeType.includes("webm") ? "webm" : "mp4";
   const outputName = replaceExtension(filename, ext);
-  const hasChunks = source?.kind === "media-source" && source.record.buffers.some((b) => b.chunks.length);
 
-  let captureVideo = video;
-  let isClone = false;
-  if (hasChunks) {
-    captureVideo = document.createElement("video");
-    captureVideo.muted = true;
-    captureVideo.playsInline = true;
-    captureVideo.preload = "auto";
-    captureVideo.loop = false;
-    getCaptureRenderHost().appendChild(captureVideo);
-    isClone = true;
-    captureVideo.src = URL.createObjectURL(buildChunkBlob(source.record));
-    await waitForLoadedMetadata(captureVideo, signal);
-    if (hasStartTime && Number.isFinite(captureVideo.duration) && captureVideo.duration > 0) {
-      captureVideo.currentTime = Math.min(startTime, captureVideo.duration);
-    }
-  } else if (video.seekable.length && video.duration !== Infinity) {
+  const captureVideo = video;
+  if (video.seekable.length && video.duration !== Infinity) {
     video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
   }
 
   if (signal.aborted) throw new DOMException("Canceled", "AbortError");
-  const cloneStream = captureVideo.captureStream();
-  if (!cloneStream.getVideoTracks().length) {
+  const recordStream = captureVideo.captureStream();
+  if (!recordStream.getVideoTracks().length) {
     throw new Error("The video stream has no capturable video track.");
-  }
-  let recordStream;
-  if (isClone) {
-    const originalStream = video.captureStream();
-    const audioTracks = originalStream.getAudioTracks();
-    recordStream = new MediaStream([
-      ...cloneStream.getVideoTracks(),
-      ...audioTracks,
-    ]);
-  } else {
-    recordStream = cloneStream;
   }
 
   const recorder = new MediaRecorder(recordStream, {
     mimeType,
-    videoBitsPerSecond: getRecordingBitrate(isClone ? captureVideo : video),
+    videoBitsPerSecond: getRecordingBitrate(video),
     audioBitsPerSecond: 128_000,
   });
   const chunks = [];
@@ -501,7 +473,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   const reportProgress = () => {
     recordingElapsed = Math.max(0, captureVideo.currentTime - recordingStartPos);
     const label = `Recording ${recordingElapsed.toFixed(1)}s…`;
-    emitStatus(videoId, "progress", label, recordingElapsed);
+    emitStatus(videoId, "progress", label, getRecordingProgress(captureVideo, recordingStartPos));
   };
 
   const completion = new Promise((resolve, reject) => {
@@ -530,9 +502,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
 
   let completed = false;
   try {
-    if (isClone) {
-      releaseFramePump = keepVideoFramesDecoded(captureVideo);
-    }
+    releaseFramePump = keepVideoFramesDecoded(captureVideo);
     recordingStartPos = captureVideo.currentTime;
     recorder.start(5000);
     await captureVideo.play();
@@ -563,17 +533,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     captureVideo.removeEventListener("ended", stop);
     captureVideo.removeEventListener("timeupdate", reportProgress);
     captureVideo.pause();
-    if (isClone) captureVideo.remove();
   }
-}
-
-function buildChunkBlob(mediaRecord) {
-  const allChunks = [];
-  for (const buffer of mediaRecord.buffers) {
-    for (const chunk of buffer.chunks) allChunks.push(chunk);
-  }
-  const type = mediaRecord.buffers.find((b) => b.mimeType)?.mimeType || "video/mp4";
-  return new Blob(allChunks, { type });
 }
 
 function waitForLoadedMetadata(video, signal) {
@@ -591,6 +551,15 @@ function waitForLoadedMetadata(video, signal) {
     video.addEventListener("error", onError, { once: true });
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function getRecordingProgress(video, startTime) {
+  if (!Number.isFinite(video.duration) || video.duration <= startTime) {
+    return undefined;
+  }
+  const elapsed = Math.max(0, video.currentTime - startTime);
+  const remainingDuration = video.duration - startTime;
+  return (elapsed / remainingDuration) * 100;
 }
 
 function keepVideoPlaying(video) {
