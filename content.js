@@ -17,6 +17,7 @@ const DEFAULT_BLACKLISTED_DOMAINS = [
 const DEFAULT_SETTINGS = {
   buttonPosition: "top-right",
   downloadFolder: "",
+  showSaveAs: false,
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
@@ -134,12 +135,14 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
   const blobUrl = URL.createObjectURL(blob);
 
   let downloadFilename = filename;
+  let saveAs = settings.showSaveAs;
   if (settings.downloadFolder) {
     const folder = settings.downloadFolder
       .trim()
       .replace(/^[\/\\]+|[\/\\]+$/g, "");
     if (folder && !hasForbiddenFolder(folder)) {
       downloadFilename = `${folder}/${filename}`;
+      saveAs = false;
     }
   }
 
@@ -148,6 +151,7 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
       {
         url: blobUrl,
         filename: downloadFilename,
+        saveAs,
         conflictAction: "overwrite",
       },
       () => {
@@ -2040,6 +2044,7 @@ async function downloadMedia(media) {
     url: src,
     mediaType: media.tagName === "VIDEO" ? "video" : "image",
     folder: settings.downloadFolder,
+    saveAs: settings.showSaveAs,
   });
 }
 
@@ -2390,11 +2395,17 @@ function openContextMenu(media, x, y, linkEl) {
   contextMenuEl = menu;
   contextMenuMedia = media;
 
-  const rect = menu.getBoundingClientRect();
-  const maxX = window.innerWidth - rect.width - 8;
-  const maxY = window.innerHeight - rect.height - 8;
+  const menuRect = menu.getBoundingClientRect();
+  const menuHeight = menuRect.height;
+  const gap = 12;
+
+  let top = y - menuHeight - gap;
+  if (top < 8) top = y + gap;
+
+  const maxX = window.innerWidth - menuRect.width - 8;
+  const maxY = window.innerHeight - menuHeight - 8;
   menu.style.left = `${Math.min(Math.max(8, x), Math.max(8, maxX))}px`;
-  menu.style.top = `${Math.min(Math.max(8, y), Math.max(8, maxY))}px`;
+  menu.style.top = `${Math.max(8, Math.min(top, maxY))}px`;
   requestAnimationFrame(() => menu.classList.add("imd-context-menu-open"));
 }
 
@@ -2418,7 +2429,8 @@ document.addEventListener(
       }
     }
     if (!media) return;
-    openContextMenu(media, event.clientX, event.clientY - 64, linkEl);
+
+    openContextMenu(media, event.clientX, event.clientY, linkEl);
   },
   true,
 );

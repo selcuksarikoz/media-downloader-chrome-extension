@@ -93,13 +93,14 @@ async function keepPreviewNextToSource(previewTabId, sourceTabId) {
   }, 5000);
 }
 
-function downloadMedia({ url, folder, mediaType }) {
+function downloadMedia({ url, folder, saveAs, mediaType }) {
   let filename = getFilenameFromUrl(url, mediaType);
 
   if (typeof folder === "string") {
     folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
     if (folder && !hasForbiddenFolder(folder)) {
       filename = `${folder}/${filename}`;
+      saveAs = false;
     }
   }
 
@@ -107,6 +108,7 @@ function downloadMedia({ url, folder, mediaType }) {
     {
       url,
       filename,
+      saveAs: saveAs === true,
       conflictAction: "overwrite",
     },
     () => {

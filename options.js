@@ -3,6 +3,7 @@ import { DEFAULT_BLACKLISTED_DOMAINS } from "./shared.js";
 const DEFAULTS = {
   buttonPosition: "top-right",
   downloadFolder: "",
+  showSaveAs: true,
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
@@ -22,6 +23,7 @@ function saveOptions() {
     {
       buttonPosition: get("position").value,
       downloadFolder: folder,
+      showSaveAs: get("saveAs").checked,
       showPreviewButton: get("showPreview").checked,
       showVideoControls: get("showVideoControls").checked,
       useContextMenu: get("useContextMenu").checked,
@@ -51,6 +53,7 @@ function restoreOptions() {
       : items.downloadFolder;
     get("position").value = items.buttonPosition;
     get("folder").value = folder;
+    get("saveAs").checked = items.showSaveAs;
     get("showPreview").checked = items.showPreviewButton;
     get("showVideoControls").checked = items.showVideoControls;
     get("useContextMenu").checked = items.useContextMenu;
