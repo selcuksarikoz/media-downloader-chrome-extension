@@ -221,7 +221,8 @@ body.options-page {
   border: 0;
   background: transparent;
   z-index: $imd-z-action;
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
   gap: $imd-gap;
   opacity: 0;
   pointer-events: none;
@@ -235,7 +236,8 @@ body.options-page {
 .imd-context-menu {
   position: fixed;
   z-index: $imd-z-menu;
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
   gap: $imd-gap;
   margin: 0;
   padding: $imd-gap;
@@ -256,14 +258,17 @@ body.options-page {
 
 .imd-action-btn {
   @include imd-action-button;
+  background-color: $imd-btn-bg !important;
+  border: none !important;
+  flex-shrink: 0 !important;
 
   &:hover {
-    background-color: $imd-btn-bg-hover;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    background-color: $imd-btn-bg-hover !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25) !important;
   }
 
   &.imd-recording {
-    background-color: $imd-accent-error;
+    background-color: $imd-accent-error !important;
   }
 
   &:disabled {
@@ -278,7 +283,7 @@ body.options-page {
   svg {
     width: $imd-icon-size;
     height: $imd-icon-size;
-    fill: $imd-text;
+    fill: $imd-text !important;
     pointer-events: none;
   }
 }
@@ -361,7 +366,8 @@ body.options-page {
 
 .imd-download-actions {
   margin-left: auto;
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
   gap: $imd-gap;
 }
 
@@ -460,6 +466,7 @@ body.options-page {
 }
 
 .imd-lightbox-actions-row {
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
   gap: 8px;
 }
