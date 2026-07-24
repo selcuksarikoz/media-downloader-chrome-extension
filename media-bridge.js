@@ -6,6 +6,20 @@ const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const blobKinds = new Map();
+const BLOB_KINDS_MAX_SIZE = 500;
+
+function trimBlobKinds() {
+  if (blobKinds.size <= BLOB_KINDS_MAX_SIZE) return;
+  const excess = blobKinds.size - BLOB_KINDS_MAX_SIZE;
+  let removed = 0;
+  for (const [url, entry] of blobKinds) {
+    if (removed >= excess) break;
+    if (entry.kind !== "media-source" || !entry.record?.lockCount) {
+      blobKinds.delete(url);
+      removed++;
+    }
+  }
+}
 const activeRecordings = new Map();
 const activeJobs = new Set();
 const activeJobControllers = new Map();
@@ -113,6 +127,7 @@ URL.createObjectURL = (object) => {
   } else if (object instanceof Blob) {
     blobKinds.set(url, { kind: "blob" });
   }
+  trimBlobKinds();
   return url;
 };
 
@@ -588,6 +603,13 @@ function getCaptureRenderHost() {
   return captureRenderHost;
 }
 
+function cleanupCaptureRenderHost() {
+  if (captureRenderHost && !captureRenderHost.children.length) {
+    captureRenderHost.remove();
+    captureRenderHost = null;
+  }
+}
+
 function hostVideoForCapture(video) {
   return () => {};
 }
@@ -645,6 +667,7 @@ function keepVideoFramesDecoded(video) {
     if (callbackId !== undefined) video.cancelVideoFrameCallback?.(callbackId);
     renderedFrameTimes.delete(video);
     canvas.remove();
+    cleanupCaptureRenderHost();
   };
 }
 

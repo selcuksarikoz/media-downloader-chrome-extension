@@ -1080,8 +1080,17 @@ function repositionOpenControls() {
   });
 }
 
-window.addEventListener("scroll", repositionOpenControls, true);
-window.addEventListener("resize", repositionOpenControls);
+let repositionFrame = null;
+function scheduleReposition() {
+  if (repositionFrame !== null) return;
+  repositionFrame = requestAnimationFrame(() => {
+    repositionFrame = null;
+    repositionOpenControls();
+  });
+}
+
+window.addEventListener("scroll", scheduleReposition, true);
+window.addEventListener("resize", scheduleReposition);
 
 let pointerFrame = null;
 let lastPointerPosition = null;
@@ -1158,6 +1167,23 @@ function findTopMediaAtPoint(x, y) {
   return bestMedia;
 }
 
+let visibilityStyleCacheFrame = -1;
+const visibilityStyleCache = new Map();
+
+function getCachedComputedStyle(element) {
+  const frame = performance.now();
+  if (visibilityStyleCacheFrame !== Math.floor(frame / 16)) {
+    visibilityStyleCache.clear();
+    visibilityStyleCacheFrame = Math.floor(frame / 16);
+  }
+  let cached = visibilityStyleCache.get(element);
+  if (!cached) {
+    cached = getComputedStyle(element);
+    visibilityStyleCache.set(element, cached);
+  }
+  return cached;
+}
+
 /** Check if a media element is actually visible (not hidden, opacity 0, etc.). */
 function isMediaActuallyVisible(media) {
   const hasBackgroundProxy = hasVisibleBackgroundProxy(media);
@@ -1179,7 +1205,7 @@ function isMediaActuallyVisible(media) {
     ) {
       return false;
     }
-    const style = getComputedStyle(element);
+    const style = getCachedComputedStyle(element);
     if (
       style.display === "none" ||
       style.visibility === "hidden" ||
@@ -1196,56 +1222,88 @@ function isMediaActuallyVisible(media) {
 function hasVisibleBackgroundProxy(media) {
   if (!media.parentElement) return false;
   const mediaRect = media.getBoundingClientRect();
-  const candidates =
-    media.tagName === "VIDEO"
-      ? Array.from(
-          (getInstagramReelLink(media) || media.parentElement).querySelectorAll(
-            "img",
-          ),
-        )
-      : Array.from(media.parentElement.children);
-  return candidates.some((element) => {
-    if (element === media) return false;
-    const style = getComputedStyle(element);
-    const hasVisibleImage =
-      element.tagName === "IMG" && Boolean(element.currentSrc || element.src);
+  const parent = media.tagName === "VIDEO"
+    ? (getInstagramReelLink(media) || media.parentElement)
+    : media.parentElement;
+  if (!parent) return false;
+
+  if (media.tagName === "VIDEO") {
+    const imgs = parent.querySelectorAll("img");
+    for (const element of imgs) {
+      if (element === media) continue;
+      const style = getCachedComputedStyle(element);
+      const hasVisibleImage = element.tagName === "IMG" && Boolean(element.currentSrc || element.src);
+      if (
+        (!hasVisibleImage && style.backgroundImage === "none") ||
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        Number(style.opacity) === 0
+      ) continue;
+      const rect = element.getBoundingClientRect();
+      if (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.left < mediaRect.right &&
+        rect.right > mediaRect.left &&
+        rect.top < mediaRect.bottom &&
+        rect.bottom > mediaRect.top
+      ) return true;
+    }
+    return false;
+  }
+
+  for (const element of parent.children) {
+    if (element === media) continue;
+    const style = getCachedComputedStyle(element);
+    const hasVisibleImage = element.tagName === "IMG" && Boolean(element.currentSrc || element.src);
     if (
       (!hasVisibleImage && style.backgroundImage === "none") ||
       style.display === "none" ||
       style.visibility === "hidden" ||
       Number(style.opacity) === 0
-    ) {
-      return false;
-    }
+    ) continue;
     const rect = element.getBoundingClientRect();
-    return (
+    if (
       rect.width > 0 &&
       rect.height > 0 &&
       rect.left < mediaRect.right &&
       rect.right > mediaRect.left &&
       rect.top < mediaRect.bottom &&
       rect.bottom > mediaRect.top
-    );
-  });
+    ) return true;
+  }
+  return false;
+}
+
+let cachedModalsFrame = -1;
+let cachedModals = [];
+
+function getVisibleModals() {
+  const frame = performance.now();
+  if (cachedModalsFrame !== Math.floor(frame / 16)) {
+    cachedModalsFrame = Math.floor(frame / 16);
+    cachedModals = Array.from(
+      document.querySelectorAll(
+        'dialog[open], [role="dialog"], [aria-modal="true"]',
+      ),
+    ).filter((modal) => {
+      const style = getCachedComputedStyle(modal);
+      const rect = modal.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity) > 0 &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    });
+  }
+  return cachedModals;
 }
 
 /** Find the topmost modal at a point, or determine if one exists. */
 function getModalAtPoint(x, y, stack) {
-  const modals = Array.from(
-    document.querySelectorAll(
-      'dialog[open], [role="dialog"], [aria-modal="true"]',
-    ),
-  ).filter((modal) => {
-    const style = getComputedStyle(modal);
-    const rect = modal.getBoundingClientRect();
-    return (
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      Number(style.opacity) > 0 &&
-      rect.width > 0 &&
-      rect.height > 0
-    );
-  });
+  const modals = getVisibleModals();
   if (!modals.length) return { hasModal: false, modal: null };
 
   const modal = stack
@@ -1539,6 +1597,7 @@ function openLightbox(media, url) {
       <span class="imd-lightbox-info"></span>
     `;
       const infoEl = actions.querySelector(".imd-lightbox-info");
+      const infoAbort = new AbortController();
       img.addEventListener(
         "load",
         () => {
@@ -1550,7 +1609,7 @@ function openLightbox(media, url) {
           const format =
             ext === "png" ? "PNG" : ext === "webp" ? "WebP" : "JPG";
           infoEl.textContent = `${w} × ${h} · ${format}`;
-          fetch(resolvedUrl, { method: "HEAD" })
+          fetch(resolvedUrl, { method: "HEAD", signal: infoAbort.signal })
             .then((res) => {
               const ct = res.headers.get("Content-Type");
               if (ct) {
@@ -1605,13 +1664,19 @@ function openLightbox(media, url) {
         passive: true,
       });
 
+      const escHandler = (e) => {
+        if (e.key === "Escape") close();
+      };
+      document.addEventListener("keydown", escHandler);
+
       const cleanup = () => {
+        infoAbort.abort();
+        document.removeEventListener("keydown", escHandler);
+        overlay.removeEventListener("scroll", repositionOpenControls);
         overlay.remove();
         actions.remove();
         lightboxOpen = false;
         if (resolvedUrl.startsWith("blob:")) {
-          // Defer revocation so the in-flight download fetch (handled by the
-          // media bridge) has time to read the blob before it is released.
           setTimeout(() => URL.revokeObjectURL(resolvedUrl), 60_000);
         }
         document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
@@ -1621,10 +1686,7 @@ function openLightbox(media, url) {
         lightboxZoomLevel = 1;
       };
 
-      const close = () => {
-        overlay.removeEventListener("scroll", repositionOpenControls);
-        cleanup();
-      };
+      const close = () => cleanup();
 
       let lightboxZoomed = false;
       let lightboxZoomLevel = 1;
@@ -1729,13 +1791,7 @@ function openLightbox(media, url) {
         { passive: false },
       );
 
-      const escHandler = (e) => {
-        if (e.key === "Escape") {
-          close();
-          document.removeEventListener("keydown", escHandler);
-        }
-      };
-      document.addEventListener("keydown", escHandler);
+
     })
     .catch((error) => {
       console.error("Lightbox failed to load image:", error);
@@ -1830,21 +1886,16 @@ function measureImageArea(url) {
     const finish = (area) => {
       if (!settled) {
         settled = true;
+        clearTimeout(timeout);
+        probe.onload = null;
+        probe.onerror = null;
+        probe.src = "";
         resolve(area);
       }
     };
-    const timeout = setTimeout(() => {
-      finish(0);
-      probe.src = "";
-    }, 5000);
-    probe.onload = () => {
-      clearTimeout(timeout);
-      finish(probe.naturalWidth * probe.naturalHeight);
-    };
-    probe.onerror = () => {
-      clearTimeout(timeout);
-      finish(0);
-    };
+    const timeout = setTimeout(() => finish(0), 5000);
+    probe.onload = () => finish(probe.naturalWidth * probe.naturalHeight);
+    probe.onerror = () => finish(0);
     probe.src = url;
   });
 }
@@ -1861,25 +1912,22 @@ function measureVideoResolution(url) {
     const finish = (w, h) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
+      probe.onloadeddata = null;
+      probe.onloadedmetadata = null;
+      probe.onerror = null;
       probe.removeAttribute("src");
       probe.load();
       resolve(w * h);
     };
     const timeout = setTimeout(() => finish(0, 0), 15000);
-    probe.onloadeddata = () => {
-      clearTimeout(timeout);
-      finish(probe.videoWidth, probe.videoHeight);
-    };
+    probe.onloadeddata = () => finish(probe.videoWidth, probe.videoHeight);
     probe.onloadedmetadata = () => {
       if (probe.videoWidth > 0 && probe.videoHeight > 0) {
-        clearTimeout(timeout);
         finish(probe.videoWidth, probe.videoHeight);
       }
     };
-    probe.onerror = () => {
-      clearTimeout(timeout);
-      finish(0, 0);
-    };
+    probe.onerror = () => finish(0, 0);
     probe.src = url;
     probe.load();
   });
