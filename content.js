@@ -17,7 +17,6 @@ const DEFAULT_BLACKLISTED_DOMAINS = [
 const DEFAULT_SETTINGS = {
   buttonPosition: "top-right",
   downloadFolder: "",
-  showSaveAs: false,
   showPreviewButton: true,
   showVideoControls: true,
   captureType: "jpg",
@@ -135,14 +134,12 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
   const blobUrl = URL.createObjectURL(blob);
 
   let downloadFilename = filename;
-  let saveAs = settings.showSaveAs;
   if (settings.downloadFolder) {
     const folder = settings.downloadFolder
       .trim()
       .replace(/^[\/\\]+|[\/\\]+$/g, "");
     if (folder && !hasForbiddenFolder(folder)) {
       downloadFilename = `${folder}/${filename}`;
-      saveAs = false;
     }
   }
 
@@ -151,7 +148,6 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
       {
         url: blobUrl,
         filename: downloadFilename,
-        saveAs,
         conflictAction: "overwrite",
       },
       () => {
@@ -2044,7 +2040,6 @@ async function downloadMedia(media) {
     url: src,
     mediaType: media.tagName === "VIDEO" ? "video" : "image",
     folder: settings.downloadFolder,
-    saveAs: settings.showSaveAs,
   });
 }
 
