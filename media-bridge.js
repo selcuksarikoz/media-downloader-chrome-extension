@@ -493,7 +493,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
 
   const completion = new Promise((resolve, reject) => {
     recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size) chunks.push(event.data);
+      if (event.data && event.data.size > 0) chunks.push(event.data);
     });
     recorder.addEventListener("stop", resolve, { once: true });
     recorder.addEventListener(
@@ -519,7 +519,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   try {
     releaseFramePump = keepVideoFramesDecoded(captureVideo);
     recordingStartPos = captureVideo.currentTime;
-    recorder.start(5000);
+    recorder.start(1000);
     await captureVideo.play();
     safetyTimer = setInterval(() => {
       if (captureVideo.ended || (Number.isFinite(captureVideo.duration) && captureVideo.duration > 0 && captureVideo.currentTime >= captureVideo.duration - 0.15)) {
@@ -616,8 +616,18 @@ function hostVideoForCapture(video) {
 
 function keepVideoFramesDecoded(video) {
   const canvas = document.createElement("canvas");
-  canvas.width = 160;
-  canvas.height = 90;
+  const vw = video.videoWidth || 0;
+  const vh = video.videoHeight || 0;
+  if (vw >= 3840 || vh >= 2160) {
+    canvas.width = 1280;
+    canvas.height = 720;
+  } else if (vw >= 1920 || vh >= 1080) {
+    canvas.width = 640;
+    canvas.height = 360;
+  } else {
+    canvas.width = 320;
+    canvas.height = 180;
+  }
   canvas.setAttribute("aria-hidden", "true");
   canvas.style.cssText =
     "display:block;flex:0 0 160px;width:160px;height:90px;" +
