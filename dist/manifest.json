@@ -1,9 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Media Downloader",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "Download images and videos with overlay controls.",
-  "permissions": ["storage", "downloads", "activeTab", "scripting", "clipboardWrite"],
+  "permissions": [
+    "storage",
+    "downloads",
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
