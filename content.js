@@ -1653,8 +1653,12 @@ function openLightbox(media, url) {
           previewMedia(img);
           close();
         });
-      document.body.appendChild(overlay);
-      document.body.appendChild(actions);
+      const anchor =
+        document.getElementById("MediaViewer")?.open
+          ? document.getElementById("MediaViewer")
+          : document.body;
+      anchor.appendChild(overlay);
+      anchor.appendChild(actions);
 
       requestAnimationFrame(() => {
         overlay.classList.add("imd-lightbox-open");
@@ -2335,14 +2339,28 @@ function triggerTrim(media, trimBtn) {
 }
 
 /** Find a tracked media element at the given viewport coordinates. */
+function findTrackedAncestor(el) {
+  let node = el;
+  while (node && node !== document.body) {
+    if (trackedMedia.has(node)) return node;
+    const found = node.querySelector?.("img[data-imd-media-type], video[data-imd-media-type]");
+    if (found && trackedMedia.has(found)) return found;
+    node = node.parentElement;
+  }
+  return null;
+}
+
 function getMediaAtPoint(x, y) {
+  const originals = [];
+  for (const [el] of trackedMedia) {
+    originals.push([el, el.style.pointerEvents]);
+    el.style.pointerEvents = "auto";
+  }
   const stack = document.elementsFromPoint(x, y);
+  for (let i = originals.length - 1; i >= 0; i--) originals[i][0].style.pointerEvents = originals[i][1];
   for (const el of stack) {
-    let node = el;
-    while (node) {
-      if (trackedMedia.has(node)) return node;
-      node = node.parentElement;
-    }
+    const found = findTrackedAncestor(el);
+    if (found) return found;
   }
   return null;
 }
@@ -2391,7 +2409,10 @@ function openContextMenu(media, x, y, linkEl) {
     });
   }
 
-  document.body.appendChild(menu);
+  const anchor = document.getElementById("MediaViewer")?.open
+    ? document.getElementById("MediaViewer")
+    : document.body;
+  anchor.appendChild(menu);
   contextMenuEl = menu;
   contextMenuMedia = media;
 
@@ -2409,31 +2430,62 @@ function openContextMenu(media, x, y, linkEl) {
   requestAnimationFrame(() => menu.classList.add("imd-context-menu-open"));
 }
 
-document.addEventListener(
-  "contextmenu",
-  (event) => {
-    if (!settings.useContextMenu || !extensionActive) return;
-    const media = getMediaAtPoint(event.clientX, event.clientY);
-    const path = event.composedPath();
-    let linkEl =
-      path.find((el) => el.tagName === "A" && el.hasAttribute("href")) ||
-      event.target?.closest?.("a[href]");
-    if (!linkEl && media) {
-      let node = media;
-      while (node && node !== document.body) {
-        if (node.tagName === "A" && node.hasAttribute("href")) {
-          linkEl = node;
-          break;
+function handleContextMenuEvent(event) {
+  if (!extensionActive) return;
+
+  const path = event.composedPath();
+  let media = null;
+
+  for (const el of path) {
+    if (trackedMedia.has(el)) { media = el; break; }
+    const found = el.querySelector?.("img[data-imd-media-type], video[data-imd-media-type]");
+    if (found && trackedMedia.has(found)) { media = found; break; }
+  }
+
+  if (!media) media = getMediaAtPoint(event.clientX, event.clientY);
+
+  if (!media) return;
+
+  event.stopPropagation();
+
+  let linkEl =
+    path.find((el) => el.tagName === "A" && el.hasAttribute("href")) ||
+    event.target?.closest?.("a[href]");
+  if (!linkEl) {
+    let node = media;
+    while (node && node !== document.body) {
+      if (node.tagName === "A" && node.hasAttribute("href")) {
+        linkEl = node;
+        break;
+      }
+      node = node.parentElement || node.getRootNode()?.host;
+    }
+  }
+
+  openContextMenu(media, event.clientX, event.clientY, linkEl);
+}
+
+document.addEventListener("contextmenu", handleContextMenuEvent, true);
+
+const dialogObserver = new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (node.nodeType !== 1) continue;
+      const dialogs = node.tagName === "DIALOG"
+        ? [node]
+        : [...(node.querySelectorAll?.("dialog") ?? [])];
+      for (const dialog of dialogs) {
+        if (!dialog.dataset.imdCtxMenu) {
+          dialog.dataset.imdCtxMenu = "true";
+          dialog.addEventListener("contextmenu", handleContextMenuEvent, true);
         }
-        node = node.parentElement || node.getRootNode()?.host;
       }
     }
-    if (!media) return;
-
-    openContextMenu(media, event.clientX, event.clientY, linkEl);
-  },
-  true,
-);
+  }
+});
+if (document.body) {
+  dialogObserver.observe(document.body, { childList: true, subtree: true });
+}
 
 document.addEventListener("pointerdown", (event) => {
   if (contextMenuEl && !contextMenuEl.contains(event.target)) {

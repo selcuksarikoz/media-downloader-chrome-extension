@@ -1,8 +1,8 @@
 # Media Downloader
 
-A Chrome extension for downloading images and videos from websites, developed
-especially for Instagram. It adds download, preview, and frame-capture controls
-directly to page media.
+A Chrome extension for downloading images and videos from websites, especially
+Instagram, TikTok, and Telegram Web. It adds download, preview, and frame-capture
+controls directly to page media.
 
 ## Behavior
 
