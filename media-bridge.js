@@ -689,18 +689,20 @@ function isHdrVideo(video) {
 
 function getRecorderMimeType(isHdr) {
   const candidates = [
-    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-    "video/mp4;codecs=avc1.64003E,mp4a.40.2",
-    "video/mp4",
+    "video/mp4;codecs=hvc1.2.4.L150.90,mp4a.40.2",
+    "video/mp4;codecs=hev1.2.4.L150.90,mp4a.40.2",
   ];
   if (isHdr) {
-    candidates.unshift(
-      "video/mp4;codecs=hvc1.2.4.L150.90,mp4a.40.2",
-      "video/mp4;codecs=hev1.2.4.L150.90,mp4a.40.2",
+    candidates.push(
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp9"
     );
   }
+  candidates.push(
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1.64003E,mp4a.40.2",
+    "video/mp4"
+  );
   return candidates.find((type) => MediaRecorder.isTypeSupported(type));
 }
 

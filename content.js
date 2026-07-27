@@ -2083,6 +2083,8 @@ function startTrimRecording(video) {
   }
 
   const mimeType = [
+    "video/mp4;codecs=hvc1.2.4.L150.90,mp4a.40.2",
+    "video/mp4;codecs=hev1.2.4.L150.90,mp4a.40.2",
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4;codecs=avc1.64003E,mp4a.40.2",
     "video/mp4",
