@@ -1433,6 +1433,14 @@ function attachMediaActionHandlers(media, btns) {
   btns.copyBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
+    const restoreTitle = () => {
+      setTimeout(() => {
+        const isVideo = media.tagName === "VIDEO";
+        btns.copyBtn.title = isVideo
+          ? "Copy current frame to clipboard"
+          : "Copy image to clipboard";
+      }, 1500);
+    };
     try {
       const isVideo = media.tagName === "VIDEO";
       const { copiedType } = isVideo
@@ -1449,26 +1457,112 @@ function attachMediaActionHandlers(media, btns) {
       }, 1500);
     } catch (error) {
       console.error("Copy to clipboard failed:", error);
+      btns.copyBtn.title = "Copy failed";
+      restoreTitle();
     }
   });
 }
 
 async function copyImageToClipboard(image) {
-  const blobPromise = getImageClipboardBlob(image);
-  await navigator.clipboard.write([
-    new ClipboardItem({ "image/png": blobPromise }),
-  ]);
-  return { copiedType: "png" };
+  const url = await resolveHighestResolutionImageUrl(image);
+  let blob;
+  try {
+    blob = await fetchImageBlob(url);
+  } catch (error) {
+    blob = await fetchImageBlobViaBackground(url);
+  }
+  const copiedType = await copyBlobToClipboard(blob);
+  return { copiedType };
 }
 
 async function copyVideoFrameToClipboard(video) {
   const preferredFormat = getFrameCaptureFormat(settings.captureType);
   const clipboardFormat = getClipboardImageFormat(preferredFormat);
-  const blobPromise = captureVideoFrameBlob(video, clipboardFormat.extension);
-  await navigator.clipboard.write([
-    new ClipboardItem({ [clipboardFormat.mimeType]: blobPromise }),
-  ]);
-  return { copiedType: clipboardFormat.extension };
+  let blob;
+  try {
+    blob = await captureVideoFrameBlob(video, clipboardFormat.extension);
+  } catch (error) {
+    blob = await captureVideoFrameFromSource(video, clipboardFormat.extension);
+  }
+  const copiedType = await copyBlobToClipboard(blob);
+  return { copiedType };
+}
+
+/** Write an image blob to the system clipboard. */
+async function copyBlobToClipboard(blob) {
+  if (
+    !navigator.clipboard ||
+    typeof navigator.clipboard.write !== "function" ||
+    typeof ClipboardItem === "undefined"
+  ) {
+    throw new Error(
+      "Clipboard is not available on this page (an HTTPS page is required).",
+    );
+  }
+
+  let type = blob.type || "";
+  if (
+    !type ||
+    (typeof ClipboardItem.supports === "function" &&
+      !ClipboardItem.supports(type))
+  ) {
+    blob = await convertImageBlobToPng(blob);
+    type = "image/png";
+  }
+
+  await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+  return type.split("/")[1].replace("jpeg", "jpg");
+}
+
+/** Re-encode any image blob into a PNG blob. */
+async function convertImageBlobToPng(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext("2d").drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (png) =>
+        png ? resolve(png) : reject(new Error("PNG conversion failed.")),
+      "image/png",
+    );
+  });
+}
+
+/** Fetch an image URL as a blob from the current page context. */
+async function fetchImageBlob(url) {
+  const response = await fetch(url, {
+    credentials: "include",
+    redirect: "follow",
+  });
+  if (!response.ok) throw new Error(`Image fetch failed (${response.status}).`);
+  return response.blob();
+}
+
+/** Fetch an image URL as a blob through the background (bypasses CORS). */
+function fetchImageBlobViaBackground(url) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: "fetchMedia", url },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response?.ok || !response.data) {
+          reject(new Error(response?.error || "Image fetch failed."));
+          return;
+        }
+        resolve(
+          new Blob([response.data], {
+            type: response.mimeType || "",
+          }),
+        );
+      },
+    );
+  });
 }
 
 function getFrameCaptureFormat(captureType = settings.captureType) {
@@ -1491,24 +1585,76 @@ function getClipboardImageFormat(preferredFormat) {
   return preferredFormat;
 }
 
-async function getImageClipboardBlob(image) {
-  const url = await resolveHighestResolutionImageUrl(image);
+/** Re-capture a video frame by loading the source with CORS enabled. */
+function captureVideoFrameFromSource(
+  video,
+  captureType = settings.captureType,
+) {
   return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      canvas.getContext("2d").drawImage(img, 0, 0);
-      canvas.toBlob(
-        (blob) =>
-          blob ? resolve(blob) : reject(new Error("Canvas toBlob failed")),
-        "image/png",
-      );
+    const url = getVideoUrl(video);
+    if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
+      reject(new Error("Video source cannot be re-captured."));
+      return;
+    }
+
+    const probe = document.createElement("video");
+    probe.muted = true;
+    probe.playsInline = true;
+    probe.crossOrigin = "anonymous";
+    probe.preload = "auto";
+
+    let settled = false;
+    const finish = (error, blob) => {
+      if (settled) return;
+      settled = true;
+      probe.removeAttribute("src");
+      probe.load();
+      probe.remove();
+      if (error) reject(error);
+      else resolve(blob);
     };
-    img.onerror = () => reject(new Error("Image load failed"));
-    img.src = url;
+
+    probe.onloadedmetadata = () => {
+      const duration = Number.isFinite(probe.duration)
+        ? probe.duration
+        : Infinity;
+      const target = Math.min(
+        Math.max(video.currentTime || 0, 0),
+        Math.max(duration - 0.01, 0),
+      );
+      try {
+        probe.currentTime = target;
+      } catch (error) {
+        finish(error);
+      }
+    };
+    probe.onseeked = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = probe.videoWidth;
+        canvas.height = probe.videoHeight;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas is unavailable.");
+        context.imageSmoothingEnabled = false;
+        context.drawImage(probe, 0, 0);
+        const format = getFrameCaptureFormat(captureType);
+        canvas.toBlob(
+          (result) =>
+            result
+              ? finish(null, result)
+              : finish(new Error("Frame encoding failed.")),
+          format.mimeType,
+          format.quality,
+        );
+      } catch (error) {
+        finish(error);
+      }
+    };
+    probe.onerror = () =>
+      finish(new Error("Video source could not be loaded for capture."));
+
+    probe.src = url;
+    probe.load();
   });
 }
 

@@ -20,7 +20,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.tabs.create({ url: message.url, active: false });
     return;
   }
+  if (message.action === "fetchMedia") {
+    fetchMedia(message.url)
+      .then(({ mimeType, data }) =>
+        sendResponse({ ok: true, mimeType, data }),
+      )
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
 });
+
+async function fetchMedia(url) {
+  if (url.startsWith("blob:") || url.startsWith("data:")) {
+    throw new Error("Page-local media cannot be fetched from the background.");
+  }
+  const response = await fetch(url, {
+    credentials: "include",
+    redirect: "follow",
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Fetch failed (${response.status}).`);
+  const data = await response.arrayBuffer();
+  const mimeType = response.headers.get("Content-Type") || "";
+  return { mimeType, data };
+}
 
 async function openPreviewTab(url, sourceTabId) {
   const sourceTab = sourceTabId
