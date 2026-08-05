@@ -9,7 +9,7 @@ const DEFAULTS = {
   captureType: "jpg",
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
-  maxConcurrentDownloads: 5,
+  maxConcurrentDownloads: 2,
   useContextMenu: false,
 };
 const get = (id) => document.getElementById(id);

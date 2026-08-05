@@ -470,3 +470,32 @@ body.options-page {
   flex-direction: row !important;
   gap: 8px;
 }
+
+.imd-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 16px);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: $imd-radius-panel;
+  background: $imd-panel-bg;
+  border: 1px solid $imd-border;
+  box-shadow: $imd-shadow;
+  color: $imd-text;
+  font-size: 13px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+  z-index: $imd-z-menu;
+}
+
+.imd-toast.imd-toast-show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}

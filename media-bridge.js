@@ -3,6 +3,7 @@ const TRIM_EVENT = "imd:trim-blob-video";
 const CONTROL_EVENT = "imd:control-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
+const PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const blobKinds = new Map();
@@ -25,7 +26,7 @@ const activeJobs = new Set();
 const activeJobControllers = new Map();
 const queuedJobs = [];
 const queuedVideoIds = new Set();
-let maxConcurrentJobs = 5;
+let maxConcurrentJobs = 2;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
 const protectedVideos = new WeakSet();
@@ -148,7 +149,7 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
 
   maxConcurrentJobs = Math.min(
     10,
-    Math.max(1, Number.parseInt(maxConcurrent, 10) || 5)
+    Math.max(1, Number.parseInt(maxConcurrent, 10) || 2)
   );
 
   const video = document.querySelector(
@@ -177,7 +178,7 @@ window.addEventListener(TRIM_EVENT, (event) => {
 
   maxConcurrentJobs = Math.min(
     10,
-    Math.max(1, Number.parseInt(maxConcurrent, 10) || 5)
+    Math.max(1, Number.parseInt(maxConcurrent, 10) || 2)
   );
 
   const video = document.querySelector(
@@ -334,6 +335,16 @@ function sendBlobForDownload(blob, filename, videoId) {
   }
 }
 
+function persistChunk(videoId, blob) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent(PERSIST_CHUNK_EVENT, {
+        detail: { videoId, blob },
+      })
+    );
+  } catch {}
+}
+
 async function downloadKnownBlob(url, filename, videoId, signal) {
   const response = await fetch(url, { signal });
   const blob = await response.blob();
@@ -403,9 +414,13 @@ function isMediaFullyBuffered(video) {
 function waitForMediaCompletion(video, videoId, signal) {
   return new Promise((resolve, reject) => {
     let timer;
+    let stallTimer;
     let settled = false;
+    let lastProgressTime = video.currentTime;
+    let lastProgressUpdateAt = Date.now();
     const releasePlaybackLock = keepVideoPlaying(video);
     const reportProgress = () => {
+      lastProgressUpdateAt = Date.now();
       const progress =
         Number.isFinite(video.duration) && video.duration > 0
           ? (video.currentTime / video.duration) * 100
@@ -421,6 +436,7 @@ function waitForMediaCompletion(video, videoId, signal) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(stallTimer);
       video.removeEventListener("ended", finish);
       video.removeEventListener("error", fail);
       video.removeEventListener("timeupdate", reportProgress);
@@ -446,6 +462,17 @@ function waitForMediaCompletion(video, videoId, signal) {
     if (Number.isFinite(video.duration) && video.duration > 0) {
       timer = setTimeout(finish, Math.ceil(video.duration * 1000) + 5000);
     }
+    // Guard against infinite duration (common for MediaSource streams): if
+    // playback stops making progress for a while, finalize with the segments
+    // collected so far instead of hanging the download forever.
+    stallTimer = setInterval(() => {
+      const current = video.currentTime;
+      if (current === lastProgressTime) {
+        if (Date.now() - lastProgressUpdateAt > 15000) finish();
+      } else {
+        lastProgressTime = current;
+      }
+    }, 1000);
     video.play().catch(() => {});
   });
 }
@@ -465,6 +492,16 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   const outputName = replaceExtension(filename, ext);
 
   const captureVideo = video;
+  const wasLooping = captureVideo.loop;
+  // The page usually recycles this element for the next reel/story by swapping
+  // its source. Lock the source for the duration of the recording so the
+  // download keeps capturing the original media instead of stalling or
+  // switching to unrelated content.
+  protectedVideos.add(captureVideo);
+  // Automatic downloads record a single full pass; disable looping so the
+  // recording ends deterministically. Trims are user-stopped, so leave loop
+  // untouched there.
+  if (!hasStartTime) captureVideo.loop = false;
   if (video.seekable.length && video.duration !== Infinity) {
     video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
   }
@@ -485,7 +522,9 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   let releaseFramePump = () => {};
   let recordingStartPos = 0;
   let recordingElapsed = 0;
+  let lastTimeupdateAt = Date.now();
   const reportProgress = () => {
+    lastTimeupdateAt = Date.now();
     recordingElapsed = Math.max(0, captureVideo.currentTime - recordingStartPos);
     const label = `Recording ${recordingElapsed.toFixed(1)}s…`;
     emitStatus(videoId, "progress", label, getRecordingProgress(captureVideo, recordingStartPos));
@@ -493,7 +532,10 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
 
   const completion = new Promise((resolve, reject) => {
     recorder.addEventListener("dataavailable", (event) => {
-      if (event.data && event.data.size > 0) chunks.push(event.data);
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+        persistChunk(videoId, event.data);
+      }
     });
     recorder.addEventListener("stop", resolve, { once: true });
     recorder.addEventListener(
@@ -516,6 +558,8 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   }
 
   let completed = false;
+  let stallTimer;
+  let lastProgressTime = captureVideo.currentTime;
   try {
     releaseFramePump = keepVideoFramesDecoded(captureVideo);
     recordingStartPos = captureVideo.currentTime;
@@ -526,6 +570,23 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
         stop();
       }
     }, 250);
+    // If the element stops producing frames (e.g. the page recycled it even
+    // though we locked the source), finalize with what was captured instead of
+    // leaving the download hanging forever.
+    stallTimer = setInterval(() => {
+      const current = captureVideo.currentTime;
+      if (current !== lastProgressTime) {
+        lastProgressTime = current;
+        return;
+      }
+      if (captureVideo.ended) {
+        stop();
+        return;
+      }
+      if (Date.now() - lastTimeupdateAt > 15000) {
+        stop();
+      }
+    }, 1000);
     emitStatus(videoId, "recording", hasStartTime ? `Recording from ${startTime}s…` : "Recording video stream…", 0);
     captureVideo.addEventListener("ended", stop, { once: true });
     captureVideo.addEventListener("timeupdate", reportProgress);
@@ -542,11 +603,15 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     completed = true;
   } finally {
     clearInterval(safetyTimer);
+    clearInterval(stallTimer);
     releaseFramePump();
+    protectedVideos.delete(captureVideo);
+    if (!hasStartTime) captureVideo.loop = wasLooping;
     activeRecordings.delete(videoId);
     signal.removeEventListener("abort", cancel);
     captureVideo.removeEventListener("ended", stop);
     captureVideo.removeEventListener("timeupdate", reportProgress);
+    if (recorder.state !== "inactive") recorder.stop();
     captureVideo.pause();
   }
 }

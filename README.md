@@ -19,7 +19,9 @@ controls directly to page media.
 - Single-buffer MediaSource streams reuse captured segments.
 - Separate MediaSource audio/video buffers are recorded in real time as MP4.
 - Video downloads that require recording are queued according to the configured
-  concurrency limit and require the tab to remain open.
+  concurrency limit. Recorded segments are streamed to the extension's storage,
+  so a download is finalized and saved even if the tab is closed or the page
+  navigates mid-recording (a partial file is saved if recording was interrupted).
 - The capture button saves the video's current frame as JPG, PNG, or WebP. It
   does not start a video recording.
 - The **Trim** button (scissors icon) records a video segment starting from the

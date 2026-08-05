@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
   captureType: "jpg",
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
-  maxConcurrentDownloads: 5,
+  maxConcurrentDownloads: 2,
   useContextMenu: false,
 };
 const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "recording", "progress"]);
@@ -44,8 +44,65 @@ const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
+const BLOB_PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
+const BLOB_STORE_PORT_NAME = "imd-blob-store";
+const FETCH_MEDIA_PORT_NAME = "imd-fetch-media";
+let blobStorePort = null;
+let blobStoreSeq = 0;
+const blobStorePending = new Map();
+
+function getBlobStorePort() {
+  if (blobStorePort) return blobStorePort;
+  try {
+    blobStorePort = chrome.runtime.connect({ name: BLOB_STORE_PORT_NAME });
+  } catch {
+    return null;
+  }
+  blobStorePort.onDisconnect.addListener(() => {
+    blobStorePort = null;
+  });
+  blobStorePort.onMessage.addListener((msg) => {
+    if (!msg?.requestId) return;
+    const pending = blobStorePending.get(msg.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    blobStorePending.delete(msg.requestId);
+    pending.resolve(msg.ok === true);
+  });
+  return blobStorePort;
+}
+
+function sendBlobStoreMessage(message) {
+  return new Promise((resolve) => {
+    const port = getBlobStorePort();
+    if (!port) {
+      resolve(false);
+      return;
+    }
+    const requestId = `m${++blobStoreSeq}`;
+    message.requestId = requestId;
+    const timer = setTimeout(() => {
+      blobStorePending.delete(requestId);
+      resolve(false);
+    }, 15000);
+    blobStorePending.set(requestId, { resolve, timer });
+    try {
+      port.postMessage(message);
+    } catch {
+      clearTimeout(timer);
+      blobStorePending.delete(requestId);
+      resolve(false);
+    }
+  });
+}
+
+window.addEventListener(BLOB_PERSIST_CHUNK_EVENT, (event) => {
+  const { videoId, blob } = event.detail || {};
+  if (!videoId || !blob || !blob.size) return;
+  sendBlobStoreMessage({ action: "chunk", jobId: videoId, blob });
+});
 let lightboxOpen = false;
 const visibleMedia = new WeakSet();
 const mediaIntersectionObserver = new IntersectionObserver(
@@ -125,24 +182,59 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
 
   updateBlobDownloadPanel(videoId, status, message, progress);
 
-  if (status === "error") console.error(message);
+  if (status === "error" || status === "canceled") {
+    console.error(message);
+    sendBlobStoreMessage({ action: "cancel", jobId: videoId });
+  }
 });
 
-window.addEventListener(BLOB_DATA_EVENT, (event) => {
+window.addEventListener(BLOB_DATA_EVENT, async (event) => {
   const { blob, filename, videoId } = event.detail || {};
   if (!blob || !blob.size) return;
 
+  const sent = await sendBlobStoreMessage({
+    action: "finalize",
+    jobId: videoId,
+    blob,
+    filename,
+    folder: settings.downloadFolder,
+    saveAs: settings.showSaveAs,
+  });
+  if (!sent) {
+    downloadBlobFile(blob, filename, settings.downloadFolder, settings.showSaveAs);
+  }
+});
+
+let toastEl = null;
+let toastTimer = null;
+
+/** Show a short transient error message near the bottom of the viewport. */
+function showToast(message) {
+  if (!toastEl) {
+    toastEl = document.createElement("div");
+    toastEl.className = "imd-toast";
+    toastEl.setAttribute("role", "alert");
+    document.documentElement.appendChild(toastEl);
+  }
+  toastEl.textContent = message;
+  toastEl.classList.add("imd-toast-show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove("imd-toast-show");
+  }, 4000);
+}
+
+/** Directly start a blob file download (fallback when persistence fails). */
+function downloadBlobFile(blob, filename, folder, saveAs) {
   const blobUrl = URL.createObjectURL(blob);
 
   let downloadFilename = filename;
-  let saveAs = settings.showSaveAs;
-  if (settings.downloadFolder) {
-    const folder = settings.downloadFolder
-      .trim()
-      .replace(/^[\/\\]+|[\/\\]+$/g, "");
-    if (folder && !hasForbiddenFolder(folder)) {
-      downloadFilename = `${folder}/${filename}`;
-      saveAs = false;
+  let useSaveAs = saveAs;
+  if (folder) {
+    const cleanFolder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    if (cleanFolder && !hasForbiddenFolder(cleanFolder)) {
+      downloadFilename = `${cleanFolder}/${filename}`;
+      useSaveAs = false;
     }
   }
 
@@ -151,7 +243,7 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
       {
         url: blobUrl,
         filename: downloadFilename,
-        saveAs,
+        saveAs: useSaveAs,
         conflictAction: "overwrite",
       },
       () => {
@@ -160,6 +252,7 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
             "Blob download failed:",
             chrome.runtime.lastError.message,
           );
+          showToast(`Blob download failed: ${chrome.runtime.lastError.message}`);
         }
         setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
       },
@@ -171,7 +264,7 @@ window.addEventListener(BLOB_DATA_EVENT, (event) => {
     a.click();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
   }
-});
+}
 
 let blobDownloadStack;
 const blobDownloadPanels = new Map();
@@ -1544,24 +1637,48 @@ async function fetchImageBlob(url) {
 /** Fetch an image URL as a blob through the background (bypasses CORS). */
 function fetchImageBlobViaBackground(url) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { action: "fetchMedia", url },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response?.ok || !response.data) {
-          reject(new Error(response?.error || "Image fetch failed."));
-          return;
-        }
-        resolve(
-          new Blob([response.data], {
-            type: response.mimeType || "",
-          }),
-        );
-      },
+    let settled = false;
+    let port;
+    let timeout;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
+        port?.disconnect();
+      } catch {}
+      fn(value);
+    };
+    try {
+      port = chrome.runtime.connect({ name: FETCH_MEDIA_PORT_NAME });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    timeout = setTimeout(
+      () => settle(reject, new Error("Image fetch timed out.")),
+      30000,
     );
+    port.onMessage.addListener((response) => {
+      if (response?.ok && response.data) {
+        settle(
+          resolve,
+          new Blob([response.data], { type: response.mimeType || "" }),
+        );
+      } else {
+        settle(reject, new Error(response?.error || "Image fetch failed."));
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      settle(
+        reject,
+        new Error(
+          chrome.runtime.lastError?.message ||
+            "Background fetch connection closed.",
+        ),
+      );
+    });
+    port.postMessage({ action: "fetchMedia", url });
   });
 }
 
@@ -2189,13 +2306,26 @@ async function downloadMedia(media) {
     return;
   }
 
-  chrome.runtime.sendMessage({
-    action: "download",
-    url: src,
-    mediaType: media.tagName === "VIDEO" ? "video" : "image",
-    folder: settings.downloadFolder,
-    saveAs: settings.showSaveAs,
-  });
+  chrome.runtime.sendMessage(
+    {
+      action: "download",
+      url: src,
+      mediaType: media.tagName === "VIDEO" ? "video" : "image",
+      folder: settings.downloadFolder,
+      saveAs: settings.showSaveAs,
+    },
+    (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Download failed:", chrome.runtime.lastError.message);
+        showToast(`Download failed: ${chrome.runtime.lastError.message}`);
+        return;
+      }
+      if (!response?.ok) {
+        console.error("Download failed:", response?.error || "Unknown error");
+        showToast(response?.error || "Download failed.");
+      }
+    },
+  );
 }
 
 /** Start streaming a blob video for download via the media bridge. */
@@ -2207,6 +2337,13 @@ function streamBlobVideo(video, url) {
     maxConcurrent: settings.maxConcurrentDownloads,
   };
   blobDownloadRequests.set(detail.videoId, detail);
+  sendBlobStoreMessage({
+    action: "job-start",
+    jobId: detail.videoId,
+    filename: detail.filename,
+    folder: settings.downloadFolder,
+    saveAs: settings.showSaveAs,
+  });
   window.dispatchEvent(
     new CustomEvent(BLOB_DOWNLOAD_EVENT, {
       detail,
@@ -2413,6 +2550,13 @@ function triggerTrim(media, trimBtn) {
         trimBtn.title = "Save trim";
         trimBtn.innerHTML = STOP_ICON;
       }
+      sendBlobStoreMessage({
+        action: "job-start",
+        jobId: media.dataset.imdCaptureId,
+        filename: getSuggestedVideoName(media),
+        folder: settings.downloadFolder,
+        saveAs: settings.showSaveAs,
+      });
       window.dispatchEvent(
         new CustomEvent(BLOB_TRIM_EVENT, {
           detail: {
