@@ -47,8 +47,43 @@ const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 const BLOB_PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
+const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
+const CAPTURE_FROM_MSE_RESULT_EVENT = "imd:capture-from-mse-result";
 const BLOB_STORE_PORT_NAME = "imd-blob-store";
 const FETCH_MEDIA_PORT_NAME = "imd-fetch-media";
+let mseCaptureSeq = 0;
+const mseCapturePending = new Map();
+
+window.addEventListener(CAPTURE_FROM_MSE_RESULT_EVENT, (event) => {
+  const { requestId, blob } = event.detail || {};
+  const pending = mseCapturePending.get(requestId);
+  if (!pending) return;
+  mseCapturePending.delete(requestId);
+  clearTimeout(pending.timer);
+  pending.resolve(blob || null);
+});
+
+/** Ask the media bridge to rebuild a blob from the recorded MediaSource segments. */
+function requestMediaSourceBlob(url, timeout = 4000) {
+  return new Promise((resolve) => {
+    const requestId = `mse-capture-${++mseCaptureSeq}`;
+    const timer = setTimeout(() => {
+      if (mseCapturePending.delete(requestId)) resolve(null);
+    }, timeout);
+    mseCapturePending.set(requestId, { resolve, timer });
+    try {
+      window.dispatchEvent(
+        new CustomEvent(CAPTURE_FROM_MSE_EVENT, {
+          detail: { url, requestId },
+        }),
+      );
+    } catch {
+      clearTimeout(timer);
+      mseCapturePending.delete(requestId);
+      resolve(null);
+    }
+  });
+}
 let blobStorePort = null;
 let blobStoreSeq = 0;
 const blobStorePending = new Map();
@@ -1498,14 +1533,17 @@ function attachMediaActionHandlers(media, btns) {
     e.preventDefault();
     e.stopPropagation();
     captureVideoFrame(media)
-      .then((blobUrl) => {
-        if (blobUrl) {
-          openLightbox(media, blobUrl);
+      .then(({ blobUrl, dataUrl }) => {
+        if (dataUrl) {
+          openLightbox(media, dataUrl, blobUrl);
           setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
         }
       })
       .catch((error) => {
         console.error("Video frame capture failed:", error);
+        showToast(
+          `Frame capture failed: ${error?.message || "unknown error"}`,
+        );
       });
   });
   btns.lightboxBtn?.addEventListener("click", (e) => {
@@ -1571,12 +1609,10 @@ async function copyImageToClipboard(image) {
 async function copyVideoFrameToClipboard(video) {
   const preferredFormat = getFrameCaptureFormat(settings.captureType);
   const clipboardFormat = getClipboardImageFormat(preferredFormat);
-  let blob;
-  try {
-    blob = await captureVideoFrameBlob(video, clipboardFormat.extension);
-  } catch (error) {
-    blob = await captureVideoFrameFromSource(video, clipboardFormat.extension);
-  }
+  const blob = await captureVideoFrameBlobWithFallbacks(
+    video,
+    clipboardFormat.extension,
+  );
   const copiedType = await copyBlobToClipboard(blob);
   return { copiedType };
 }
@@ -1776,10 +1812,15 @@ function captureVideoFrameFromSource(
 }
 
 /** Preview media in the background tab (uses highest resolution for images/videos). */
-async function previewMedia(media) {
+async function previewMedia(media, preferredUrl) {
   if (media.tagName === "VIDEO") {
     const url = resolveHighestResolutionVideoUrl(media);
     if (url) openPreviewInBackground(url);
+    return;
+  }
+
+  if (preferredUrl) {
+    openPreviewInBackground(preferredUrl);
     return;
   }
 
@@ -1815,8 +1856,12 @@ function openPreviewInBackground(url) {
   });
 }
 
-/** Open a full-size lightbox overlay for an image (or a captured video frame). */
-function openLightbox(media, url) {
+/**
+ * Open a full-size lightbox overlay for an image (or a captured video frame).
+ * `url` is the display URL (data: URLs render reliably on every page).
+ * `downloadUrl` is the original media URL used for downloads/previews.
+ */
+function openLightbox(media, url, downloadUrl) {
   if (media.tagName !== "IMG" && !url) return;
   if (lightboxOpen) return;
 
@@ -1826,6 +1871,7 @@ function openLightbox(media, url) {
   promise
     .then((resolvedUrl) => {
       if (!resolvedUrl) return;
+      const mediaUrl = downloadUrl || resolvedUrl;
 
       lightboxOpen = true;
 
@@ -1906,14 +1952,14 @@ function openLightbox(media, url) {
         // downloadMedia is async; for blob: URLs it dispatches the download
         // request and the media bridge fetches the blob. Close only after it
         // resolves so the blob URL is not revoked before the fetch completes.
-        downloadMedia(img).finally(() => close());
+        downloadMedia(img, mediaUrl).finally(() => close());
       });
       actions
         .querySelector(".imd-preview-btn")
         .addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          previewMedia(img);
+          previewMedia(img, mediaUrl);
           close();
         });
       const anchor =
@@ -1943,8 +1989,8 @@ function openLightbox(media, url) {
         overlay.remove();
         actions.remove();
         lightboxOpen = false;
-        if (resolvedUrl.startsWith("blob:")) {
-          setTimeout(() => URL.revokeObjectURL(resolvedUrl), 60_000);
+        if (mediaUrl.startsWith("blob:")) {
+          setTimeout(() => URL.revokeObjectURL(mediaUrl), 60_000);
         }
         document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
           btn.hidden = false;
@@ -2291,11 +2337,12 @@ function parseSrcset(srcset) {
 }
 
 /** Download the highest resolution version of an image or video. */
-async function downloadMedia(media) {
+async function downloadMedia(media, preferredUrl) {
   const src =
-    media.tagName === "IMG"
+    preferredUrl ||
+    (media.tagName === "IMG"
       ? await resolveHighestResolutionImageUrl(media)
-      : await resolveHighestResolutionVideoUrl(media);
+      : await resolveHighestResolutionVideoUrl(media));
   if (!src) {
     console.error("Media has no source.");
     return;
@@ -2448,61 +2495,428 @@ function startTrimRecording(video) {
   };
 }
 
-/** Capture the current video frame and return it as a blob URL. */
+/**
+ * Capture the current video frame and return both a blob URL (for downloads,
+ * previews and the clipboard) and a data URL (for reliable in-page display).
+ */
 async function captureVideoFrame(video) {
-  const blob = await captureVideoFrameBlob(video);
-  return URL.createObjectURL(blob);
+  const blob = await captureVideoFrameBlobWithFallbacks(video);
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    return { blobUrl, dataUrl: await blobToDataUrl(blob) };
+  } catch (error) {
+    return { blobUrl, dataUrl: blobUrl };
+  }
+}
+
+/** Convert a Blob into a data: URL string (FileReader-based). */
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () =>
+      reject(reader.error || new Error("Blob read failed."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Capture the current video frame as an encoded image blob, trying harder
+ * sources in order until one succeeds:
+ *   1. draw the live element directly onto a canvas,
+ *   2. re-load the plain source URL with CORS enabled,
+ *   3. rebuild the stream from the MediaSource segments recorded by the bridge,
+ *   4. screenshot the visible tab and crop the video element rect.
+ */
+async function captureVideoFrameBlobWithFallbacks(
+  video,
+  captureType = settings.captureType,
+) {
+  try {
+    return await captureVideoFrameBlob(video, captureType);
+  } catch (error) {
+    console.warn("[Media Downloader] Direct frame capture failed:", error);
+    const sourceUrl = getVideoUrl(video);
+    if (sourceUrl && !sourceUrl.startsWith("blob:") && !sourceUrl.startsWith("data:")) {
+      return await captureVideoFrameFromSource(video, captureType);
+    }
+    const mseBlob = await requestMediaSourceBlob(sourceUrl);
+    if (mseBlob && mseBlob.size) {
+      try {
+        return await captureFrameFromMediaProbe(video, mseBlob, captureType);
+      } catch (probeError) {
+        console.warn(
+          "[Media Downloader] MediaSource rebuild capture failed:",
+          probeError,
+        );
+      }
+    }
+    return await captureVideoFrameFromTab(video);
+  }
 }
 
 /** Capture the current video frame as an encoded image blob. */
 async function captureVideoFrameBlob(video, captureType = settings.captureType) {
-  if (!video.videoWidth || !video.videoHeight) {
-    throw new Error("Video frame is not ready.");
+  if (
+    !Number.isFinite(video.videoWidth) ||
+    !video.videoWidth ||
+    !Number.isFinite(video.videoHeight) ||
+    !video.videoHeight
+  ) {
+    const ready = await waitForVideoMetadata(video);
+    if (!ready) throw new Error("Video frame is not ready.");
   }
   window.dispatchEvent(
     new CustomEvent(CAPTURE_BLOCK_EVENT, { detail: { video } }),
   );
-  video.pause();
+  const wasPlaying = !video.paused;
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const isHdr =
-      video.videoColorSpace &&
-      (video.videoColorSpace.transfer === "pq" ||
-        video.videoColorSpace.transfer === "hlg");
-    const contextOptions =
-      isHdr &&
-      "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
-        ? { colorSpace: "display-p3" }
-        : undefined;
-    const context = canvas.getContext("2d", contextOptions);
-    if (!context) throw new Error("Canvas is unavailable.");
-    // HDR frames are tone-mapped to SDR by the canvas; draw at native
-    // resolution and disable smoothing so the captured pixels stay as close to
-    // the source as the canvas can represent.
-    context.imageSmoothingEnabled = false;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const format = getFrameCaptureFormat(captureType);
-    return await new Promise((resolve, reject) => {
+    // First pass grabs the live presented frame (never paused, so the decoder
+    // keeps painting). If the frame is empty (paused streams often drop their
+    // decoded frame), fall back to seeking in place to force a new decode.
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        canvas.toBlob(
-          (result) =>
-            result
-              ? resolve(result)
-              : reject(new Error("Frame encoding failed.")),
-          format.mimeType,
-          format.quality,
-        );
+        if (attempt === 0 && wasPlaying) {
+          await waitForNextPresentedFrame(video);
+        } else {
+          await ensurePresentedFrame(video, attempt > 0);
+        }
+        const blob = await drawVideoFrameToBlob(video, captureType);
+        if (wasPlaying) video.pause();
+        return blob;
       } catch (error) {
-        reject(error);
+        lastError = error;
       }
-    });
+    }
+    throw lastError || new Error("Video frame capture failed.");
   } finally {
     window.dispatchEvent(
       new CustomEvent(CAPTURE_UNBLOCK_EVENT, { detail: { video } }),
     );
   }
+}
+
+/** Wait until the element presents its next rendered frame (if it is playing). */
+function waitForNextPresentedFrame(video, timeout = 1500) {
+  return new Promise((resolve) => {
+    if (typeof video.requestVideoFrameCallback !== "function") {
+      resolve();
+      return;
+    }
+    let callbackId;
+    const timer = setTimeout(() => {
+      video.cancelVideoFrameCallback?.(callbackId);
+      resolve();
+    }, timeout);
+    callbackId = video.requestVideoFrameCallback(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/** Draw the video's current frame onto a fresh canvas and encode it. */
+async function drawVideoFrameToBlob(video, captureType = settings.captureType) {
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const isHdr =
+    video.videoColorSpace &&
+    (video.videoColorSpace.transfer === "pq" ||
+      video.videoColorSpace.transfer === "hlg");
+  const contextOptions =
+    isHdr &&
+    "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
+      ? { colorSpace: "display-p3" }
+      : undefined;
+  const context = canvas.getContext("2d", contextOptions);
+  if (!context) throw new Error("Canvas is unavailable.");
+  // HDR frames are tone-mapped to SDR by the canvas; draw at native
+  // resolution and disable smoothing so the captured pixels stay as close to
+  // the source as the canvas can represent.
+  context.imageSmoothingEnabled = false;
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  // A tainted canvas throws later in toBlob; a streamed video that did not
+  // decode its frame yet renders transparent or plain black, so treat those
+  // as a miss and let the caller retry.
+  if (isCanvasBlank(context, canvas.width, canvas.height)) {
+    throw new Error("Video frame is not decoded yet.");
+  }
+  const format = getFrameCaptureFormat(captureType);
+  return await new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(
+        (result) =>
+          result
+            ? resolve(result)
+            : reject(new Error("Frame encoding failed.")),
+        format.mimeType,
+        format.quality,
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+/** Wait until the video element has dimensions (metadata) or times out. */
+function waitForVideoMetadata(video, timeout = 2500) {
+  if (video.videoWidth > 0 && video.videoHeight > 0) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener("loadedmetadata", onMetadata);
+      clearTimeout(timer);
+      resolve(video.videoWidth > 0 && video.videoHeight > 0);
+    };
+    const onMetadata = () => finish();
+    const timer = setTimeout(finish, timeout);
+    video.addEventListener("loadedmetadata", onMetadata);
+  });
+}
+
+/**
+ * Make sure the element has a decoded frame at the current position before a
+ * canvas draw. With force=true it always seeks in place, which forces the
+ * decoder to re-decode the frame (paused streams drop their frame otherwise).
+ */
+function ensurePresentedFrame(video, force = false, timeout = 2000) {
+  if (!force && video.readyState >= 2) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+      clearTimeout(timer);
+      resolve();
+    };
+    const onSeeked = () => cleanup();
+    const onError = () => cleanup();
+    const timer = setTimeout(cleanup, timeout);
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const target = Math.min(
+      Math.max(video.currentTime || 0, 0),
+      Math.max(duration - 0.01, 0),
+    );
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("error", onError);
+    try {
+      video.currentTime = target;
+    } catch {
+      cleanup();
+    }
+  });
+}
+
+/**
+ * Detect a canvas holding no usable frame: fully transparent (undecoded
+ * stream) or plain black (paused element whose decoder dropped the frame).
+ */
+function isCanvasBlank(context, width, height) {
+  try {
+    const points = [
+      [0, 0],
+      [width >> 1, 0],
+      [width - 1, 0],
+      [0, height >> 1],
+      [width >> 1, height >> 1],
+      [width - 1, height >> 1],
+      [0, height - 1],
+      [width >> 1, height - 1],
+      [width - 1, height - 1],
+    ];
+    for (const [x, y] of points) {
+      const { data } = context.getImageData(x, y, 1, 1);
+      if (data[3] === 0) continue;
+      if (data[0] || data[1] || data[2]) return false;
+    }
+    return true;
+  } catch {
+    // Tainted canvas: not blank, but unusable for encoding.
+    return false;
+  }
+}
+
+/**
+ * Load a rebuilt media blob (recorded MediaSource segments) into an offscreen
+ * probe, seek to the video's current time and capture that frame.
+ */
+async function captureFrameFromMediaProbe(
+  video,
+  mediaBlob,
+  captureType = settings.captureType,
+) {
+  const blobUrl = URL.createObjectURL(mediaBlob);
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      const probe = document.createElement("video");
+      probe.muted = true;
+      probe.playsInline = true;
+      probe.preload = "auto";
+      let settled = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        probe.removeAttribute("src");
+        probe.load();
+        probe.remove();
+        if (error) reject(error);
+        else resolve(result);
+      };
+      probe.onloadedmetadata = () => {
+        const duration = Number.isFinite(probe.duration)
+          ? probe.duration
+          : Infinity;
+        const target = Math.min(
+          Math.max(video.currentTime || 0, 0),
+          Math.max(duration - 0.01, 0),
+        );
+        try {
+          probe.currentTime = target;
+        } catch (error) {
+          finish(error);
+        }
+      };
+      probe.onseeked = () => {
+        const tryCapture = (attempt) => {
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = probe.videoWidth;
+            canvas.height = probe.videoHeight;
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error("Canvas is unavailable.");
+            context.imageSmoothingEnabled = false;
+            context.drawImage(probe, 0, 0);
+            if (attempt < 3 && isCanvasBlank(context, canvas.width, canvas.height)) {
+              setTimeout(() => tryCapture(attempt + 1), 120);
+              return;
+            }
+            if (isCanvasBlank(context, canvas.width, canvas.height)) {
+              throw new Error("Rebuilt media frame is not decoded.");
+            }
+            const format = getFrameCaptureFormat(captureType);
+            canvas.toBlob(
+              (result) =>
+                result
+                  ? finish(null, result)
+                  : finish(new Error("Frame encoding failed.")),
+              format.mimeType,
+              format.quality,
+            );
+          } catch (error) {
+            finish(error);
+          }
+        };
+        tryCapture(0);
+      };
+      probe.onerror = () =>
+        finish(new Error("Rebuilt media could not be loaded."));
+      probe.src = blobUrl;
+      probe.load();
+    });
+    return blob;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  }
+}
+
+/**
+ * Last-resort capture: screenshot the visible tab through the background
+ * service worker and crop the video element's bounding rect from it.
+ */
+function captureVideoFrameFromTab(video) {
+  return new Promise((resolve, reject) => {
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+      reject(new Error("Tab screenshot is unavailable."));
+      return;
+    }
+    const actionGroups = Array.from(
+      document.querySelectorAll(".imd-action-group"),
+    );
+    const previousDisplays = actionGroups.map(
+      (group) => group.style.display,
+    );
+    actionGroups.forEach((group) => {
+      group.style.display = "none";
+    });
+    const restore = () => {
+      actionGroups.forEach((group, index) => {
+        group.style.display = previousDisplays[index];
+      });
+    };
+    chrome.runtime.sendMessage({ action: "captureTab" }, (response) => {
+      if (chrome.runtime.lastError || !response?.ok) {
+        restore();
+        reject(
+          new Error(
+            chrome.runtime.lastError?.message || "Tab screenshot failed.",
+          ),
+        );
+        return;
+      }
+      const rect = video.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        restore();
+        reject(new Error("Video is not visible on screen."));
+        return;
+      }
+      const image = new Image();
+      let attempts = 0;
+      const cropAndResolve = () => {
+        const dpr = Math.max(window.devicePixelRatio || 1, 1);
+        const sx = Math.max(0, Math.round(rect.left * dpr));
+        const sy = Math.max(0, Math.round(rect.top * dpr));
+        const width = Math.max(
+          1,
+          Math.min(Math.round(rect.width * dpr), image.naturalWidth - sx),
+        );
+        const height = Math.max(
+          1,
+          Math.min(Math.round(rect.height * dpr), image.naturalHeight - sy),
+        );
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.imageSmoothingEnabled = false;
+        context.drawImage(image, sx, sy, width, height, 0, 0, width, height);
+        // The player may cover a paused video with a poster overlay that is
+        // still loading; retry once before giving up on the crop.
+        if (attempts < 1 && isCanvasBlank(context, width, height)) {
+          attempts += 1;
+          setTimeout(cropAndResolve, 200);
+          return;
+        }
+        if (isCanvasBlank(context, width, height)) {
+          reject(new Error("Captured screen area is empty."));
+          return;
+        }
+        canvas.toBlob(
+          (blob) =>
+            blob
+              ? resolve(blob)
+              : reject(new Error("Frame encoding failed.")),
+          "image/png",
+        );
+      };
+      image.onload = () => {
+        restore();
+        cropAndResolve();
+      };
+      image.onerror = () => {
+        restore();
+        reject(new Error("Screenshot decode failed."));
+      };
+      image.src = response.dataUrl;
+    });
+  });
 }
 
 /** Toggle Picture-in-Picture mode for a video element. */

@@ -249,6 +249,42 @@ window.addEventListener(CAPTURE_UNBLOCK_EVENT, (event) => {
   if (video instanceof HTMLMediaElement) captureBlockedVideos.delete(video);
 });
 
+const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
+const CAPTURE_FROM_MSE_RESULT_EVENT = "imd:capture-from-mse-result";
+
+window.addEventListener(CAPTURE_FROM_MSE_EVENT, (event) => {
+  const { url, requestId } = event.detail || {};
+  if (!url || !requestId) return;
+  const source = blobKinds.get(url);
+  let blob = null;
+  if (source?.kind === "media-source" && source.record?.buffers?.length) {
+    blob = buildBlobFromRecordedBuffers(source.record.buffers);
+  }
+  try {
+    window.dispatchEvent(
+      new CustomEvent(CAPTURE_FROM_MSE_RESULT_EVENT, {
+        detail: { requestId, blob },
+      })
+    );
+  } catch {}
+});
+
+/**
+ * Concatenate the recorded SourceBuffer segments into one playable blob.
+ * Audio and video usually live in separate buffers; pick the video track and
+ * fall back to the buffer holding the most data.
+ */
+function buildBlobFromRecordedBuffers(buffers) {
+  const videoBuffer =
+    buffers.find((buffer) => /video/i.test(buffer.mimeType)) ||
+    buffers.reduce((largest, buffer) =>
+      buffer.chunks.length > largest.chunks.length ? buffer : largest
+    );
+  if (!videoBuffer?.chunks?.length) return null;
+  const mimeType = videoBuffer.mimeType.split(";")[0] || "video/mp4";
+  return new Blob(videoBuffer.chunks, { type: mimeType });
+}
+
 function startJob(job) {
   const { url, filename, videoId, video, source } = job;
   const controller = new AbortController();

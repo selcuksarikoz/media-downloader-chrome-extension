@@ -33,6 +33,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.tabs.create({ url: message.url, active: false });
     return;
   }
+  if (message.action === "captureTab") {
+    chrome.tabs.captureVisibleTab(
+      sender.tab?.windowId,
+      { format: "png" },
+      (dataUrl) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          sendResponse({
+            ok: false,
+            error: chrome.runtime.lastError?.message || "Tab capture failed.",
+          });
+          return;
+        }
+        sendResponse({ ok: true, dataUrl });
+      },
+    );
+    return true;
+  }
 });
 
 chrome.runtime.onConnect.addListener((port) => {
