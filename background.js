@@ -216,7 +216,19 @@ async function downloadJob(jobId) {
       blob.type.includes("webm") ? "webm" : "mp4",
     );
   }
-  const url = URL.createObjectURL(blob);
+
+  let url;
+  let isObjectUrl = false;
+  try {
+    const created = await createDownloadableUrl(blob);
+    url = created.url;
+    isObjectUrl = created.isObjectUrl;
+  } catch (error) {
+    // A job that cannot be turned into a download URL must never linger:
+    // drop it so it stops being retried on every service worker start.
+    await deleteJob(jobId);
+    throw error;
+  }
 
   let downloadId;
   try {
@@ -239,17 +251,44 @@ async function downloadJob(jobId) {
     });
   } catch (error) {
     console.error("[Media Downloader] Blob download failed:", error);
-    URL.revokeObjectURL(url);
+    if (isObjectUrl) URL.revokeObjectURL(url);
     await deleteJob(jobId);
     return;
   }
 
-  activeBlobUrls.set(downloadId, { jobId, url });
+  activeBlobUrls.set(downloadId, { jobId, url, isObjectUrl });
   // The download is now owned by the browser (the object URL keeps the blob
   // alive). Drop the IndexedDB copy immediately so a completed or interrupted
   // download can never leave a stale job behind, even across service worker
   // restarts.
   await deleteJob(jobId);
+}
+
+/**
+ * Service workers have no URL.createObjectURL. Prefer object URLs when they
+ * exist; otherwise encode the blob as a data: URL with FileReader so the
+ * download can still start from the service worker.
+ */
+function createDownloadableUrl(blob) {
+  if (typeof URL.createObjectURL === "function") {
+    return Promise.resolve({ url: URL.createObjectURL(blob), isObjectUrl: true });
+  }
+  if (blob.size > 512 * 1024 * 1024) {
+    return Promise.reject(
+      new Error(
+        "Blob is too large to encode inside the background worker; " +
+          "keep the tab open and use the page's download fallback.",
+      ),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () =>
+      resolve({ url: reader.result, isObjectUrl: false });
+    reader.onerror = () =>
+      reject(new Error("Blob could not be encoded for download."));
+    reader.readAsDataURL(blob);
+  });
 }
 
 chrome.downloads.onChanged.addListener((delta) => {
@@ -258,7 +297,9 @@ chrome.downloads.onChanged.addListener((delta) => {
   const entry = activeBlobUrls.get(delta.id);
   if (!entry) return;
   activeBlobUrls.delete(delta.id);
-  URL.revokeObjectURL(entry.url);
+  if (entry.isObjectUrl !== false) {
+    URL.revokeObjectURL(entry.url);
+  }
   deleteJob(entry.jobId).catch(() => {});
 });
 

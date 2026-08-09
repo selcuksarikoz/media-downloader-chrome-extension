@@ -10,10 +10,19 @@ controls directly to page media.
 - Action buttons are circular with no transition delay for instant feedback.
 - Video controls include a Picture-in-Picture button (when supported).
 - Click the bolt icon on images to open them in a full-size lightbox overlay with
-  download and preview buttons fixed at the bottom center.
-- Click the lightbox image to zoom in at the clicked point (2x). Click again to
-  zoom out. Use Ctrl+scroll for smooth zoom (1x–10x). Scroll or use the scrollbar
-  to pan when zoomed. Click outside the image or press ESC to close.
+  actions fixed at the bottom center.
+- The lightbox opens with an active **crop** overlay covering the whole image.
+  Drag inside the crop area to move it, drag the 8 round handles to resize, and
+  click the dimmed area (or press Escape) to cancel cropping.
+- **Download in the lightbox saves the cropped region** at the original (full)
+  resolution, using the frame capture format selected in the settings. When crop
+  is cancelled, download saves the full image.
+- Click the lightbox image (or the crop area) to zoom in at the clicked point.
+  Accepting crop no longer requires double-click: a click without dragging is
+  zoom; dragging moves the crop area. The crop overlay hides while zoomed so you
+  can inspect the image unobstructed, and returns when you zoom back out.
+  Ctrl+scroll provides smooth zoom (1x–10x); scroll or use the scrollbar to pan
+  when zoomed. Click outside the image or press ESC to close.
 - Regular image and video URLs use `chrome.downloads`.
 - Blob URLs are copied directly when readable.
 - Single-buffer MediaSource streams reuse captured segments.
@@ -22,6 +31,8 @@ controls directly to page media.
   concurrency limit. Recorded segments are streamed to the extension's storage,
   so a download is finalized and saved even if the tab is closed or the page
   navigates mid-recording (a partial file is saved if recording was interrupted).
+  Background downloads fall back to a data URL when blob URLs are unavailable
+  in the service worker context.
 - The capture button saves the video's current frame as JPG, PNG, or WebP. It
   does not start a video recording.
 - The **Trim** button (scissors icon) records a video segment starting from the
@@ -62,7 +73,7 @@ in the settings.
 - Always ask where to save (show "Save As" dialog)
 - Preview button visibility
 - Native video controls
-- Frame capture type: JPG (default), PNG, or WebP
+- Frame capture type: JPG (default), PNG, or WebP — also used for lightbox crops
 - Use right-click menu instead of hover buttons
 - Domain blacklist with subdomain matching
 

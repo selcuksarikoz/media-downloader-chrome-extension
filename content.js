@@ -439,6 +439,14 @@ const LIGHTBOX_ICON = `
 </svg>
 `;
 
+const CROP_ICON = `
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/>
+</svg>
+`;
+
+const MIN_CROP_SIZE_PX = 24;
+
 const TRIM_ICON = `
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <path d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z"/>
@@ -1888,12 +1896,28 @@ function openLightbox(media, url, downloadUrl) {
       const container = document.createElement("div");
       container.className = "imd-lightbox-container";
 
+      const stage = document.createElement("div");
+      stage.className = "imd-lightbox-stage";
+
       const img = document.createElement("img");
       img.className = "imd-lightbox-image";
-      img.src = resolvedUrl;
       img.alt = media.alt || "";
+      // Load the image CORS-enabled so the crop export can draw it straight
+      // from the canvas-taint-free element (no refetch). If the server has no
+      // CORS headers the load fails; retry without crossOrigin and remember
+      // the canvas will be tainted.
+      let corsClean = true;
+      img.addEventListener("error", () => {
+        if (!img.crossOrigin) return;
+        corsClean = false;
+        img.crossOrigin = null;
+        img.src = resolvedUrl;
+      });
+      img.crossOrigin = "anonymous";
+      img.src = resolvedUrl;
 
-      container.appendChild(img);
+      stage.appendChild(img);
+      container.appendChild(stage);
       overlay.appendChild(container);
 
       const actions = document.createElement("div");
@@ -1902,10 +1926,16 @@ function openLightbox(media, url, downloadUrl) {
       <div class="imd-lightbox-actions-row">
         <button type="button" class="imd-action-btn imd-down-btn" title="Download Image" aria-label="Download Image">${DOWNLOAD_ICON}</button>
         <button type="button" class="imd-action-btn imd-preview-btn" title="Preview image" aria-label="Preview image">${PREVIEW_ICON}</button>
+        <button type="button" class="imd-action-btn imd-crop-btn" title="Toggle crop" aria-label="Toggle crop">${CROP_ICON}</button>
       </div>
       <span class="imd-lightbox-info"></span>
     `;
       const infoEl = actions.querySelector(".imd-lightbox-info");
+      let infoText = "";
+      const setInfo = (text) => {
+        infoText = text;
+        infoEl.textContent = cropActive ? infoCropText() : infoText;
+      };
       const infoAbort = new AbortController();
       img.addEventListener(
         "load",
@@ -1917,7 +1947,7 @@ function openLightbox(media, url, downloadUrl) {
           ).toLowerCase();
           const format =
             ext === "png" ? "PNG" : ext === "webp" ? "WebP" : "JPG";
-          infoEl.textContent = `${w} × ${h} · ${format}`;
+          setInfo(`${w} × ${h} · ${format}`);
           fetch(resolvedUrl, { method: "HEAD", signal: infoAbort.signal })
             .then((res) => {
               const ct = res.headers.get("Content-Type");
@@ -1933,22 +1963,27 @@ function openLightbox(media, url, downloadUrl) {
                         : f === "webp"
                           ? "WebP"
                           : f.toUpperCase();
-                  infoEl.textContent = `${w} × ${h} · ${label}`;
+                  setInfo(`${w} × ${h} · ${label}`);
                 }
               }
               const len = res.headers.get("Content-Length");
               if (len) {
                 const mb = (Number(len) / (1024 * 1024)).toFixed(1);
-                infoEl.textContent += ` · ${mb} MB`;
+                setInfo(`${infoText} · ${mb} MB`);
               }
             })
             .catch(() => {});
+          startCrop();
         },
         { once: true },
       );
       actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (cropActive) {
+          saveCrop();
+          return;
+        }
         // downloadMedia is async; for blob: URLs it dispatches the download
         // request and the media bridge fetches the blob. Close only after it
         // resolves so the blob URL is not revoked before the fetch completes.
@@ -1978,11 +2013,216 @@ function openLightbox(media, url, downloadUrl) {
       });
 
       const escHandler = (e) => {
-        if (e.key === "Escape") close();
+        if (e.key === "Escape") {
+          if (cropActive) cancelCrop();
+          else close();
+        }
       };
       document.addEventListener("keydown", escHandler);
 
+      // ---------------------------------------------------------------------
+      // Crop
+      // ---------------------------------------------------------------------
+      const cropBtn = actions.querySelector(".imd-crop-btn");
+      const cropRect = { x: 0, y: 0, w: 1, h: 1 };
+      let cropActive = false;
+      let cropOverlay = null;
+      let cropDrag = null;
+
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+      function infoCropText() {
+        const w = Math.max(1, Math.round(cropRect.w * img.naturalWidth));
+        const h = Math.max(1, Math.round(cropRect.h * img.naturalHeight));
+        return `Crop · ${w} × ${h} px`;
+      }
+
+      function renderCropOverlay() {
+        const rectEl = cropOverlay.querySelector(".imd-crop-rect");
+        rectEl.style.left = `${cropRect.x * 100}%`;
+        rectEl.style.top = `${cropRect.y * 100}%`;
+        rectEl.style.width = `${cropRect.w * 100}%`;
+        rectEl.style.height = `${cropRect.h * 100}%`;
+      }
+
+      function updateCropInfo() {
+        infoEl.textContent = cropActive ? infoCropText() : infoText;
+      }
+
+      function createCropOverlay() {
+        const el = document.createElement("div");
+        el.className = "imd-crop-overlay";
+        el.innerHTML = `
+          <div class="imd-crop-mask"></div>
+          <div class="imd-crop-rect">
+            <div class="imd-crop-grid"></div>
+            <div class="imd-crop-handle imd-crop-h-nw" data-dir="nw"></div>
+            <div class="imd-crop-handle imd-crop-h-n" data-dir="n"></div>
+            <div class="imd-crop-handle imd-crop-h-ne" data-dir="ne"></div>
+            <div class="imd-crop-handle imd-crop-h-e" data-dir="e"></div>
+            <div class="imd-crop-handle imd-crop-h-se" data-dir="se"></div>
+            <div class="imd-crop-handle imd-crop-h-s" data-dir="s"></div>
+            <div class="imd-crop-handle imd-crop-h-sw" data-dir="sw"></div>
+            <div class="imd-crop-handle imd-crop-h-w" data-dir="w"></div>
+          </div>`;
+        el.addEventListener("pointerdown", (e) => {
+          const handle = e.target.closest(".imd-crop-handle");
+          const rectEl = e.target.closest(".imd-crop-rect");
+          if (!handle && !rectEl) {
+            if (e.target.classList.contains("imd-crop-mask")) {
+              cancelCrop();
+            }
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          cropDrag = {
+            mode: handle ? "resize" : "move",
+            dir: handle?.dataset.dir || "",
+            start: { x: e.clientX, y: e.clientY, rect: { ...cropRect } },
+            pointerId: e.pointerId,
+            moved: false,
+          };
+          try {
+            el.setPointerCapture(e.pointerId);
+          } catch {}
+        });
+        el.addEventListener("pointermove", (e) => {
+          if (!cropDrag) return;
+          e.preventDefault();
+          el.classList.add("imd-dragging");
+          if (
+            Math.hypot(e.clientX - cropDrag.start.x, e.clientY - cropDrag.start.y) >
+            5
+          ) {
+            cropDrag.moved = true;
+          }
+          const stageRect = stage.getBoundingClientRect();
+          if (!stageRect.width || !stageRect.height) return;
+          const dx = (e.clientX - cropDrag.start.x) / stageRect.width;
+          const dy = (e.clientY - cropDrag.start.y) / stageRect.height;
+          const { x, y, w, h } = cropDrag.start.rect;
+          const minW = Math.min(MIN_CROP_SIZE_PX / stageRect.width, 0.5);
+          const minH = Math.min(MIN_CROP_SIZE_PX / stageRect.height, 0.5);
+          const next = { ...cropRect };
+          if (cropDrag.mode === "move") {
+            next.x = clamp(x + dx, 0, Math.max(0, 1 - w));
+            next.y = clamp(y + dy, 0, Math.max(0, 1 - h));
+          } else {
+            const dir = cropDrag.dir;
+            if (dir.includes("w")) {
+              const left = clamp(x + dx, 0, Math.max(0, x + w - minW));
+              next.x = left;
+              next.w = x + w - left;
+            } else if (dir.includes("e")) {
+              next.w = clamp(w + dx, minW, 1 - x);
+            }
+            if (dir.includes("n")) {
+              const top = clamp(y + dy, 0, Math.max(0, y + h - minH));
+              next.y = top;
+              next.h = y + h - top;
+            } else if (dir.includes("s")) {
+              next.h = clamp(h + dy, minH, 1 - y);
+            }
+          }
+          Object.assign(cropRect, next);
+          renderCropOverlay();
+          updateCropInfo();
+        });
+        const endCropDrag = (e) => {
+          if (!cropDrag) return;
+          const drag = cropDrag;
+          const pointerId = cropDrag.pointerId;
+          cropDrag = null;
+          el.classList.remove("imd-dragging");
+          try {
+            el.releasePointerCapture(pointerId);
+          } catch {}
+          // A plain click on the crop area (no drag) toggles zoom. Handle
+          // drags are resize gestures and never toggle zoom.
+          if (drag.mode === "move" && !drag.moved) {
+            toggleZoom({ clientX: e.clientX, clientY: e.clientY });
+          }
+        };
+        el.addEventListener("pointerup", endCropDrag);
+        el.addEventListener("pointercancel", endCropDrag);
+        return el;
+      }
+
+      function hideCropOverlay() {
+        if (cropOverlay) cropOverlay.style.display = "none";
+      }
+
+      function showCropOverlay() {
+        if (cropOverlay) cropOverlay.style.display = "";
+      }
+
+      function startCrop() {
+        if (cropActive) return;
+        if (!img.complete || !img.naturalWidth) {
+          showToast("Wait for the image to finish loading.");
+          return;
+        }
+        // Leave the zoomed state first so the crop overlay aligns 1:1 with
+        // the displayed image.
+        if (lightboxZoomed) {
+          lightboxZoomed = false;
+          lightboxZoomLevel = 1;
+          applyZoom();
+        }
+        cropActive = true;
+        // Cover the whole image initially (edges at 0/100%).
+        Object.assign(cropRect, { x: 0, y: 0, w: 1, h: 1 });
+        if (!cropOverlay) cropOverlay = createCropOverlay();
+        showCropOverlay();
+        stage.appendChild(cropOverlay);
+        cropBtn.classList.add("imd-active");
+        renderCropOverlay();
+        updateCropInfo();
+      }
+
+      function cancelCrop() {
+        if (!cropActive) return;
+        cropActive = false;
+        cropDrag = null;
+        cropOverlay?.remove();
+        cropBtn.classList.remove("imd-active");
+        updateCropInfo();
+      }
+
+      cropBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (cropActive) cancelCrop();
+        else startCrop();
+      });
+
+      /** Export the current crop region at full resolution. */
+      async function saveCrop() {
+        try {
+          const { blob, filename, width, height } = await buildCroppedImage(
+            img,
+            mediaUrl || resolvedUrl,
+            cropRect,
+            getFrameCaptureFormat(settings.captureType),
+            corsClean,
+          );
+          downloadBlobFile(
+            blob,
+            filename,
+            settings.downloadFolder,
+            settings.showSaveAs,
+          );
+          showToast(`Crop saved · ${width} × ${height} px`);
+          close();
+        } catch (error) {
+          console.error("Crop failed:", error);
+          showToast(`Crop failed: ${error?.message || "Unknown error"}`);
+        }
+      }
+
       const cleanup = () => {
+        cancelCrop();
         infoAbort.abort();
         document.removeEventListener("keydown", escHandler);
         overlay.removeEventListener("scroll", repositionOpenControls);
@@ -2073,10 +2313,12 @@ function openLightbox(media, url, downloadUrl) {
           lightboxZoomed = false;
           lightboxZoomLevel = 1;
           applyZoom();
+          if (cropActive) showCropOverlay();
         } else {
           lightboxZoomed = true;
           lightboxZoomLevel = 1;
           applyZoom(getZoomOrigin(e));
+          if (cropActive) hideCropOverlay();
         }
       }
 
@@ -2089,16 +2331,27 @@ function openLightbox(media, url, downloadUrl) {
 
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            if (!lightboxZoomed) {
-              lightboxZoomed = true;
-              lightboxZoomLevel = 1;
-            }
             const delta = e.deltaY > 0 ? 1 / 1.15 : 1.15;
             lightboxZoomLevel = Math.min(
               Math.max(lightboxZoomLevel * delta, 1),
               10,
             );
+            if (lightboxZoomLevel <= 1.001) {
+              // Wheeled all the way back out: leave the zoomed state.
+              if (lightboxZoomed) {
+                lightboxZoomed = false;
+                lightboxZoomLevel = 1;
+                applyZoom();
+                if (cropActive) showCropOverlay();
+              }
+              return;
+            }
+            if (!lightboxZoomed) {
+              lightboxZoomed = true;
+              lightboxZoomLevel = 1;
+            }
             applyZoom(e.deltaY < 0 ? getZoomOrigin(e) : null);
+            if (cropActive) hideCropOverlay();
           }
         },
         { passive: false },
@@ -2108,6 +2361,140 @@ function openLightbox(media, url, downloadUrl) {
     })
     .catch((error) => {
       console.error("Lightbox failed to load image:", error);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Cropped image export
+// ---------------------------------------------------------------------------
+
+/** Detect the best output format for a cropped image. Uses the option
+ * format when set, otherwise mirrors the source image's format. */
+function getImageCropFormat(url, preferredFormat) {
+  if (preferredFormat?.mimeType) {
+    return {
+      mimeType: preferredFormat.mimeType,
+      extension: preferredFormat.extension || "jpg",
+      quality: preferredFormat.quality ?? null,
+    };
+  }
+  let ext = "";
+  if (url.startsWith("data:")) {
+    ext = (url.match(/^data:image\/([a-z0-9.+-]+)/i)?.[1] || "").toLowerCase();
+  } else {
+    try {
+      ext = (
+        new URL(url).pathname.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || ""
+      ).toLowerCase();
+    } catch {}
+  }
+  if (ext === "png") return { mimeType: "image/png", extension: "png", quality: null };
+  if (ext === "webp") return { mimeType: "image/webp", extension: "webp", quality: 0.95 };
+  return { mimeType: "image/jpeg", extension: "jpg", quality: 0.95 };
+}
+
+/** Load an image blob into a same-origin <img> for taint-free canvas drawing. */
+function loadImageFromBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ image, url });
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Retrieved image could not be decoded."));
+    };
+    image.src = url;
+  });
+}
+
+/** Build a unique filename for a cropped image export (no "crop" suffix). */
+function getCropFilename(url, extension) {
+  let base = `image-${Date.now()}`;
+  if (!url.startsWith("data:")) {
+    try {
+      const pathname = new URL(url).pathname;
+      const name = pathname.slice(pathname.lastIndexOf("/") + 1);
+      if (name) {
+        base = decodeURIComponent(name).replace(/[^a-zA-Z0-9.\-_]/g, "_");
+        base = base.replace(/\.[^.]+$/, "");
+      }
+    } catch {}
+  }
+  return `${base || "image"}.${extension}`;
+}
+
+/**
+ * Render the crop region at the image's full original resolution.
+ * When the lightbox image was loaded CORS-clean (crossOrigin + ACAO headers)
+ * it is drawn straight from the on-screen element — no refetch at all. Only
+ * if the lightbox image is tainted are fetches attempted (page fetch, then
+ * background bypass) to obtain a clean copy.
+ */
+function buildCroppedImage(img, url, cropRect, preferredFormat, corsClean) {
+  const { mimeType, extension, quality } = getImageCropFormat(
+    url,
+    preferredFormat,
+  );
+
+  const render = (source) => {
+    const width = Math.max(1, source.naturalWidth);
+    const height = Math.max(1, source.naturalHeight);
+    const x = Math.round(cropRect.x * width);
+    const y = Math.round(cropRect.y * height);
+    const cropW = Math.max(
+      1,
+      Math.min(width - x, Math.round(cropRect.w * width)),
+    );
+    const cropH = Math.max(
+      1,
+      Math.min(height - y, Math.round(cropRect.h * height)),
+    );
+
+    const canvas = document.createElement("canvas");
+    canvas.width = cropW;
+    canvas.height = cropH;
+    const context = canvas.getContext("2d");
+    context.drawImage(source, x, y, cropW, cropH, 0, 0, cropW, cropH);
+
+    return new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error("Cropped image could not be encoded."));
+            return;
+          }
+          resolve({
+            blob,
+            filename: getCropFilename(url, extension),
+            width: cropW,
+            height: cropH,
+          });
+        }, mimeType, quality);
+      } catch (error) {
+        reject(
+          new Error(
+            "Protected (CORS) image cannot be re-read for cropping.",
+          ),
+        );
+      }
+    });
+  };
+
+  if (corsClean) return render(img);
+
+  return Promise.resolve()
+    .then(() => fetchImageBlob(url))
+    .catch(() => fetchImageBlobViaBackground(url))
+    .then((blob) => (blob ? loadImageFromBlob(blob) : null))
+    .then((source) => {
+      if (source) {
+        try {
+          return render(source.image);
+        } finally {
+          URL.revokeObjectURL(source.url);
+        }
+      }
+      return render(img);
     });
 }
 

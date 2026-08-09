@@ -426,6 +426,14 @@ body.options-page {
     }
   }
 
+  &-stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+  }
+
   &-image {
     max-width: 95vw;
     max-height: 95vh;
@@ -441,6 +449,123 @@ body.options-page {
       border-radius: 0;
       cursor: zoom-out;
     }
+  }
+}
+
+.imd-crop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+
+  &.imd-dragging {
+    cursor: grabbing;
+
+    .imd-crop-rect,
+    .imd-crop-handle {
+      cursor: grabbing !important;
+    }
+  }
+}
+
+.imd-crop-mask {
+  position: absolute;
+  inset: 0;
+}
+
+.imd-crop-rect {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 0 9999px rgba(0, 0, 0, 0.6);
+  cursor: move;
+}
+
+.imd-crop-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.8;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.45) 1px, transparent 1px);
+  background-size: 33.3333% 33.3333%;
+}
+
+.imd-crop-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.08s ease;
+
+  &:hover {
+    transform: translate(-50%, -50%) scale(1.35);
+  }
+}
+
+.imd-crop-h-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.imd-crop-h-n {
+  top: 0;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.imd-crop-h-ne {
+  top: 0;
+  left: 100%;
+  cursor: nesw-resize;
+}
+
+.imd-crop-h-e {
+  top: 50%;
+  left: 100%;
+  cursor: ew-resize;
+}
+
+.imd-crop-h-se {
+  top: 100%;
+  left: 100%;
+  cursor: nwse-resize;
+}
+
+.imd-crop-h-s {
+  top: 100%;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.imd-crop-h-sw {
+  top: 100%;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.imd-crop-h-w {
+  top: 50%;
+  left: 0;
+  cursor: ew-resize;
+}
+
+.imd-crop-btn.imd-active {
+  background-color: $imd-accent !important;
+
+  svg {
+    fill: #fff !important;
   }
 }
 

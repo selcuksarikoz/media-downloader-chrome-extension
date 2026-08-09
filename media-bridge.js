@@ -538,8 +538,16 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   // recording ends deterministically. Trims are user-stopped, so leave loop
   // untouched there.
   if (!hasStartTime) captureVideo.loop = false;
-  if (video.seekable.length && video.duration !== Infinity) {
-    video.currentTime = hasStartTime ? Math.min(startTime, video.duration) : 0;
+  // Seeking a MediaSource-backed video is asynchronous. The recorder must not
+  // start before the seek completes and the first frame at the target position
+  // is rendered, otherwise the captureStream video track produces no frames
+  // and the file starts with audio-only data.
+  const seeks = video.seekable.length && video.duration !== Infinity;
+  const seekTarget = hasStartTime ? Math.min(startTime, video.duration) : 0;
+  const needsSeek = seeks && Math.abs(captureVideo.currentTime - seekTarget) > 0.05;
+  if (seeks) {
+    captureVideo.currentTime = seekTarget;
+    if (needsSeek) await waitForVideoSeek(captureVideo, signal);
   }
 
   if (signal.aborted) throw new DOMException("Canceled", "AbortError");
@@ -598,9 +606,14 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   let lastProgressTime = captureVideo.currentTime;
   try {
     releaseFramePump = keepVideoFramesDecoded(captureVideo);
+    await captureVideo.play();
+    // Wait until a frame at the target position is actually being rendered
+    // before starting the recorder so the file does not begin with a
+    // video-less segment (audio-only head).
+    await waitForFirstRenderedFrame(captureVideo, seekTarget, signal);
+    signal.throwIfAborted();
     recordingStartPos = captureVideo.currentTime;
     recorder.start(1000);
-    await captureVideo.play();
     safetyTimer = setInterval(() => {
       if (captureVideo.ended || (Number.isFinite(captureVideo.duration) && captureVideo.duration > 0 && captureVideo.currentTime >= captureVideo.duration - 0.15)) {
         stop();
@@ -650,6 +663,58 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     if (recorder.state !== "inactive") recorder.stop();
     captureVideo.pause();
   }
+}
+
+/** Resolve once an in-flight seek on the video completes. */
+function waitForVideoSeek(video, signal) {
+  if (!video.seeking) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onFailed);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onSeeked = () => { cleanup(); resolve(); };
+    const onFailed = () => { cleanup(); resolve(); };
+    const onAbort = () => { cleanup(); resolve(); };
+    timer = setTimeout(onFailed, 3000);
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onFailed, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Wait until the video renders its first frame at the target position. */
+function waitForFirstRenderedFrame(video, targetTime, signal) {
+  return new Promise((resolve) => {
+    if (typeof video.requestVideoFrameCallback !== "function") {
+      setTimeout(resolve, 150);
+      return;
+    }
+    let frameId;
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (frameId !== undefined) video.cancelVideoFrameCallback?.(frameId);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => { cleanup(); resolve(); };
+    const onFrame = (_now, metadata) => {
+      frameId = undefined;
+      const frameTime = metadata?.mediaTime;
+      if (!Number.isFinite(frameTime) || Math.abs(frameTime - targetTime) > 0.1) {
+        frameId = video.requestVideoFrameCallback(onFrame);
+        return;
+      }
+      cleanup();
+      resolve();
+    };
+    timer = setTimeout(onAbort, 3000);
+    video.requestVideoFrameCallback(onFrame);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function waitForLoadedMetadata(video, signal) {
