@@ -21,7 +21,7 @@ $imd-radius-small: 4px;
 // Pill radius for the horizontal context menu (half its rendered height).
 $imd-radius-pill: 26px;
 
-$imd-shadow: 0 10px 35px rgba(0, 0, 0, 0.5);
+$imd-shadow: none;
 
 $imd-btn-size: 40px;
 $imd-icon-size: 24px;
@@ -76,7 +76,6 @@ body.options-page {
   background: white;
   padding: 2rem;
   border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   width: 400px;
   max-width: 90%;
 }
@@ -238,6 +237,7 @@ body.options-page {
   z-index: $imd-z-menu;
   display: flex !important;
   flex-direction: row !important;
+  align-items: center;
   gap: $imd-gap;
   margin: 0;
   padding: $imd-gap;
@@ -256,6 +256,55 @@ body.options-page {
   }
 }
 
+// Footer chip showing the real resolution (+ byte size) of the media. It hangs
+// just below the pill, centered and tucked slightly into it. The tucked-in
+// strip is clipped away (no border there). Its top corners are carved inward
+// like a macOS notch (concave, inverted-S curvature) instead of bulging out.
+.imd-media-info {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: -5px;
+  clip-path: inset(5px -5px -5px -5px);
+  -webkit-mask:
+    radial-gradient(
+      circle 16px at 16px 16px,
+      transparent 15.5px,
+      #000 16.5px
+    ) no-repeat,
+    radial-gradient(
+      circle 16px at calc(100% - 16px) 16px,
+      transparent 15.5px,
+      #000 16.5px
+    ) no-repeat;
+  mask:
+    radial-gradient(
+      circle 16px at 16px 16px,
+      transparent 15.5px,
+      #000 16.5px
+    ) no-repeat,
+    radial-gradient(
+      circle 16px at calc(100% - 16px) 16px,
+      transparent 15.5px,
+      #000 16.5px
+    ) no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 4px 14px;
+  border: 1px solid $imd-border;
+  background: $imd-panel-bg;
+  border-radius: 0 0 $imd-radius-panel $imd-radius-panel;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: $imd-text-muted;
+  white-space: nowrap;
+}
+
 .imd-action-btn {
   @include imd-action-button;
   background-color: $imd-btn-bg !important;
@@ -264,7 +313,6 @@ body.options-page {
 
   &:hover {
     background-color: $imd-btn-bg-hover !important;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25) !important;
   }
 
   &.imd-recording {
@@ -439,7 +487,6 @@ body.options-page {
     max-height: 95vh;
     object-fit: contain;
     border-radius: $imd-radius-small;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
     cursor: zoom-in;
 
     .imd-lightbox-fullwidth & {
@@ -505,7 +552,6 @@ body.options-page {
   border-radius: 9999px;
   transform: translate(-50%, -50%);
   z-index: 4;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   transition: transform 0.08s ease;
 
   &:hover {
@@ -606,7 +652,6 @@ body.options-page {
   border-radius: $imd-radius-panel;
   background: $imd-panel-bg;
   border: 1px solid $imd-border;
-  box-shadow: $imd-shadow;
   color: $imd-text;
   font-size: 13px;
   font-family:
