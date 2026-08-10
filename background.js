@@ -9,6 +9,8 @@ const CHUNK_STORE = "chunks";
 const portJobSets = new Map();
 const activeBlobUrls = new Map();
 const activePreparedDownloads = new Map();
+const OFFSCREEN_DOCUMENT_PATH = "ffmpeg/ffmpeg-offscreen.html";
+let creatingOffscreenDocument = null;
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install" || details.reason === "update") {
@@ -17,6 +19,27 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.target === "background" && message.action === "independentMuxResult") {
+    handleIndependentMuxResult(message);
+    return;
+  }
+  if (message?.action === "startIndependentMux") {
+    startIndependentMux(message, sender.tab?.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.action === "cancelIndependentMux") {
+    ensureOffscreenDocument()
+      .then(() => chrome.runtime.sendMessage({
+        target: "ffmpeg-offscreen",
+        action: "cancelIndependentMux",
+        muxId: message.muxId,
+      }))
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (!message.url) return;
   if (message.action === "downloadMuxUrl") {
     downloadPreparedUrl(message, sender.tab?.id)
@@ -58,6 +81,82 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+async function ensureOffscreenDocument() {
+  const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [offscreenUrl],
+  });
+  if (contexts.length) return;
+  if (!creatingOffscreenDocument) {
+    creatingOffscreenDocument = chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: ["BLOBS", "WORKERS"],
+      justification:
+        "Download and mux independent media tracks after the source tab navigates.",
+    }).finally(() => {
+      creatingOffscreenDocument = null;
+    });
+  }
+  await creatingOffscreenDocument;
+}
+
+async function startIndependentMux(message, tabId) {
+  await ensureOffscreenDocument();
+  const response = await chrome.runtime.sendMessage({
+    target: "ffmpeg-offscreen",
+    action: "startIndependentMux",
+    ...message,
+    tabId,
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Offscreen mux could not be started.");
+  }
+}
+
+async function handleIndependentMuxResult(message) {
+  const notifyTab = (result) => {
+    if (!message.tabId) return;
+    chrome.tabs.sendMessage(message.tabId, {
+      action: "independentMuxResult",
+      muxId: message.muxId,
+      ...result,
+    }).catch(() => {});
+  };
+
+  if (!message.ok) {
+    notifyTab({
+      ok: false,
+      canceled: message.canceled,
+      error: message.error || "Independent mux failed.",
+    });
+    return;
+  }
+
+  try {
+    const filename = replaceExtension(message.filename, message.extension);
+    await downloadPreparedUrl(
+      {
+        url: message.url,
+        filename,
+        folder: message.folder,
+        saveAs: message.saveAs,
+      },
+      message.tabId,
+      message.muxId,
+    );
+    notifyTab({ ok: true });
+  } catch (error) {
+    chrome.runtime.sendMessage({
+      target: "ffmpeg-offscreen",
+      action: "releaseIndependentMux",
+      muxId: message.muxId,
+      url: message.url,
+    }).catch(() => {});
+    notifyTab({ ok: false, error: error.message });
+  }
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === FETCH_PORT) {
@@ -315,7 +414,14 @@ chrome.downloads.onChanged.addListener((delta) => {
   const prepared = activePreparedDownloads.get(delta.id);
   if (prepared) {
     activePreparedDownloads.delete(delta.id);
-    if (prepared.tabId) {
+    if (prepared.offscreenMuxId) {
+      chrome.runtime.sendMessage({
+        target: "ffmpeg-offscreen",
+        action: "releaseIndependentMux",
+        muxId: prepared.offscreenMuxId,
+        url: prepared.url,
+      }).catch(() => {});
+    } else if (prepared.tabId) {
       chrome.tabs
         .sendMessage(prepared.tabId, {
           action: "releaseMuxUrl",
@@ -550,7 +656,11 @@ function downloadMedia({ url, folder, saveAs, mediaType }) {
   });
 }
 
-function downloadPreparedUrl({ url, filename, folder, saveAs }, tabId) {
+function downloadPreparedUrl(
+  { url, filename, folder, saveAs },
+  tabId,
+  offscreenMuxId,
+) {
   return new Promise((resolve, reject) => {
     filename = (filename || `video-${Date.now()}.mp4`).replace(
       /[^a-zA-Z0-9.\-_]/g,
@@ -575,7 +685,7 @@ function downloadPreparedUrl({ url, filename, folder, saveAs }, tabId) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
-        activePreparedDownloads.set(downloadId, { url, tabId });
+        activePreparedDownloads.set(downloadId, { url, tabId, offscreenMuxId });
         resolve(downloadId);
       },
     );

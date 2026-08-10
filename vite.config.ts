@@ -66,6 +66,14 @@ export default defineConfig({
           src: "ffmpeg-host.js",
           dest: "ffmpeg",
         },
+        {
+          src: "ffmpeg-offscreen.html",
+          dest: "ffmpeg",
+        },
+        {
+          src: "ffmpeg-offscreen.js",
+          dest: "ffmpeg",
+        },
       ],
     }),
   ],

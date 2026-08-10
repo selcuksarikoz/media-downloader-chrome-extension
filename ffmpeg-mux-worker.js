@@ -82,10 +82,6 @@ self.onmessage = async (event) => {
       url,
       extension: useWebm ? "webm" : "mp4",
     });
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      self.close();
-    }, 60_000);
   } catch (error) {
     self.postMessage({
       muxId,

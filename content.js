@@ -23,10 +23,9 @@ const DEFAULT_SETTINGS = {
   captureType: "jpg",
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
-  maxConcurrentDownloads: 2,
   useContextMenu: false,
 };
-const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "recording", "progress"]);
+const ACTIVE_DOWNLOAD_STATES = new Set(["recording", "progress"]);
 let settings = { ...DEFAULT_SETTINGS };
 let extensionActive = false;
 let mediaMutationObserver = null;
@@ -35,6 +34,7 @@ const mediaControls = new Map();
 const trackedMedia = new Map();
 const capturedVideos = new Map();
 const blobDownloadRequests = new Map();
+const activeBlobJobIds = new Set();
 const pipState = new WeakMap();
 const mediaHoverListeners = new WeakMap();
 const instagramNativeControlState = new WeakMap();
@@ -43,6 +43,7 @@ const blobJobIntent = new Map();
 const canceledBlobJobs = new Set();
 const activeMuxWorkers = new Map();
 const muxOutputWorkers = new Map();
+const activeIndependentMuxes = new Map();
 const FFMPEG_HOST_CHANNEL = "imd:ffmpeg-host";
 let ffmpegHostFrame = null;
 let ffmpegHostPromise = null;
@@ -54,6 +55,7 @@ const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 const BLOB_PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const BLOB_MUX_EVENT = "imd:mux-blob-tracks";
 const BLOB_MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
+const NAVIGATION_BLOCKED_EVENT = "imd:navigation-blocked";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
@@ -154,6 +156,21 @@ window.addEventListener(BLOB_MUX_EVENT, async (event) => {
   let response = { ok: false };
   try {
     if (canceledBlobJobs.has(videoId)) throw abortError();
+    if (tracks.every((track) => track.url && !track.blob)) {
+      await muxTracksIndependently(
+        videoId,
+        filename,
+        tracks,
+        startTime,
+      );
+      response = { ok: true };
+      window.dispatchEvent(
+        new CustomEvent(BLOB_MUX_RESULT_EVENT, {
+          detail: { requestId, ...response },
+        }),
+      );
+      return;
+    }
     const result = await muxTracksLocally(videoId, tracks, startTime);
     if (canceledBlobJobs.has(videoId)) throw abortError();
     const outputName = replaceFileExtension(filename, result.extension);
@@ -177,6 +194,43 @@ window.addEventListener(BLOB_MUX_EVENT, async (event) => {
     }),
   );
 });
+
+function muxTracksIndependently(videoId, filename, tracks, startTime) {
+  const muxId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const entry = { muxId, resolve, reject };
+    activeIndependentMuxes.set(videoId, entry);
+    chrome.runtime.sendMessage(
+      {
+        action: "startIndependentMux",
+        muxId,
+        videoId,
+        filename,
+        folder: settings.downloadFolder,
+        saveAs: settings.showSaveAs,
+        tracks: tracks.map((track) => ({
+          mimeType: track.mimeType,
+          url: track.url,
+        })),
+        startTime,
+      },
+      (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          if (activeIndependentMuxes.get(videoId) === entry) {
+            activeIndependentMuxes.delete(videoId);
+          }
+          reject(
+            new Error(
+              chrome.runtime.lastError?.message ||
+                response?.error ||
+                "Independent download could not be started.",
+            ),
+          );
+        }
+      },
+    );
+  });
+}
 
 async function getFfmpegHostFrame() {
   if (ffmpegHostFrame?.isConnected) return ffmpegHostFrame;
@@ -248,6 +302,7 @@ async function muxTracksLocally(videoId, tracks, startTime) {
     const payload = tracks.map((track) => ({
       mimeType: track.mimeType,
       blob: track.blob,
+      url: track.url,
     }));
     frame.contentWindow.postMessage(
       {
@@ -263,6 +318,15 @@ async function muxTracksLocally(videoId, tracks, startTime) {
 }
 
 function cancelLocalMux(videoId) {
+  const independent = activeIndependentMuxes.get(videoId);
+  if (independent) {
+    activeIndependentMuxes.delete(videoId);
+    chrome.runtime.sendMessage({
+      action: "cancelIndependentMux",
+      muxId: independent.muxId,
+    });
+    independent.reject(abortError());
+  }
   const entry = activeMuxWorkers.get(videoId);
   if (!entry) return;
   activeMuxWorkers.delete(videoId);
@@ -294,6 +358,22 @@ function releaseMuxUrl(url) {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message?.action === "independentMuxResult" && message.muxId) {
+    const entry = [...activeIndependentMuxes.values()].find(
+      (candidate) => candidate.muxId === message.muxId,
+    );
+    if (!entry) return;
+    for (const [videoId, candidate] of activeIndependentMuxes) {
+      if (candidate === entry) activeIndependentMuxes.delete(videoId);
+    }
+    if (message.ok) entry.resolve(message);
+    else {
+      const error = new Error(message.error || "Independent mux failed.");
+      if (message.canceled) error.name = "AbortError";
+      entry.reject(error);
+    }
+    return;
+  }
   if (message?.action === "releaseMuxUrl" && message.url) {
     releaseMuxUrl(message.url);
   }
@@ -366,6 +446,10 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
+  if (videoId) {
+    if (ACTIVE_DOWNLOAD_STATES.has(status)) activeBlobJobIds.add(videoId);
+    else activeBlobJobIds.delete(videoId);
+  }
   const video = capturedVideos.get(videoId);
   const allBtns = video
     ? mediaControls.get(video)?.querySelectorAll(".imd-action-btn")
@@ -522,11 +606,77 @@ function downloadBlobFile(blob, filename, folder, saveAs) {
 
 let blobDownloadStack;
 const blobDownloadPanels = new Map();
+const DOWNLOAD_NAVIGATION_WARNING =
+  "You cannot leave or reload this page while a download is in progress. " +
+  "Wait for it to finish or cancel the download.";
+
+function hasActivePageDownload() {
+  return (
+    blobDownloadRequests.size > 0 ||
+    activeBlobJobIds.size > 0 ||
+    activeIndependentMuxes.size > 0 ||
+    activeMuxWorkers.size > 0
+  );
+}
+
+function warnDownloadNavigationBlocked() {
+  showToast(DOWNLOAD_NAVIGATION_WARNING);
+}
+
 window.addEventListener("beforeunload", (event) => {
-  if (!blobDownloadRequests.size) return;
+  if (!hasActivePageDownload()) return;
   event.preventDefault();
   event.returnValue = "";
 });
+
+window.addEventListener(NAVIGATION_BLOCKED_EVENT, warnDownloadNavigationBlocked);
+
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!hasActivePageDownload()) return;
+    const anchor = event.target.closest?.("a[href]");
+    if (!anchor || anchor.hasAttribute("download")) return;
+    if (anchor.target && anchor.target.toLowerCase() === "_blank") return;
+    let destination;
+    try {
+      destination = new URL(anchor.href, location.href);
+    } catch {
+      return;
+    }
+    if (destination.href === location.href) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    warnDownloadNavigationBlocked();
+  },
+  true,
+);
+
+document.addEventListener(
+  "submit",
+  (event) => {
+    if (!hasActivePageDownload()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    warnDownloadNavigationBlocked();
+  },
+  true,
+);
+
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (!hasActivePageDownload()) return;
+    const reloadShortcut =
+      event.key === "F5" ||
+      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r");
+    if (!reloadShortcut) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    warnDownloadNavigationBlocked();
+  },
+  true,
+);
 
 /** Update or create the download panel for a blob video. */
 function updateBlobDownloadPanel(videoId, status, message, progress) {
@@ -3011,7 +3161,6 @@ function streamBlobVideo(video, url) {
     url,
     filename: getSuggestedVideoName(video),
     videoId: video.dataset.imdCaptureId,
-    maxConcurrent: settings.maxConcurrentDownloads,
   };
   canceledBlobJobs.delete(detail.videoId);
   blobDownloadRequests.set(detail.videoId, detail);
@@ -3626,7 +3775,6 @@ function triggerTrim(media, trimBtn) {
             filename: getSuggestedVideoName(media),
             videoId: media.dataset.imdCaptureId,
             startTime: media.currentTime,
-            maxConcurrent: settings.maxConcurrentDownloads,
           },
         }),
       );

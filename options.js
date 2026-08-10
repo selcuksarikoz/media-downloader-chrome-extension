@@ -9,7 +9,6 @@ const DEFAULTS = {
   captureType: "jpg",
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
-  maxConcurrentDownloads: 2,
   useContextMenu: false,
 };
 const get = (id) => document.getElementById(id);
@@ -30,14 +29,6 @@ function saveOptions() {
       captureType: get("captureType").value,
       blacklistedDomains,
       minWidth: parseInt(get("minWidth").value, 10) || DEFAULTS.minWidth,
-      maxConcurrentDownloads: Math.min(
-        10,
-        Math.max(
-          1,
-          parseInt(get("maxConcurrent").value, 10) ||
-            DEFAULTS.maxConcurrentDownloads
-        )
-      ),
     },
     () => {
       get("status").textContent = "Options saved.";
@@ -47,6 +38,7 @@ function saveOptions() {
 }
 
 function restoreOptions() {
+  chrome.storage.sync.remove("maxConcurrentDownloads");
   chrome.storage.sync.get(DEFAULTS, (items) => {
     const folder = hasForbiddenFolder(items.downloadFolder)
       ? ""
@@ -63,7 +55,6 @@ function restoreOptions() {
       ? items.captureType
       : DEFAULTS.captureType;
     get("minWidth").value = items.minWidth;
-    get("maxConcurrent").value = items.maxConcurrentDownloads;
     blacklistedDomains = normalizeDomainList(items.blacklistedDomains);
     renderBlacklist();
     if (folder !== items.downloadFolder) {

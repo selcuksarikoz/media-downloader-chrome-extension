@@ -6,6 +6,7 @@ const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 const PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const MUX_EVENT = "imd:mux-blob-tracks";
 const MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
+const NAVIGATION_BLOCKED_EVENT = "imd:navigation-blocked";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const blobKinds = new Map();
@@ -26,14 +27,245 @@ function trimBlobKinds() {
 const activeRecordings = new Map();
 const activeJobs = new Set();
 const activeJobControllers = new Map();
-const queuedJobs = [];
-const queuedVideoIds = new Set();
-let maxConcurrentJobs = 2;
 const mediaSourceRecords = new WeakMap();
 const sourceBufferRecords = new WeakMap();
+const responseSources = new WeakMap();
+const payloadSources = new WeakMap();
 const protectedVideos = new WeakSet();
 const captureBlockedVideos = new WeakSet();
 const renderedFrameTimes = new WeakMap();
+const nativeHistoryPushState = History.prototype.pushState;
+const nativeHistoryReplaceState = History.prototype.replaceState;
+let lastAllowedPageUrl = location.href;
+
+function hasActiveMediaJob() {
+  return activeJobs.size > 0;
+}
+
+function emitNavigationBlocked() {
+  window.dispatchEvent(new CustomEvent(NAVIGATION_BLOCKED_EVENT));
+}
+
+function isDifferentPageUrl(url) {
+  if (url == null) return false;
+  try {
+    return new URL(String(url), location.href).href !== location.href;
+  } catch {
+    return false;
+  }
+}
+
+History.prototype.pushState = function (state, unused, url) {
+  if (hasActiveMediaJob() && isDifferentPageUrl(url)) {
+    emitNavigationBlocked();
+    return;
+  }
+  const result = nativeHistoryPushState.call(this, state, unused, url);
+  lastAllowedPageUrl = location.href;
+  return result;
+};
+
+History.prototype.replaceState = function (state, unused, url) {
+  if (hasActiveMediaJob() && isDifferentPageUrl(url)) {
+    emitNavigationBlocked();
+    return;
+  }
+  const result = nativeHistoryReplaceState.call(this, state, unused, url);
+  lastAllowedPageUrl = location.href;
+  return result;
+};
+
+window.addEventListener(
+  "popstate",
+  (event) => {
+    if (!hasActiveMediaJob()) {
+      lastAllowedPageUrl = location.href;
+      return;
+    }
+    event.stopImmediatePropagation();
+    nativeHistoryPushState.call(history, history.state, "", lastAllowedPageUrl);
+    emitNavigationBlocked();
+  },
+  true
+);
+
+window.addEventListener(
+  "hashchange",
+  (event) => {
+    if (!hasActiveMediaJob()) {
+      lastAllowedPageUrl = location.href;
+      return;
+    }
+    event.stopImmediatePropagation();
+    nativeHistoryReplaceState.call(
+      history,
+      history.state,
+      "",
+      lastAllowedPageUrl
+    );
+    emitNavigationBlocked();
+  },
+  true
+);
+
+window.addEventListener("beforeunload", (event) => {
+  if (!hasActiveMediaJob()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
+function normalizeRequestUrl(input) {
+  try {
+    const value = typeof input === "string" || input instanceof URL
+      ? String(input)
+      : input?.url;
+    return value ? new URL(value, document.baseURI).href : "";
+  } catch {
+    return "";
+  }
+}
+
+function getResponseSource(response, fallbackUrl = "") {
+  const header = (name) => {
+    try {
+      return response.headers?.get(name) || "";
+    } catch {
+      return "";
+    }
+  };
+  return {
+    url: response.url || fallbackUrl,
+    status: response.status || 0,
+    contentType: header("Content-Type"),
+    contentRange: header("Content-Range"),
+    contentLength: Number.parseInt(header("Content-Length"), 10) || 0,
+  };
+}
+
+function tagMediaPayload(payload, source) {
+  if (!payload || !source?.url) return payload;
+  if (payload instanceof ArrayBuffer) payloadSources.set(payload, source);
+  else if (ArrayBuffer.isView(payload)) payloadSources.set(payload.buffer, source);
+  else if (payload instanceof Blob) payloadSources.set(payload, source);
+  return payload;
+}
+
+// Associate bytes appended to MediaSource with the original CDN response.
+// The association lets the extension fetch the complete track independently
+// without seeking or accelerating the page's video element.
+const nativeFetch = window.fetch;
+window.fetch = async function (...args) {
+  const fallbackUrl = normalizeRequestUrl(args[0]);
+  const response = await nativeFetch.apply(this, args);
+  responseSources.set(response, getResponseSource(response, fallbackUrl));
+  return response;
+};
+
+const nativeResponseClone = Response.prototype.clone;
+Response.prototype.clone = function () {
+  const clone = nativeResponseClone.call(this);
+  const source = responseSources.get(this);
+  if (source) responseSources.set(clone, source);
+  return clone;
+};
+
+for (const method of ["arrayBuffer", "blob"]) {
+  const nativeMethod = Response.prototype[method];
+  Response.prototype[method] = async function (...args) {
+    const payload = await nativeMethod.apply(this, args);
+    return tagMediaPayload(
+      payload,
+      responseSources.get(this) || getResponseSource(this)
+    );
+  };
+}
+
+const nativeBlobArrayBuffer = Blob.prototype.arrayBuffer;
+Blob.prototype.arrayBuffer = async function (...args) {
+  const payload = await nativeBlobArrayBuffer.apply(this, args);
+  return tagMediaPayload(payload, payloadSources.get(this));
+};
+
+const nativeArrayBufferSlice = ArrayBuffer.prototype.slice;
+ArrayBuffer.prototype.slice = function (...args) {
+  const sliced = nativeArrayBufferSlice.apply(this, args);
+  return tagMediaPayload(sliced, payloadSources.get(this));
+};
+
+const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
+const nativeTypedArraySlice = typedArrayPrototype.slice;
+if (typeof nativeTypedArraySlice === "function") {
+  typedArrayPrototype.slice = function (...args) {
+    const sliced = nativeTypedArraySlice.apply(this, args);
+    tagMediaPayload(sliced, payloadSources.get(this.buffer));
+    return sliced;
+  };
+}
+
+if (window.ReadableStream && window.ReadableStreamDefaultReader) {
+  const streamSources = new WeakMap();
+  const readerSources = new WeakMap();
+  const bodyDescriptor = Object.getOwnPropertyDescriptor(Response.prototype, "body");
+  if (bodyDescriptor?.get) {
+    Object.defineProperty(Response.prototype, "body", {
+      ...bodyDescriptor,
+      get() {
+        const stream = bodyDescriptor.get.call(this);
+        const source = responseSources.get(this);
+        if (stream && source) streamSources.set(stream, source);
+        return stream;
+      },
+    });
+  }
+  const nativeGetReader = ReadableStream.prototype.getReader;
+  ReadableStream.prototype.getReader = function (...args) {
+    const reader = nativeGetReader.apply(this, args);
+    const source = streamSources.get(this);
+    if (source) readerSources.set(reader, source);
+    return reader;
+  };
+  const nativeReaderRead = ReadableStreamDefaultReader.prototype.read;
+  ReadableStreamDefaultReader.prototype.read = async function (...args) {
+    const result = await nativeReaderRead.apply(this, args);
+    tagMediaPayload(result?.value, readerSources.get(this));
+    return result;
+  };
+}
+
+if (window.XMLHttpRequest) {
+  const xhrSources = new WeakMap();
+  const nativeXhrOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...args) {
+    xhrSources.set(this, { url: normalizeRequestUrl(url) });
+    return nativeXhrOpen.call(this, method, url, ...args);
+  };
+  const responseDescriptor = Object.getOwnPropertyDescriptor(
+    XMLHttpRequest.prototype,
+    "response"
+  );
+  if (responseDescriptor?.get) {
+    Object.defineProperty(XMLHttpRequest.prototype, "response", {
+      ...responseDescriptor,
+      get() {
+        const payload = responseDescriptor.get.call(this);
+        const initial = xhrSources.get(this);
+        if (!initial) return payload;
+        let source = initial;
+        try {
+          source = {
+            url: this.responseURL || initial.url,
+            status: this.status || 0,
+            contentType: this.getResponseHeader("Content-Type") || "",
+            contentRange: this.getResponseHeader("Content-Range") || "",
+            contentLength:
+              Number.parseInt(this.getResponseHeader("Content-Length"), 10) || 0,
+          };
+        } catch {}
+        return tagMediaPayload(payload, source);
+      },
+    });
+  }
+}
 
 const nativePause = HTMLMediaElement.prototype.pause;
 const nativePlay = HTMLMediaElement.prototype.play;
@@ -98,7 +330,7 @@ if (window.MediaSource && window.SourceBuffer) {
   MediaSource.prototype.addSourceBuffer = function (mimeType) {
     const sourceBuffer = nativeAddSourceBuffer.call(this, mimeType);
     const record = getMediaSourceRecord(this);
-    const bufferRecord = { mimeType, chunks: [] };
+    const bufferRecord = { mimeType, chunks: [], sources: [] };
     record.buffers.push(bufferRecord);
     sourceBufferRecords.set(sourceBuffer, { bufferRecord, mediaRecord: record });
     return sourceBuffer;
@@ -108,6 +340,17 @@ if (window.MediaSource && window.SourceBuffer) {
   SourceBuffer.prototype.appendBuffer = function (data) {
     const sourceRecord = sourceBufferRecords.get(this);
     if (sourceRecord && data) {
+      const source = payloadSources.get(
+        ArrayBuffer.isView(data) ? data.buffer : data
+      );
+      if (
+        source?.url &&
+        !sourceRecord.bufferRecord.sources.some(
+          (existing) => existing.url === source.url
+        )
+      ) {
+        sourceRecord.bufferRecord.sources.push(source);
+      }
       const bytes = ArrayBuffer.isView(data)
         ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
         : new Uint8Array(data);
@@ -145,49 +388,32 @@ URL.revokeObjectURL = (url) => {
 };
 
 window.addEventListener(DOWNLOAD_EVENT, (event) => {
-  const { url, filename, videoId, maxConcurrent } = event.detail || {};
+  const { url, filename, videoId } = event.detail || {};
   if (!url || !videoId) return;
-
-  maxConcurrentJobs = Math.min(
-    10,
-    Math.max(1, Number.parseInt(maxConcurrent, 10) || 2)
-  );
 
   const video = document.querySelector(
     `video[data-imd-capture-id="${CSS.escape(videoId)}"]`
   );
   if (!video) return;
 
-  if (activeJobs.has(videoId) || queuedVideoIds.has(videoId)) return;
+  if (activeJobs.has(videoId)) return;
 
   const source = blobKinds.get(url);
   if (source?.kind === "media-source") source.record.lockCount += 1;
   const job = { url, filename, videoId, video, source };
-  if (activeJobs.size >= maxConcurrentJobs) {
-    queuedJobs.push(job);
-    queuedVideoIds.add(videoId);
-    updateQueueStatuses();
-    return;
-  }
-
   startJob(job);
 });
 
 window.addEventListener(TRIM_EVENT, (event) => {
-  const { url, filename, videoId, startTime, maxConcurrent } = event.detail || {};
+  const { url, filename, videoId, startTime } = event.detail || {};
   if (!url || !videoId) return;
-
-  maxConcurrentJobs = Math.min(
-    10,
-    Math.max(1, Number.parseInt(maxConcurrent, 10) || 2)
-  );
 
   const video = document.querySelector(
     `video[data-imd-capture-id="${CSS.escape(videoId)}"]`
   );
   if (!video) return;
 
-  if (activeJobs.has(videoId) || queuedVideoIds.has(videoId)) return;
+  if (activeJobs.has(videoId)) return;
 
   const source = blobKinds.get(url);
   if (source?.kind === "media-source") source.record.lockCount += 1;
@@ -201,12 +427,6 @@ window.addEventListener(TRIM_EVENT, (event) => {
     isTrim: true,
   };
 
-  if (activeJobs.size >= maxConcurrentJobs) {
-    queuedJobs.push(job);
-    queuedVideoIds.add(videoId);
-    updateQueueStatuses();
-    return;
-  }
   startJob(job);
 });
 
@@ -216,16 +436,6 @@ window.addEventListener(CONTROL_EVENT, (event) => {
 
   if (action === "save") {
     activeRecordings.get(videoId)?.save();
-    return;
-  }
-
-  const queueIndex = queuedJobs.findIndex((job) => job.videoId === videoId);
-  if (queueIndex !== -1) {
-    const [job] = queuedJobs.splice(queueIndex, 1);
-    queuedVideoIds.delete(videoId);
-    releaseMediaSourceLock(job.source);
-    emitStatus(videoId, "canceled", "Video download canceled.");
-    updateQueueStatuses();
     return;
   }
 
@@ -301,7 +511,7 @@ function startJob(job) {
       controller.signal,
       startTime
     );
-  } else if (isTrim && source?.kind === "media-source" && source.record.buffers.length) {
+  } else if (isTrim && source?.kind === "media-source") {
     operation = downloadCapturedMediaSource(
       video,
       videoId,
@@ -312,7 +522,7 @@ function startJob(job) {
     );
   } else if (source?.kind === "blob") {
     operation = downloadKnownBlob(url, filename, videoId, controller.signal);
-  } else if (source?.kind === "media-source" && source.record.buffers.length) {
+  } else if (source?.kind === "media-source") {
     operation = downloadCapturedMediaSource(
       video,
       videoId,
@@ -338,7 +548,6 @@ function startJob(job) {
       releaseMediaSourceLock(source);
       activeJobs.delete(videoId);
       activeJobControllers.delete(videoId);
-      startQueuedJobs();
     });
 }
 
@@ -350,26 +559,6 @@ function releaseMediaSourceLock(source) {
     blobKinds.delete(pendingUrl);
   }
   source.record.pendingRevokes.clear();
-}
-
-function startQueuedJobs() {
-  while (activeJobs.size < maxConcurrentJobs && queuedJobs.length) {
-    const job = queuedJobs.shift();
-    queuedVideoIds.delete(job.videoId);
-    startJob(job);
-  }
-  updateQueueStatuses();
-}
-
-function updateQueueStatuses() {
-  queuedJobs.forEach((job, index) => {
-    emitStatus(
-      job.videoId,
-      "queued",
-      `Waiting in queue · position ${index + 1}`,
-      0
-    );
-  });
 }
 
 function sendBlobForDownload(blob, filename, videoId) {
@@ -430,6 +619,17 @@ async function downloadCapturedMediaSource(
   startTime
 ) {
   try {
+    const hadIndependentTracks = getIndependentTracks(bufferRecords).length > 0;
+    if (
+      await downloadIndependentTracks(
+        bufferRecords,
+        videoId,
+        filename,
+        startTime,
+        signal
+      )
+    ) return;
+
     if (!isMediaFullyBuffered(video)) {
       emitStatus(
         videoId,
@@ -437,7 +637,26 @@ async function downloadCapturedMediaSource(
         "Waiting for original media segments; video controls remain available…",
         0
       );
-      await waitForMediaCompletion(video, videoId, signal);
+      const waitResult = await waitForMediaCompletion(
+        video,
+        videoId,
+        signal,
+        () =>
+          !hadIndependentTracks && getIndependentTracks(bufferRecords).length > 0
+      );
+      if (
+        waitResult === "independent" &&
+        await downloadIndependentTracks(
+          bufferRecords,
+          videoId,
+          filename,
+          startTime,
+          signal
+        )
+      ) return;
+      if (!isMediaFullyBuffered(video)) {
+        await waitForMediaCompletion(video, videoId, signal);
+      }
     }
 
     signal.throwIfAborted();
@@ -480,6 +699,87 @@ async function downloadCapturedMediaSource(
   } finally {
     activeRecordings.delete(videoId);
   }
+}
+
+async function downloadIndependentTracks(
+  bufferRecords,
+  videoId,
+  filename,
+  startTime,
+  signal
+) {
+  const independentTracks = getIndependentTracks(bufferRecords);
+  if (!independentTracks.length) return false;
+  try {
+    emitStatus(
+      videoId,
+      "recording",
+      "Downloading original tracks independently in parallel…",
+      5
+    );
+    await requestFastMux(
+      videoId,
+      filename,
+      independentTracks,
+      startTime,
+      signal
+    );
+    emitStatus(
+      videoId,
+      "complete",
+      startTime > 0
+        ? "Independent download and trim completed."
+        : "Original tracks downloaded and muxed independently.",
+      100
+    );
+    return true;
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    console.warn(
+      "[Media Downloader] Independent track download unavailable; " +
+        "falling back to captured segments:",
+      error
+    );
+    return false;
+  }
+}
+
+function getIndependentTracks(bufferRecords) {
+  const mediaBuffers = bufferRecords.filter((buffer) =>
+    /^(audio|video)\//i.test(buffer?.mimeType || "")
+  );
+  if (!mediaBuffers.length) return [];
+
+  const tracks = [];
+  for (const buffer of mediaBuffers) {
+    const source = [...(buffer.sources || [])]
+      .reverse()
+      .find(isCompleteTrackSource);
+    if (!source) return [];
+    tracks.push({ mimeType: buffer.mimeType, url: source.url });
+  }
+  return tracks.some((track) => /^video\//i.test(track.mimeType)) ? tracks : [];
+}
+
+function isCompleteTrackSource(source) {
+  if (!/^https?:/i.test(source?.url || "")) return false;
+  if (/^bytes\s+\d+-\d+\/\d+$/i.test(source.contentRange || "")) return true;
+  let hasExplicitByteWindow = false;
+  try {
+    const params = new URL(source.url).searchParams;
+    hasExplicitByteWindow =
+      params.has("bytestart") ||
+      params.has("byteend") ||
+      params.has("byte_start") ||
+      params.has("byte_end") ||
+      params.has("range");
+  } catch {}
+  if (hasExplicitByteWindow || source.status !== 200) return false;
+  if (/\.(?:mp4|m4a|webm|mov)(?:$|[?#])/i.test(source.url)) return true;
+  return (
+    /^(?:audio|video)\//i.test(source.contentType || "") &&
+    !/\.(?:m4s|ts)(?:$|[?#])/i.test(source.url)
+  );
 }
 
 function requestFastMux(videoId, filename, tracks, startTime, signal) {
@@ -535,7 +835,7 @@ function isMediaFullyBuffered(video) {
   return bufferedUntil >= video.duration - 0.25;
 }
 
-function waitForMediaCompletion(video, videoId, signal) {
+function waitForMediaCompletion(video, videoId, signal, independentReady) {
   return new Promise((resolve, reject) => {
     let checkTimer;
     let settled = false;
@@ -556,9 +856,13 @@ function waitForMediaCompletion(video, videoId, signal) {
         "Collecting segments in the background; you can use the video normally…",
         progress
       );
+      if (independentReady?.()) {
+        settle(null, "independent");
+        return;
+      }
       if (isMediaFullyBuffered(video) || video.ended) finish();
     };
-    const settle = (error) => {
+    const settle = (error, result) => {
       if (settled) return;
       settled = true;
       clearInterval(checkTimer);
@@ -568,7 +872,7 @@ function waitForMediaCompletion(video, videoId, signal) {
       video.removeEventListener("durationchange", reportProgress);
       signal.removeEventListener("abort", cancel);
       if (error) reject(error);
-      else resolve();
+      else resolve(result);
     };
     const finish = () => settle();
     const cancel = () => settle(signal.reason || new DOMException("Canceled", "AbortError"));

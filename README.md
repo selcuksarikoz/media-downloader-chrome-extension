@@ -27,8 +27,8 @@ controls directly to page media.
 - Blob URLs are copied directly when readable.
 - Single-buffer MediaSource streams reuse captured segments.
 - Separate MediaSource audio/video buffers are recorded in real time as MP4.
-- Video downloads that require recording are queued according to the configured
-  concurrency limit. Recorded segments are streamed to the extension's storage,
+- Video downloads start immediately without a concurrency queue. Recorded
+  segments are streamed to the extension's storage,
   so a download is finalized and saved even if the tab is closed or the page
   navigates mid-recording (a partial file is saved if recording was interrupted).
   Background downloads fall back to a data URL when blob URLs are unavailable
