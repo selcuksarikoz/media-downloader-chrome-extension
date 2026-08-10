@@ -8,6 +8,7 @@ const downloadAllBtn = document.getElementById("download-all");
 const clearBtn = document.getElementById("clear");
 
 let activeTabId;
+let activeFrameIds = [0];
 let mediaItems = [];
 const itemStates = new Map();
 const itemProgress = new Map();
@@ -24,26 +25,63 @@ async function init() {
     showUnavailable("No active tab was found.");
     return;
   }
+  activeFrameIds = await discoverFrameIds();
   await loadMedia("getPopupMedia");
   refreshTimer = setInterval(refreshMedia, 500);
 }
 
-async function sendToTab(message) {
+async function discoverFrameIds() {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: activeTabId, allFrames: true },
+      func: () => true,
+    });
+    const frameIds = [...new Set(results.map((result) => result.frameId))];
+    return frameIds.length ? frameIds : [0];
+  } catch {
+    return [0];
+  }
+}
+
+async function sendToTab(message, frameId = 0) {
   if (!activeTabId) throw new Error("No active tab was found.");
   try {
-    return await chrome.tabs.sendMessage(activeTabId, message);
+    return await chrome.tabs.sendMessage(activeTabId, message, { frameId });
   } catch {
     throw new Error("Open a regular web page and reload it once.");
   }
+}
+
+async function sendToAllFrames(message) {
+  const results = await Promise.allSettled(
+    activeFrameIds.map(async (frameId) => ({
+      frameId,
+      response: await sendToTab(message, frameId),
+    })),
+  );
+  return results
+    .filter((result) => result.status === "fulfilled" && result.value.response?.ok)
+    .map((result) => result.value);
+}
+
+async function collectFrameMedia(action) {
+  if (action === "rescanPopupMedia") {
+    activeFrameIds = await discoverFrameIds();
+  }
+  const results = await sendToAllFrames({ action });
+  if (!results.length) {
+    throw new Error("Open a regular web page and reload it once.");
+  }
+  return results.flatMap(({ frameId, response }) =>
+    (response.media || []).map((item) => ({ ...item, frameId })),
+  );
 }
 
 async function loadMedia(action) {
   setBusy(true);
   hideNotice();
   try {
-    const response = await sendToTab({ action });
-    if (!response?.ok) throw new Error(response?.error || "Scan failed.");
-    mediaItems = response.media || [];
+    mediaItems = await collectFrameMedia(action);
     syncStatuses(mediaItems);
     render();
   } catch (error) {
@@ -57,9 +95,7 @@ async function refreshMedia() {
   if (refreshInFlight || !activeTabId) return;
   refreshInFlight = true;
   try {
-    const response = await sendToTab({ action: "getPopupMedia" });
-    if (!response?.ok) return;
-    mediaItems = response.media || [];
+    mediaItems = await collectFrameMedia("getPopupMedia");
     syncStatuses(mediaItems);
     render();
   } catch {
@@ -170,12 +206,16 @@ function createMediaCard(item) {
 }
 
 async function downloadItem(videoId) {
+  const item = mediaItems.find((candidate) => candidate.id === videoId);
   reportedVideoIds.delete(videoId);
   itemProgress.set(videoId, 0);
   itemStates.set(videoId, "downloading");
   render();
   try {
-    const response = await sendToTab({ action: "downloadPopupMedia", videoId });
+    const response = await sendToTab(
+      { action: "downloadPopupMedia", videoId },
+      item?.frameId ?? 0,
+    );
     if (!response?.ok) throw new Error(response?.error || "Download failed.");
     if (!reportedVideoIds.has(videoId)) {
       itemStates.set(videoId, "started");
@@ -191,11 +231,15 @@ async function downloadItem(videoId) {
 
 async function removeItem(videoId) {
   try {
-    const response = await sendToTab({ action: "removePopupMedia", videoId });
+    const item = mediaItems.find((candidate) => candidate.id === videoId);
+    const response = await sendToTab(
+      { action: "removePopupMedia", videoId },
+      item?.frameId ?? 0,
+    );
     if (!response?.ok) throw new Error(response?.error || "Remove failed.");
     itemStates.delete(videoId);
     itemProgress.delete(videoId);
-    mediaItems = response.media || [];
+    mediaItems = mediaItems.filter((candidate) => candidate.id !== videoId);
     render();
   } catch (error) {
     showNotice(error.message, "error");
@@ -214,8 +258,8 @@ async function downloadAll() {
 
 async function clearAll() {
   try {
-    const response = await sendToTab({ action: "clearPopupMedia" });
-    if (!response?.ok) throw new Error(response?.error || "Clear failed.");
+    const responses = await sendToAllFrames({ action: "clearPopupMedia" });
+    if (!responses.length) throw new Error("Clear failed.");
     mediaItems = [];
     itemStates.clear();
     itemProgress.clear();

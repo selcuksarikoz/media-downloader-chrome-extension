@@ -60,11 +60,15 @@ self.onmessage = async (event) => {
         ["vp09", "av01"],
       );
 
+    const videoMimeType = tracks[videoIndex].mimeType || "";
+    const audioMimeType =
+      audioIndex >= 0 ? tracks[audioIndex].mimeType || "" : videoMimeType;
+    const videoRequiresMp4 =
+      videoNeedsH264 || /mp4|avc1|avc3|h26[45]|hevc/i.test(videoMimeType);
     const useWebm =
-      !videoNeedsH264 &&
-      tracks.some((track) =>
-        /webm|vp8|vp9|opus/i.test(track.mimeType),
-      );
+      !videoRequiresMp4 && /webm|vp8|vp9/i.test(videoMimeType);
+    const audioNeedsAac =
+      !useWebm && audioIndex >= 0 && /webm|opus|vorbis/i.test(audioMimeType);
     outputName = useWebm ? "output.webm" : "output.mp4";
     const args = [];
     for (const name of inputNames) args.push("-i", name);
@@ -91,11 +95,18 @@ self.onmessage = async (event) => {
         "high",
         "-tag:v",
         "avc1",
-        "-c:a",
-        "copy",
       );
     } else {
-      args.push("-c", "copy");
+      args.push("-c:v", "copy");
+    }
+    if (audioIndex >= 0) {
+      if (audioNeedsAac) {
+        args.push("-c:a", "aac", "-b:a", "160k");
+      } else {
+        args.push("-c:a", "copy");
+      }
+    } else {
+      args.push("-c:a", "copy");
     }
     args.push("-avoid_negative_ts", "make_zero");
     if (!useWebm) {

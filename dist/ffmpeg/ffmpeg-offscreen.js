@@ -245,6 +245,13 @@ function buildExplicitRangeUrl(value, start, end) {
       params.set("byte_end", String(end));
       return url.href;
     }
+    if (
+      url.hostname.endsWith(".googlevideo.com") &&
+      params.has("range")
+    ) {
+      params.set("range", `${start}-${end}`);
+      return url.href;
+    }
   } catch {}
   return value;
 }

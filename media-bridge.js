@@ -74,6 +74,7 @@ const activeRecordings = new Map();
 const activeJobs = new Set();
 const activeJobControllers = new Map();
 const mediaSourceRecords = new WeakMap();
+const recentMediaSourceRecords = [];
 const sourceBufferRecords = new WeakMap();
 const responseSources = new WeakMap();
 const payloadSources = new WeakMap();
@@ -171,6 +172,18 @@ function normalizeRequestUrl(input) {
   }
 }
 
+function getUrlContentRange(value) {
+  try {
+    const url = new URL(value, document.baseURI);
+    const range = /^(\d+)-(\d+)$/.exec(url.searchParams.get("range") || "");
+    const fullSize = Number(url.searchParams.get("clen"));
+    if (!range || !Number.isSafeInteger(fullSize) || fullSize <= 0) return "";
+    return `bytes ${range[1]}-${range[2]}/${fullSize}`;
+  } catch {
+    return "";
+  }
+}
+
 function getResponseSource(response, fallbackUrl = "") {
   const header = (name) => {
     try {
@@ -179,11 +192,12 @@ function getResponseSource(response, fallbackUrl = "") {
       return "";
     }
   };
+  const url = response.url || fallbackUrl;
   return {
-    url: response.url || fallbackUrl,
+    url,
     status: response.status || 0,
     contentType: header("Content-Type"),
-    contentRange: header("Content-Range"),
+    contentRange: header("Content-Range") || getUrlContentRange(url),
     contentLength: Number.parseInt(header("Content-Length"), 10) || 0,
   };
 }
@@ -302,7 +316,13 @@ if (window.XMLHttpRequest) {
             url: this.responseURL || initial.url,
             status: this.status || 0,
             contentType: this.getResponseHeader("Content-Type") || "",
-            contentRange: this.getResponseHeader("Content-Range") || "",
+            // Content-Range is not CORS-safelisted. Calling getResponseHeader
+            // for it makes Chrome report an extension error on YouTube even
+            // when the request itself succeeded. Googlevideo URLs already
+            // expose the byte window and full size through range/clen.
+            contentRange: getUrlContentRange(
+              this.responseURL || initial.url,
+            ),
             contentLength:
               Number.parseInt(this.getResponseHeader("Content-Length"), 10) || 0,
           };
@@ -365,8 +385,17 @@ Element.prototype.removeAttribute = function (name) {
 function getMediaSourceRecord(mediaSource) {
   let record = mediaSourceRecords.get(mediaSource);
   if (!record) {
-    record = { buffers: [], lockCount: 0, pendingRevokes: new Set() };
+    record = {
+      buffers: [],
+      lockCount: 0,
+      pendingRevokes: new Set(),
+      lastAppendAt: 0,
+    };
     mediaSourceRecords.set(mediaSource, record);
+    recentMediaSourceRecords.push(record);
+    if (recentMediaSourceRecords.length > 20) {
+      recentMediaSourceRecords.shift();
+    }
   }
   return record;
 }
@@ -386,6 +415,7 @@ if (window.MediaSource && window.SourceBuffer) {
   SourceBuffer.prototype.appendBuffer = function (data) {
     const sourceRecord = sourceBufferRecords.get(this);
     if (sourceRecord && data) {
+      sourceRecord.mediaRecord.lastAppendAt = Date.now();
       const source = payloadSources.get(
         ArrayBuffer.isView(data) ? data.buffer : data
       );
@@ -423,9 +453,11 @@ URL.createObjectURL = (object) => {
 const nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL);
 URL.revokeObjectURL = (url) => {
   const source = blobKinds.get(url);
-  if (source?.kind === "media-source" && source.record.lockCount) {
-    // Keep only our bookkeeping until the job settles. Revoking the real URL
-    // remains the page's decision and must not be delayed by a download.
+  if (source?.kind === "media-source") {
+    // Players such as Shaka revoke the MediaSource URL immediately after
+    // assigning it to <video>. The element keeps playing, so retain only our
+    // lightweight URL-to-segment bookkeeping for a later download request.
+    // The browser-owned object URL itself is still revoked right away.
     source.record.pendingRevokes.add(url);
     return nativeRevokeObjectURL(url);
   }
@@ -444,7 +476,18 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
 
   if (activeJobs.has(videoId)) return;
 
-  const source = blobKinds.get(url);
+  let source = blobKinds.get(url);
+  if (!source && url.startsWith("blob:")) {
+    const record = [...recentMediaSourceRecords]
+      .reverse()
+      .find((candidate) =>
+        candidate.buffers.some((buffer) => buffer.chunks.length),
+      );
+    if (record) {
+      source = { kind: "media-source", record };
+      blobKinds.set(url, source);
+    }
+  }
   if (source?.kind === "media-source") source.record.lockCount += 1;
   const job = { url, filename, videoId, video, source };
   startJob(job);
@@ -687,23 +730,14 @@ function startJob(job) {
   emitStatus(
     videoId,
     "recording",
-    isTrim ? "Preparing fast video trim…" : "Preparing video download…"
+    isTrim ? "Starting trim recording…" : "Preparing video download…"
   );
   let operation;
-  if (isTrim && source?.kind === "blob") {
-    operation = trimKnownBlob(
-      url,
-      filename,
-      videoId,
-      controller.signal,
-      startTime
-    );
-  } else if (isTrim && source?.kind === "media-source") {
-    operation = downloadCapturedMediaSource(
+  if (isTrim) {
+    operation = recordMediaSource(
       video,
       videoId,
       filename,
-      source.record.buffers,
       controller.signal,
       startTime
     );
@@ -953,22 +987,6 @@ async function fetchTelegramProgressiveRange(url, start, end, signal) {
     fullSize,
     contentType: response.headers.get("Content-Type") || "",
   };
-}
-
-async function trimKnownBlob(url, filename, videoId, signal, startTime) {
-  const response = await fetch(url, { signal });
-  const blob = await response.blob();
-  signal.throwIfAborted();
-  if (!blob.size) throw new Error("The Blob video contains no data.");
-  emitStatus(videoId, "recording", "Trimming video with FFmpeg…", 90);
-  await requestFastMux(
-    videoId,
-    filename,
-    [{ mimeType: blob.type || "video/mp4", blob }],
-    startTime,
-    signal
-  );
-  emitStatus(videoId, "complete", "Trim muxed without re-encoding.", 100);
 }
 
 async function downloadCapturedMediaSource(
@@ -1233,7 +1251,12 @@ function isCompleteTrackSource(source) {
       params.has("byte_end") ||
       params.has("range");
   } catch {}
-  if (hasExplicitByteWindow) return isRewritableInstagramRangeUrl(source.url);
+  if (hasExplicitByteWindow) {
+    return (
+      isRewritableInstagramRangeUrl(source.url) ||
+      isRewritableGoogleVideoRangeUrl(source.url)
+    );
+  }
 
   // Twitter/X commonly serves its canonical .mp4 track URL with status 206
   // while CORS hides Content-Range from page JavaScript. A fresh request to
@@ -1274,9 +1297,29 @@ function isRewritableInstagramRangeUrl(value) {
   }
 }
 
+function isRewritableGoogleVideoRangeUrl(value) {
+  try {
+    const url = new URL(value);
+    const fullSize = Number(url.searchParams.get("clen"));
+    return (
+      url.hostname.endsWith(".googlevideo.com") &&
+      /^(\d+)-(\d+)$/.test(url.searchParams.get("range") || "") &&
+      Number.isSafeInteger(fullSize) &&
+      fullSize > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function getTrackFullSize(source) {
   const match = /\/([0-9]+)$/i.exec(source?.contentRange || "");
-  const size = match ? Number(match[1]) : 0;
+  let size = match ? Number(match[1]) : 0;
+  if (!size) {
+    try {
+      size = Number(new URL(source?.url).searchParams.get("clen"));
+    } catch {}
+  }
   return Number.isSafeInteger(size) && size > 0 ? size : undefined;
 }
 
