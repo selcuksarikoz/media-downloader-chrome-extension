@@ -212,6 +212,7 @@ function muxTracksIndependently(videoId, filename, tracks, startTime) {
         tracks: tracks.map((track) => ({
           mimeType: track.mimeType,
           url: track.url,
+          fullSize: track.fullSize,
         })),
         startTime,
       },

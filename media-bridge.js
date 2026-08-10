@@ -913,7 +913,11 @@ function getIndependentTracks(bufferRecords) {
       .reverse()
       .find(isCompleteTrackSource);
     if (!source) return [];
-    tracks.push({ mimeType: buffer.mimeType, url: source.url });
+    tracks.push({
+      mimeType: buffer.mimeType,
+      url: source.url,
+      fullSize: getTrackFullSize(source),
+    });
   }
   return tracks.some((track) => /^video\//i.test(track.mimeType)) ? tracks : [];
 }
@@ -931,7 +935,7 @@ function isCompleteTrackSource(source) {
       params.has("byte_end") ||
       params.has("range");
   } catch {}
-  if (hasExplicitByteWindow) return false;
+  if (hasExplicitByteWindow) return isRewritableInstagramRangeUrl(source.url);
 
   // Twitter/X commonly serves its canonical .mp4 track URL with status 206
   // while CORS hides Content-Range from page JavaScript. A fresh request to
@@ -944,6 +948,28 @@ function isCompleteTrackSource(source) {
     /^(?:audio|video)\//i.test(source.contentType || "") &&
     !/\.(?:m4s|ts)(?:$|[?#])/i.test(source.url)
   );
+}
+
+function isRewritableInstagramRangeUrl(value) {
+  try {
+    const url = new URL(value);
+    const isInstagramCdn =
+      url.hostname.endsWith(".fbcdn.net") ||
+      url.hostname.endsWith(".cdninstagram.com");
+    const params = url.searchParams;
+    const hasRangePair =
+      (params.has("bytestart") && params.has("byteend")) ||
+      (params.has("byte_start") && params.has("byte_end"));
+    return isInstagramCdn && hasRangePair;
+  } catch {
+    return false;
+  }
+}
+
+function getTrackFullSize(source) {
+  const match = /\/([0-9]+)$/i.exec(source?.contentRange || "");
+  const size = match ? Number(match[1]) : 0;
+  return Number.isSafeInteger(size) && size > 0 ? size : undefined;
 }
 
 function requestFastMux(videoId, filename, tracks, startTime, signal) {
