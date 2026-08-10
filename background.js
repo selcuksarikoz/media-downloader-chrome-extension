@@ -158,7 +158,11 @@ async function handleStoreMessageNow(message) {
   } else if (message.action === "chunk") {
     await appendChunk(jobId, message.blob);
   } else if (message.action === "finalize") {
-    const meta = (await getJobMeta(jobId)) || {};
+    const meta = await getJobMeta(jobId);
+    // job-start always precedes finalize on the same port. Missing/canceled
+    // metadata means cancellation won the race, so a late final blob must be
+    // discarded instead of opening a save dialog.
+    if (!meta || meta.status !== "recording") return;
     await putJobMeta({
       jobId,
       filename: message.filename || meta.filename || "",
@@ -170,7 +174,7 @@ async function handleStoreMessageNow(message) {
     });
     await downloadJob(jobId);
   } else if (message.action === "cancel") {
-    await deleteJob(jobId);
+    await cancelJob(jobId);
   }
 }
 
@@ -184,7 +188,14 @@ function finalizeInterruptedJobs(jobIds) {
       : new Set(metas.map((meta) => meta.jobId));
     for (const jobId of targets) {
       const meta = await getJobMeta(jobId);
-      if (!meta || meta.status !== "recording") continue;
+      if (!meta) continue;
+      if (meta.status === "canceled") {
+        if (Date.now() - (meta.updatedAt || 0) > 24 * 60 * 60 * 1000) {
+          await deleteJob(jobId);
+        }
+        continue;
+      }
+      if (meta.status !== "recording") continue;
       // Safety net: never keep abandoned data around forever.
       if (Date.now() - (meta.updatedAt || 0) > 24 * 60 * 60 * 1000) {
         await deleteJob(jobId);
@@ -431,6 +442,40 @@ async function deleteJob(jobId) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([META_STORE, CHUNK_STORE], "readwrite");
     tx.objectStore(META_STORE).delete(jobId);
+    const index = tx.objectStore(CHUNK_STORE).index("jobId");
+    const cursorRequest = index.openCursor(IDBKeyRange.only(jobId));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (cursor) {
+        cursor.delete();
+        cursor.continue();
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+/**
+ * Keep a short-lived cancellation tombstone while removing all captured data.
+ * MediaRecorder may send its final chunk after the cancel message; appendChunk
+ * will see this status and ignore that late chunk instead of recreating a job.
+ */
+async function cancelJob(jobId) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([META_STORE, CHUNK_STORE], "readwrite");
+    tx.objectStore(META_STORE).put({
+      jobId,
+      filename: "",
+      folder: "",
+      saveAs: false,
+      status: "canceled",
+      seq: 0,
+      finalBlob: null,
+      updatedAt: Date.now(),
+    });
     const index = tx.objectStore(CHUNK_STORE).index("jobId");
     const cursorRequest = index.openCursor(IDBKeyRange.only(jobId));
     cursorRequest.onsuccess = () => {

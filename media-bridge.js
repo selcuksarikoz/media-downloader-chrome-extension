@@ -576,7 +576,10 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
 
   const completion = new Promise((resolve, reject) => {
     recorder.addEventListener("dataavailable", (event) => {
-      if (event.data && event.data.size > 0) {
+      // MediaRecorder emits one final dataavailable event after stop(). When
+      // stop() was caused by cancellation that chunk must not resurrect the
+      // canceled persistence job in the background worker.
+      if (!signal.aborted && event.data && event.data.size > 0) {
         chunks.push(event.data);
         persistChunk(videoId, event.data);
       }

@@ -40,6 +40,7 @@ const mediaHoverListeners = new WeakMap();
 const instagramNativeControlState = new WeakMap();
 const videoTrimRecordings = new Map();
 const blobJobIntent = new Map();
+const canceledBlobJobs = new Set();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
@@ -230,6 +231,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     showToast(message || "Download failed.");
   } else if (status === "canceled") {
     console.error(message);
+    canceledBlobJobs.add(videoId);
     sendBlobStoreMessage({ action: "cancel", jobId: videoId });
     showToast("Download canceled.");
   }
@@ -246,6 +248,10 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
 window.addEventListener(BLOB_DATA_EVENT, async (event) => {
   const { blob, filename, videoId } = event.detail || {};
   if (!blob || !blob.size) return;
+  // A final recorder event can race with the cancel control event. Never let
+  // a canceled job reach either the background download or the direct
+  // fallback, even if its blob was already being prepared.
+  if (canceledBlobJobs.has(videoId)) return;
 
   const sent = await sendBlobStoreMessage({
     action: "finalize",
@@ -255,7 +261,7 @@ window.addEventListener(BLOB_DATA_EVENT, async (event) => {
     folder: settings.downloadFolder,
     saveAs: settings.showSaveAs,
   });
-  if (!sent) {
+  if (!sent && !canceledBlobJobs.has(videoId)) {
     downloadBlobFile(blob, filename, settings.downloadFolder, settings.showSaveAs);
   }
 });
@@ -2814,6 +2820,7 @@ function streamBlobVideo(video, url) {
     videoId: video.dataset.imdCaptureId,
     maxConcurrent: settings.maxConcurrentDownloads,
   };
+  canceledBlobJobs.delete(detail.videoId);
   blobDownloadRequests.set(detail.videoId, detail);
   blobJobIntent.set(detail.videoId, "download");
   showToast("Video download started.");
@@ -3404,6 +3411,7 @@ function triggerTrim(media, trimBtn) {
         }),
       );
     } else {
+      canceledBlobJobs.delete(media.dataset.imdCaptureId);
       if (trimBtn) {
         trimBtn.dataset.recording = "true";
         trimBtn.title = "Save trim";
