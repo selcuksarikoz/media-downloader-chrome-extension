@@ -63,6 +63,12 @@ self.onmessage = async (event) => {
       "-avoid_negative_ts",
       "make_zero",
     );
+    if (!useWebm) {
+      // Finder/Quick Look expects the MP4 index near the beginning of the
+      // file. This adds a final container-only pass; media is still copied
+      // without re-encoding.
+      args.push("-movflags", "+faststart", "-brand", "mp42");
+    }
     args.push(outputName);
 
     ffmpeg.exec(...args);
