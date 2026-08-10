@@ -3468,172 +3468,6 @@ function getMediaAtPoint(x, y) {
 let contextMenuEl = null;
 let contextMenuMedia = null;
 
-// ---------------------------------------------------------------------------
-// Media info (real resolution + byte size) for the context menu footer
-// ---------------------------------------------------------------------------
-
-const MEDIA_INFO_TTL = 10 * 60 * 1000;
-const MEDIA_INFO_MAX_ENTRIES = 100;
-const mediaInfoCache = new Map();
-const mediaInfoInflight = new Map();
-
-function readCachedMediaInfo(url) {
-  const entry = mediaInfoCache.get(url);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > MEDIA_INFO_TTL) {
-    mediaInfoCache.delete(url);
-    return null;
-  }
-  return entry;
-}
-
-function writeCachedMediaInfo(url, info) {
-  mediaInfoCache.set(url, { ...info, ts: Date.now() });
-  if (mediaInfoCache.size > MEDIA_INFO_MAX_ENTRIES) {
-    mediaInfoCache.delete(mediaInfoCache.keys().next().value);
-  }
-}
-
-/** Get resolution + size for a URL (in-flight dedupe, then TTL cache). */
-function getMediaInfo(url, isVideo) {
-  const cached = readCachedMediaInfo(url);
-  if (cached) return Promise.resolve(cached);
-  const inflight = mediaInfoInflight.get(url);
-  if (inflight) return inflight;
-  const request = fetchMediaInfo(url, isVideo)
-    .then((info) => {
-      if (info) writeCachedMediaInfo(url, info);
-      return info;
-    })
-    .catch(() => null);
-  mediaInfoInflight.set(url, request);
-  request.finally(() => mediaInfoInflight.delete(url));
-  return request;
-}
-
-async function fetchMediaInfo(url, isVideo) {
-  const probe = isVideo
-    ? () => measureVideoDimensions(url)
-    : () => measureImageDimensions(url);
-  const [dims, bytes] = await Promise.all([probe(), measureMediaSize(url)]);
-  if (!dims && bytes == null) return null;
-  return { width: dims ? dims.width : 0, height: dims ? dims.height : 0, bytes };
-}
-
-/** Probe the intrinsic dimensions of an image URL off-screen. */
-function measureImageDimensions(url) {
-  return new Promise((resolve) => {
-    const probe = new Image();
-    let settled = false;
-    const finish = (w, h) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      probe.onload = null;
-      probe.onerror = null;
-      probe.src = "";
-      resolve(w > 0 && h > 0 ? { width: w, height: h } : null);
-    };
-    const timeout = setTimeout(() => finish(0, 0), 15000);
-    probe.onload = () => finish(probe.naturalWidth, probe.naturalHeight);
-    probe.onerror = () => finish(0, 0);
-    probe.src = url;
-  });
-}
-
-/** Best-effort byte size of a media URL (HEAD, then 1-byte range GET). */
-async function measureMediaSize(url) {
-  try {
-    const response = await fetch(url, {
-      method: "HEAD",
-      credentials: "include",
-      redirect: "follow",
-      cache: "force-cache",
-    });
-    if (response.ok) {
-      const length = parseInt(response.headers.get("Content-Length"), 10);
-      if (Number.isFinite(length) && length > 0) return length;
-    }
-  } catch {}
-  try {
-    const response = await fetch(url, {
-      credentials: "include",
-      redirect: "follow",
-      cache: "force-cache",
-      headers: { Range: "bytes=0-0" },
-    });
-    const total = (response.headers.get("Content-Range") || "").match(
-      /\/(\d+)\s*$/,
-    );
-    if (total) {
-      const length = parseInt(total[1], 10);
-      if (Number.isFinite(length) && length > 0) return length;
-    }
-  } catch {}
-  return null;
-}
-
-function formatFileSize(bytes) {
-  if (!Number.isFinite(bytes) || bytes < 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = "KB";
-  for (let i = 1; i < units.length; i++) {
-    if (value < 1024) break;
-    value /= 1024;
-    unit = units[i];
-  }
-  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`;
-}
-
-/**
- * Collect the real resolution + byte size for a media element. The numbers
- * describe the file the download buttons would actually fetch: the
- * highest-quality source URL is resolved first (thumbnail/low-bitrate element
- * states would otherwise report misleading numbers), and only then measured.
- */
-async function collectMediaInfo(media) {
-  const isVideo = media.tagName === "VIDEO";
-  const sourceUrl = isVideo
-    ? getVideoUrl(media)
-    : media.currentSrc || media.src || "";
-
-  let targetUrl = sourceUrl;
-  try {
-    targetUrl = isVideo
-      ? await resolveHighestResolutionVideoUrl(media)
-      : await resolveHighestResolutionImageUrl(media);
-  } catch {}
-
-  const elementDims =
-    isVideo && media.videoWidth > 0
-      ? { width: media.videoWidth, height: media.videoHeight }
-      : !isVideo && media.naturalWidth > 0
-        ? { width: media.naturalWidth, height: media.naturalHeight }
-        : null;
-
-  const networkUrl =
-    targetUrl &&
-    !targetUrl.startsWith("blob:") &&
-    !targetUrl.startsWith("data:")
-      ? targetUrl
-      : "";
-
-  let dims = null;
-  let bytes = null;
-  if (networkUrl) {
-    const info = await getMediaInfo(networkUrl, isVideo);
-    if (info) {
-      if (info.bytes != null) bytes = info.bytes;
-      if (info.width) dims = { width: info.width, height: info.height };
-    }
-  }
-  if (!dims) dims = elementDims;
-  if (!dims) return null;
-  return { width: dims.width, height: dims.height, bytes };
-}
-
 /** Close and remove the custom right-click menu if it is open. */
 function closeContextMenu() {
   if (contextMenuEl) {
@@ -3673,28 +3507,6 @@ function openContextMenu(media, x, y, linkEl) {
       button.addEventListener("click", closeContextMenu);
       menu.appendChild(button);
     });
-
-    const infoEl = document.createElement("div");
-    infoEl.className = "imd-media-info";
-    infoEl.textContent = "\u2026";
-    menu.appendChild(infoEl);
-    // Resolution + size footer is only shown for images.
-    if (media.tagName === "IMG") {
-      collectMediaInfo(media).then((info) => {
-        if (!contextMenuEl || contextMenuEl !== menu) return;
-        if (!info) {
-          infoEl.remove();
-          positionContextMenu(menu, x, y);
-          return;
-        }
-        infoEl.textContent =
-          `${info.width}\u00D7${info.height}` +
-          (info.bytes != null ? ` \u00B7 ${formatFileSize(info.bytes)}` : "");
-        positionContextMenu(menu, x, y);
-      });
-    } else {
-      infoEl.remove();
-    }
   }
 
   const anchor = document.getElementById("MediaViewer")?.open
@@ -3710,16 +3522,11 @@ function openContextMenu(media, x, y, linkEl) {
 
 /**
  * Position a context menu near the cursor, flipping above the menu when it
- * touches the bottom edge. The info chip hangs below the pill, so the full
- * menu height includes how far the chip protrudes.
+ * touches the bottom edge.
  */
 function positionContextMenu(menu, x, y) {
   const menuRect = menu.getBoundingClientRect();
-  const chip = menu.querySelector(".imd-media-info");
-  const chipBottom = chip
-    ? chip.getBoundingClientRect().bottom - menuRect.top
-    : 0;
-  const menuHeight = Math.max(menuRect.height, chipBottom);
+  const menuHeight = menuRect.height;
   const gap = 12;
 
   let top = y - menuHeight - gap;
