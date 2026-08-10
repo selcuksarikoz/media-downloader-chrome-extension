@@ -13,6 +13,51 @@ const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const blobKinds = new Map();
 const BLOB_KINDS_MAX_SIZE = 500;
 
+// Instagram prefers VP9/AV1 when Chrome advertises support, but macOS Finder
+// and Quick Look do not reliably open those codecs inside MP4. Advertise the
+// universally compatible H.264 path before Instagram selects a representation.
+if (
+  location.hostname === "instagram.com" ||
+  location.hostname.endsWith(".instagram.com")
+) {
+  const isPreviewIncompatibleCodec = (value) =>
+    /(?:vp0?9|av0?1)/i.test(String(value || ""));
+
+  if (window.MediaSource?.isTypeSupported) {
+    const nativeIsTypeSupported = MediaSource.isTypeSupported.bind(MediaSource);
+    try {
+      MediaSource.isTypeSupported = (type) =>
+        isPreviewIncompatibleCodec(type) ? false : nativeIsTypeSupported(type);
+    } catch {}
+  }
+
+  const nativeCanPlayType = HTMLMediaElement.prototype.canPlayType;
+  HTMLMediaElement.prototype.canPlayType = function (type) {
+    return isPreviewIncompatibleCodec(type)
+      ? ""
+      : nativeCanPlayType.call(this, type);
+  };
+
+  const mediaCapabilities = navigator.mediaCapabilities;
+  if (mediaCapabilities?.decodingInfo) {
+    const nativeDecodingInfo = mediaCapabilities.decodingInfo.bind(
+      mediaCapabilities
+    );
+    try {
+      mediaCapabilities.decodingInfo = async (config) => {
+        if (isPreviewIncompatibleCodec(config?.video?.contentType)) {
+          return {
+            supported: false,
+            smooth: false,
+            powerEfficient: false,
+          };
+        }
+        return nativeDecodingInfo(config);
+      };
+    } catch {}
+  }
+}
+
 function trimBlobKinds() {
   if (blobKinds.size <= BLOB_KINDS_MAX_SIZE) return;
   const excess = blobKinds.size - BLOB_KINDS_MAX_SIZE;
@@ -407,27 +452,44 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
 
 window.addEventListener(PAGE_MEDIA_DOWNLOAD_EVENT, (event) => {
   const { url, filename, videoId } = event.detail || {};
-  if (!url || !videoId || !isTelegramProgressiveUrl(url)) return;
+  const isTelegram = isTelegramProgressiveUrl(url);
+  const isInstagram = isInstagramDirectVideoUrl(url);
+  if (!url || !videoId || (!isTelegram && !isInstagram)) return;
   if (activeJobs.has(videoId)) return;
 
   const controller = new AbortController();
   activeJobs.add(videoId);
   activeJobControllers.set(videoId, controller);
-  emitStatus(videoId, "recording", "Downloading Telegram video…", 0);
-
-  downloadTelegramProgressiveVideo(
-    url,
-    filename,
+  emitStatus(
     videoId,
-    controller.signal
-  )
+    "recording",
+    isTelegram
+      ? "Downloading Telegram video…"
+      : "Downloading and finalizing Instagram video…",
+    0
+  );
+
+  const operation = isTelegram
+    ? downloadTelegramProgressiveVideo(
+        url,
+        filename,
+        videoId,
+        controller.signal
+      )
+    : downloadInstagramDirectVideo(
+        url,
+        filename,
+        videoId,
+        controller.signal
+      );
+  operation
     .catch((error) => {
       if (error?.name === "AbortError") return;
-      console.error("[Media Downloader] Telegram video download failed:", error);
+      console.error("[Media Downloader] Page video download failed:", error);
       emitStatus(
         videoId,
         "error",
-        error?.message || "Telegram video download failed."
+        error?.message || "Video download failed."
       );
     })
     .finally(() => {
@@ -521,7 +583,100 @@ function buildBlobFromRecordedBuffers(buffers) {
     );
   if (!videoBuffer?.chunks?.length) return null;
   const mimeType = videoBuffer.mimeType.split(";")[0] || "video/mp4";
-  return new Blob(videoBuffer.chunks, { type: mimeType });
+  return new Blob(getOrderedCapturedChunks(videoBuffer.chunks), {
+    type: mimeType,
+  });
+}
+
+function getOrderedCapturedChunks(chunks) {
+  const inspected = chunks.map((chunk, index) => ({
+    chunk,
+    index,
+    decodeTime: getFragmentDecodeTime(chunk),
+  }));
+  const timed = inspected.filter((entry) => entry.decodeTime !== undefined);
+  if (timed.length < 2) return chunks;
+
+  let previousDecodeTime = -Infinity;
+  let needsOrdering = false;
+  for (const entry of timed) {
+    if (entry.decodeTime <= previousDecodeTime) {
+      needsOrdering = true;
+      break;
+    }
+    previousDecodeTime = entry.decodeTime;
+  }
+  if (!needsOrdering) return chunks;
+
+  const headers = inspected.filter((entry) => entry.decodeTime === undefined);
+  timed.sort(
+    (a, b) => a.decodeTime - b.decodeTime || a.index - b.index
+  );
+
+  // Seeking back to zero can make the page append a fragment that was already
+  // captured before the download started. Keep one fragment per decode time.
+  const unique = [];
+  let previousTime;
+  for (const entry of timed) {
+    if (entry.decodeTime === previousTime) continue;
+    unique.push(entry.chunk);
+    previousTime = entry.decodeTime;
+  }
+  return [...headers.map((entry) => entry.chunk), ...unique];
+}
+
+function getFragmentDecodeTime(chunk) {
+  const bytes = new Uint8Array(chunk);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const readBoxes = (start, end, depth = 0) => {
+    let offset = start;
+    while (offset + 8 <= end) {
+      let size = view.getUint32(offset);
+      const type = String.fromCharCode(
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7]
+      );
+      let headerSize = 8;
+      if (size === 1) {
+        if (offset + 16 > end) return undefined;
+        const high = view.getUint32(offset + 8);
+        const low = view.getUint32(offset + 12);
+        size = high * 2 ** 32 + low;
+        headerSize = 16;
+      } else if (size === 0) {
+        size = end - offset;
+      }
+      if (size < headerSize || offset + size > end) return undefined;
+
+      if (type === "tfdt" && offset + headerSize + 8 <= end) {
+        const version = bytes[offset + headerSize];
+        const valueOffset = offset + headerSize + 4;
+        if (version === 1 && valueOffset + 8 <= offset + size) {
+          return (
+            view.getUint32(valueOffset) * 2 ** 32 +
+            view.getUint32(valueOffset + 4)
+          );
+        }
+        if (valueOffset + 4 <= offset + size) {
+          return view.getUint32(valueOffset);
+        }
+      }
+
+      if (depth < 3 && (type === "moof" || type === "traf")) {
+        const nested = readBoxes(
+          offset + headerSize,
+          offset + size,
+          depth + 1
+        );
+        if (nested !== undefined) return nested;
+      }
+      offset += size;
+    }
+    return undefined;
+  };
+  return readBoxes(0, bytes.byteLength);
 }
 
 function startJob(job) {
@@ -620,6 +775,18 @@ async function downloadKnownBlob(url, filename, videoId, signal) {
   const blob = await response.blob();
   signal.throwIfAborted();
   if (!blob.size) throw new Error("The Blob video contains no data.");
+  if (isInstagramPage()) {
+    emitStatus(videoId, "recording", "Finalizing MP4 for system preview…", 98);
+    await requestFastMux(
+      videoId,
+      filename,
+      [{ mimeType: blob.type || "video/mp4", blob }],
+      undefined,
+      signal
+    );
+    emitStatus(videoId, "complete", "Preview-compatible MP4 saved.", 100);
+    return;
+  }
   await validateVideoBlob(blob, signal);
   signal.throwIfAborted();
   sendBlobForDownload(blob, filename, videoId);
@@ -637,6 +804,43 @@ function isTelegramProgressiveUrl(value) {
   } catch {
     return false;
   }
+}
+
+function isInstagramPage() {
+  return (
+    location.hostname === "instagram.com" ||
+    location.hostname.endsWith(".instagram.com")
+  );
+}
+
+function isInstagramDirectVideoUrl(value) {
+  if (!isInstagramPage()) return false;
+  try {
+    const url = new URL(value, document.baseURI);
+    return (
+      url.protocol === "https:" &&
+      (url.hostname.endsWith(".fbcdn.net") ||
+        url.hostname.endsWith(".cdninstagram.com"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function downloadInstagramDirectVideo(
+  url,
+  filename,
+  videoId,
+  signal
+) {
+  await requestFastMux(
+    videoId,
+    filename,
+    [{ mimeType: "video/mp4", url }],
+    undefined,
+    signal
+  );
+  emitStatus(videoId, "complete", "Preview-compatible MP4 saved.", 100);
 }
 
 async function downloadTelegramProgressiveVideo(
@@ -775,6 +979,7 @@ async function downloadCapturedMediaSource(
   signal,
   startTime
 ) {
+  let restoreAcceleratedPlayback = () => {};
   try {
     const hadIndependentTracks = getIndependentTracks(bufferRecords).length > 0;
     if (
@@ -788,10 +993,26 @@ async function downloadCapturedMediaSource(
     ) return;
 
     if (!isMediaFullyBuffered(video)) {
+      let collectionMessage =
+        "Collecting segments in the background; you can use the video normally…";
+      if (!(startTime > 0)) {
+        const hasCapturedFragments = bufferRecords.some((buffer) =>
+          buffer.chunks.some(
+            (chunk) => getFragmentDecodeTime(chunk) !== undefined
+          )
+        );
+        const accelerated = await accelerateMediaCollection(
+          video,
+          signal,
+          !hasCapturedFragments
+        );
+        restoreAcceleratedPlayback = accelerated.restore;
+        collectionMessage = `Collecting segments at ${accelerated.rate}× playback…`;
+      }
       emitStatus(
         videoId,
         "recording",
-        "Waiting for original media segments; video controls remain available…",
+        collectionMessage,
         0
       );
       const waitResult = await waitForMediaCompletion(
@@ -799,7 +1020,8 @@ async function downloadCapturedMediaSource(
         videoId,
         signal,
         () =>
-          !hadIndependentTracks && getIndependentTracks(bufferRecords).length > 0
+          !hadIndependentTracks && getIndependentTracks(bufferRecords).length > 0,
+        collectionMessage
       );
       if (
         waitResult === "independent" &&
@@ -812,7 +1034,13 @@ async function downloadCapturedMediaSource(
         )
       ) return;
       if (!isMediaFullyBuffered(video)) {
-        await waitForMediaCompletion(video, videoId, signal);
+        await waitForMediaCompletion(
+          video,
+          videoId,
+          signal,
+          undefined,
+          collectionMessage
+        );
       }
     }
 
@@ -826,24 +1054,76 @@ async function downloadCapturedMediaSource(
       throw new Error("No MediaSource segments were captured.");
     }
 
-    if (availableBuffers.length === 1 && !(startTime > 0)) {
+    if (
+      availableBuffers.length === 1 &&
+      !(startTime > 0) &&
+      !isInstagramPage()
+    ) {
       const bufferRecord = availableBuffers[0];
       const mimeType = bufferRecord.mimeType.split(";")[0] || "video/mp4";
       const extension = mimeType.includes("webm") ? "webm" : "mp4";
-      const blob = new Blob(bufferRecord.chunks, { type: mimeType });
+      const blob = new Blob(getOrderedCapturedChunks(bufferRecord.chunks), {
+        type: mimeType,
+      });
       if (!blob.size) throw new Error("No MediaSource segments were captured.");
       await validateVideoBlob(blob, signal);
       signal.throwIfAborted();
       sendBlobForDownload(blob, replaceExtension(filename, extension), videoId);
     } else {
-      const tracks = availableBuffers.map((buffer) => ({
+      const orderedChunks = availableBuffers.map((buffer) =>
+        getOrderedCapturedChunks(buffer.chunks)
+      );
+      const tracks = availableBuffers.map((buffer, index) => ({
         mimeType: buffer.mimeType,
-        blob: new Blob(buffer.chunks, {
+        blob: new Blob(orderedChunks[index], {
           type: buffer.mimeType.split(";")[0] || "application/octet-stream",
         }),
       }));
-      emitStatus(videoId, "recording", "Muxing audio and video with FFmpeg…", 98);
-      await requestFastMux(videoId, filename, tracks, startTime, signal);
+      emitStatus(
+        videoId,
+        "recording",
+        isInstagramPage()
+          ? "Finalizing MP4 for system preview…"
+          : "Muxing audio and video with FFmpeg…",
+        98
+      );
+      try {
+        await requestFastMux(videoId, filename, tracks, startTime, signal);
+      } catch (orderedError) {
+        const wasReordered = availableBuffers.some(
+          (buffer, index) => orderedChunks[index] !== buffer.chunks
+        );
+        if (wasReordered) {
+          emitStatus(
+            videoId,
+            "recording",
+            "Retrying mux with original segment order…",
+            98
+          );
+          const originalTracks = availableBuffers.map((buffer) => ({
+            mimeType: buffer.mimeType,
+            blob: new Blob(buffer.chunks, {
+              type:
+                buffer.mimeType.split(";")[0] || "application/octet-stream",
+            }),
+          }));
+          try {
+            await requestFastMux(
+              videoId,
+              filename,
+              originalTracks,
+              startTime,
+              signal
+            );
+          } catch {
+            await fallbackToMediaRecorder(orderedError);
+            return;
+          }
+        } else {
+          await fallbackToMediaRecorder(orderedError);
+          return;
+        }
+      }
     }
     emitStatus(
       videoId,
@@ -854,7 +1134,25 @@ async function downloadCapturedMediaSource(
       100
     );
   } finally {
+    restoreAcceleratedPlayback();
     activeRecordings.delete(videoId);
+  }
+
+  async function fallbackToMediaRecorder(muxError) {
+    if (signal.aborted) throw muxError;
+    console.warn(
+      "[Media Downloader] Captured segment mux failed; retrying with MediaRecorder:",
+      muxError
+    );
+    restoreAcceleratedPlayback();
+    restoreAcceleratedPlayback = () => {};
+    emitStatus(
+      videoId,
+      "recording",
+      "Retrying with real-time video capture…",
+      0
+    );
+    await recordMediaSource(video, videoId, filename, signal, startTime);
   }
 }
 
@@ -942,7 +1240,17 @@ function isCompleteTrackSource(source) {
   // that same URL, without a Range header, still downloads the complete track.
   // Recognize the canonical file URL before rejecting non-200 responses so we
   // can switch to the independent downloader instead of waiting for playback.
-  if (/\.(?:mp4|m4a|webm|mov)(?:$|[?#])/i.test(source.url)) return true;
+  if (/\.(?:mp4|m4a|webm|mov)(?:$|[?#])/i.test(source.url)) {
+    if (
+      source.status === 200 &&
+      source.contentLength > 0 &&
+      source.contentLength < 64 * 1024 &&
+      !source.contentRange
+    ) {
+      return false;
+    }
+    return true;
+  }
   if (source.status !== 200) return false;
   return (
     /^(?:audio|video)\//i.test(source.contentType || "") &&
@@ -1025,7 +1333,14 @@ function isMediaFullyBuffered(video) {
   return bufferedUntil >= video.duration - 0.25;
 }
 
-function waitForMediaCompletion(video, videoId, signal, independentReady) {
+function waitForMediaCompletion(
+  video,
+  videoId,
+  signal,
+  independentReady,
+  collectionMessage =
+    "Collecting segments in the background; you can use the video normally…"
+) {
   return new Promise((resolve, reject) => {
     let checkTimer;
     let settled = false;
@@ -1043,7 +1358,7 @@ function waitForMediaCompletion(video, videoId, signal, independentReady) {
       emitStatus(
         videoId,
         "progress",
-        "Collecting segments in the background; you can use the video normally…",
+        collectionMessage,
         progress
       );
       if (independentReady?.()) {
@@ -1082,6 +1397,66 @@ function waitForMediaCompletion(video, videoId, signal, independentReady) {
     checkTimer = setInterval(reportProgress, 500);
     reportProgress();
   });
+}
+
+async function accelerateMediaCollection(video, signal, restartFromBeginning) {
+  const state = {
+    paused: video.paused,
+    currentTime: video.currentTime,
+    playbackRate: video.playbackRate,
+    defaultPlaybackRate: video.defaultPlaybackRate,
+    muted: video.muted,
+    loop: video.loop,
+  };
+  const releaseKeepAlive = keepVideoPlaying(video);
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    releaseKeepAlive();
+    video.loop = state.loop;
+    video.muted = state.muted;
+    try {
+      video.defaultPlaybackRate = state.defaultPlaybackRate;
+      video.playbackRate = state.playbackRate;
+    } catch {}
+    try {
+      if (Number.isFinite(state.currentTime)) video.currentTime = state.currentTime;
+    } catch {}
+    if (state.paused) nativePause.call(video);
+    else nativePlay.call(video).catch(() => {});
+  };
+
+  try {
+    video.loop = false;
+    video.muted = true;
+    let rate = 1;
+    for (const candidate of [8, 4, 2]) {
+      try {
+        video.defaultPlaybackRate = candidate;
+        video.playbackRate = candidate;
+        rate = video.playbackRate;
+        if (rate === candidate) break;
+      } catch {}
+    }
+
+    if (restartFromBeginning && video.seekable.length) {
+      const beginning = video.seekable.start(0);
+      if (Math.abs(video.currentTime - beginning) > 0.05) {
+        video.currentTime = beginning;
+        await waitForVideoSeek(video, signal);
+      }
+    }
+    signal.throwIfAborted();
+    await nativePlay.call(video);
+    try {
+      video.playbackRate = rate;
+    } catch {}
+    return { rate, restore };
+  } catch (error) {
+    restore();
+    throw error;
+  }
 }
 
 async function recordMediaSource(video, videoId, filename, signal, startTime) {

@@ -2396,11 +2396,12 @@ function openLightbox(media, url, downloadUrl) {
 
       const escHandler = (e) => {
         if (e.key === "Escape") {
-          if (cropActive) cancelCrop();
-          else close();
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          close();
         }
       };
-      document.addEventListener("keydown", escHandler);
+      document.addEventListener("keydown", escHandler, true);
 
       // ---------------------------------------------------------------------
       // Crop
@@ -2606,7 +2607,7 @@ function openLightbox(media, url, downloadUrl) {
       const cleanup = () => {
         cancelCrop();
         infoAbort.abort();
-        document.removeEventListener("keydown", escHandler);
+        document.removeEventListener("keydown", escHandler, true);
         overlay.removeEventListener("scroll", repositionOpenControls);
         overlay.remove();
         actions.remove();
@@ -3134,6 +3135,14 @@ async function downloadMedia(media, preferredUrl) {
     return;
   }
 
+  if (
+    media.tagName === "VIDEO" &&
+    isInstagramDirectVideoUrl(src)
+  ) {
+    streamPageVideo(media, src);
+    return;
+  }
+
   chrome.runtime.sendMessage(
     {
       action: "download",
@@ -3175,11 +3184,34 @@ function isTelegramProgressiveUrl(value) {
   }
 }
 
+function isInstagramPage() {
+  return (
+    location.hostname === "instagram.com" ||
+    location.hostname.endsWith(".instagram.com")
+  );
+}
+
+function isInstagramDirectVideoUrl(value) {
+  if (!isInstagramPage()) return false;
+  try {
+    const url = new URL(value, document.baseURI);
+    return (
+      url.protocol === "https:" &&
+      (url.hostname.endsWith(".fbcdn.net") ||
+        url.hostname.endsWith(".cdninstagram.com"))
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Download a page-owned media URL through the page's Service Worker. */
 function streamPageVideo(video, url) {
   const detail = {
     url,
-    filename: getSuggestedVideoName(video),
+    filename: isInstagramPage()
+      ? `video-${Date.now()}.mp4`
+      : getSuggestedVideoName(video),
     videoId: video.dataset.imdCaptureId,
   };
   canceledBlobJobs.delete(detail.videoId);
