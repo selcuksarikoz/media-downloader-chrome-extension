@@ -46,6 +46,26 @@ export default defineConfig({
           src: "icons",
           dest: ".",
         },
+        {
+          src: "node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.js",
+          dest: "ffmpeg",
+        },
+        {
+          src: "node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm",
+          dest: "ffmpeg",
+        },
+        {
+          src: "ffmpeg-mux-worker.js",
+          dest: "ffmpeg",
+        },
+        {
+          src: "ffmpeg-host.html",
+          dest: "ffmpeg",
+        },
+        {
+          src: "ffmpeg-host.js",
+          dest: "ffmpeg",
+        },
       ],
     }),
   ],

@@ -41,12 +41,19 @@ const instagramNativeControlState = new WeakMap();
 const videoTrimRecordings = new Map();
 const blobJobIntent = new Map();
 const canceledBlobJobs = new Set();
+const activeMuxWorkers = new Map();
+const muxOutputWorkers = new Map();
+const FFMPEG_HOST_CHANNEL = "imd:ffmpeg-host";
+let ffmpegHostFrame = null;
+let ffmpegHostPromise = null;
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
 const BLOB_PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
+const BLOB_MUX_EVENT = "imd:mux-blob-tracks";
+const BLOB_MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
 const CAPTURE_BLOCK_EVENT = "imd:capture-block";
 const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
 const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
@@ -140,6 +147,191 @@ window.addEventListener(BLOB_PERSIST_CHUNK_EVENT, (event) => {
   if (!videoId || !blob || !blob.size) return;
   sendBlobStoreMessage({ action: "chunk", jobId: videoId, blob });
 });
+
+window.addEventListener(BLOB_MUX_EVENT, async (event) => {
+  const { requestId, videoId, filename, tracks, startTime } = event.detail || {};
+  if (!requestId || !videoId || !tracks?.length) return;
+  let response = { ok: false };
+  try {
+    if (canceledBlobJobs.has(videoId)) throw abortError();
+    const result = await muxTracksLocally(videoId, tracks, startTime);
+    if (canceledBlobJobs.has(videoId)) throw abortError();
+    const outputName = replaceFileExtension(filename, result.extension);
+    try {
+      await downloadMuxUrl(result.url, outputName);
+    } catch (error) {
+      releaseMuxUrl(result.url);
+      throw error;
+    }
+    response = { ok: true };
+  } catch (error) {
+    response = {
+      ok: false,
+      canceled: error?.name === "AbortError",
+      error: error?.message || String(error),
+    };
+  }
+  window.dispatchEvent(
+    new CustomEvent(BLOB_MUX_RESULT_EVENT, {
+      detail: { requestId, ...response },
+    }),
+  );
+});
+
+async function getFfmpegHostFrame() {
+  if (ffmpegHostFrame?.isConnected) return ffmpegHostFrame;
+  if (ffmpegHostPromise) return ffmpegHostPromise;
+
+  ffmpegHostPromise = new Promise((resolve, reject) => {
+    const frame = document.createElement("iframe");
+    frame.src = chrome.runtime.getURL("ffmpeg/ffmpeg-host.html");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText =
+      "position:fixed;width:1px;height:1px;left:-10000px;top:-10000px;" +
+      "border:0;opacity:0;pointer-events:none";
+    frame.onload = () => {
+      ffmpegHostFrame = frame;
+      ffmpegHostPromise = null;
+      resolve(frame);
+    };
+    frame.onerror = () => {
+      frame.remove();
+      ffmpegHostPromise = null;
+      reject(new Error("The extension FFmpeg host could not be loaded."));
+    };
+    (document.documentElement || document.body).appendChild(frame);
+  });
+  return ffmpegHostPromise;
+}
+
+async function muxTracksLocally(videoId, tracks, startTime) {
+  const muxId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const frame = await getFfmpegHostFrame();
+  return new Promise((resolve, reject) => {
+    const entry = {
+      frame,
+      muxId,
+      reject,
+      cleanup: () => window.removeEventListener("message", onMessage),
+    };
+    activeMuxWorkers.set(videoId, entry);
+    const fail = (error) => {
+      if (activeMuxWorkers.get(videoId) === entry) {
+        activeMuxWorkers.delete(videoId);
+      }
+      window.removeEventListener("message", onMessage);
+      reject(error);
+    };
+    const onMessage = (event) => {
+      if (
+        event.source !== frame.contentWindow ||
+        event.data?.channel !== FFMPEG_HOST_CHANNEL ||
+        event.data?.muxId !== muxId
+      ) {
+        return;
+      }
+      window.removeEventListener("message", onMessage);
+      if (activeMuxWorkers.get(videoId) === entry) {
+        activeMuxWorkers.delete(videoId);
+      }
+      if (!event.data.ok) {
+        fail(new Error(event.data.error || "FFmpeg mux failed."));
+        return;
+      }
+      muxOutputWorkers.set(event.data.url, { frame, muxId });
+      resolve(event.data);
+    };
+    window.addEventListener("message", onMessage);
+    // Blob objects are structured-cloned without first duplicating the entire
+    // video into ArrayBuffers on the page's main thread. The worker mounts
+    // them read-only, which avoids another full-sized input copy in WASM.
+    const payload = tracks.map((track) => ({
+      mimeType: track.mimeType,
+      blob: track.blob,
+    }));
+    frame.contentWindow.postMessage(
+      {
+        channel: FFMPEG_HOST_CHANNEL,
+        action: "mux",
+        muxId,
+        tracks: payload,
+        startTime,
+      },
+      "*",
+    );
+  });
+}
+
+function cancelLocalMux(videoId) {
+  const entry = activeMuxWorkers.get(videoId);
+  if (!entry) return;
+  activeMuxWorkers.delete(videoId);
+  entry.cleanup();
+  entry.frame.contentWindow?.postMessage(
+    {
+      channel: FFMPEG_HOST_CHANNEL,
+      action: "cancel",
+      muxId: entry.muxId,
+    },
+    "*",
+  );
+  entry.reject(abortError());
+}
+
+function releaseMuxUrl(url) {
+  const entry = muxOutputWorkers.get(url);
+  if (!entry) return;
+  muxOutputWorkers.delete(url);
+  entry.frame.contentWindow?.postMessage(
+    {
+      channel: FFMPEG_HOST_CHANNEL,
+      action: "release",
+      muxId: entry.muxId,
+      url,
+    },
+    "*",
+  );
+}
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.action === "releaseMuxUrl" && message.url) {
+    releaseMuxUrl(message.url);
+  }
+});
+
+function abortError() {
+  return new DOMException("Mux canceled.", "AbortError");
+}
+
+function replaceFileExtension(filename, extension) {
+  const base = (filename || `video-${Date.now()}`).replace(/\.[^.]+$/, "");
+  return `${base}.${extension}`;
+}
+
+function downloadMuxUrl(url, filename) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        action: "downloadMuxUrl",
+        url,
+        filename,
+        folder: settings.downloadFolder,
+        saveAs: settings.showSaveAs,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response?.ok) {
+          reject(new Error(response?.error || "Muxed video download failed."));
+          return;
+        }
+        resolve();
+      },
+    );
+  });
+}
 let lightboxOpen = false;
 const visibleMedia = new WeakSet();
 const mediaIntersectionObserver = new IntersectionObserver(
@@ -232,6 +424,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   } else if (status === "canceled") {
     console.error(message);
     canceledBlobJobs.add(videoId);
+    cancelLocalMux(videoId);
     sendBlobStoreMessage({ action: "cancel", jobId: videoId });
     showToast("Download canceled.");
   }

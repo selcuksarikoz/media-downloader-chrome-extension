@@ -8,6 +8,7 @@ const CHUNK_STORE = "chunks";
 
 const portJobSets = new Map();
 const activeBlobUrls = new Map();
+const activePreparedDownloads = new Map();
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install" || details.reason === "update") {
@@ -17,6 +18,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message.url) return;
+  if (message.action === "downloadMuxUrl") {
+    downloadPreparedUrl(message, sender.tab?.id)
+      .then((downloadId) => sendResponse({ ok: true, downloadId }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message.action === "download") {
     downloadMedia(message)
       .then(() => sendResponse({ ok: true }))
@@ -305,6 +312,18 @@ function createDownloadableUrl(blob) {
 chrome.downloads.onChanged.addListener((delta) => {
   const state = delta.state?.current;
   if (state !== "complete" && state !== "interrupted") return;
+  const prepared = activePreparedDownloads.get(delta.id);
+  if (prepared) {
+    activePreparedDownloads.delete(delta.id);
+    if (prepared.tabId) {
+      chrome.tabs
+        .sendMessage(prepared.tabId, {
+          action: "releaseMuxUrl",
+          url: prepared.url,
+        })
+        .catch(() => {});
+    }
+  }
   const entry = activeBlobUrls.get(delta.id);
   if (!entry) return;
   activeBlobUrls.delete(delta.id);
@@ -526,6 +545,38 @@ function downloadMedia({ url, folder, saveAs, mediaType }) {
           return;
         }
         resolve();
+      },
+    );
+  });
+}
+
+function downloadPreparedUrl({ url, filename, folder, saveAs }, tabId) {
+  return new Promise((resolve, reject) => {
+    filename = (filename || `video-${Date.now()}.mp4`).replace(
+      /[^a-zA-Z0-9.\-_]/g,
+      "_",
+    );
+    if (typeof folder === "string") {
+      folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+      if (folder && !hasForbiddenFolder(folder)) {
+        filename = `${folder}/${filename}`;
+        saveAs = false;
+      }
+    }
+    chrome.downloads.download(
+      {
+        url,
+        filename,
+        saveAs: saveAs === true,
+        conflictAction: "overwrite",
+      },
+      (downloadId) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        activePreparedDownloads.set(downloadId, { url, tabId });
+        resolve(downloadId);
       },
     );
   });
