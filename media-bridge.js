@@ -3,6 +3,7 @@ const TRIM_EVENT = "imd:trim-blob-video";
 const CONTROL_EVENT = "imd:control-blob-video";
 const STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
+const PAGE_MEDIA_DOWNLOAD_EVENT = "imd:download-page-media";
 const PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const MUX_EVENT = "imd:mux-blob-tracks";
 const MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
@@ -404,6 +405,37 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
   startJob(job);
 });
 
+window.addEventListener(PAGE_MEDIA_DOWNLOAD_EVENT, (event) => {
+  const { url, filename, videoId } = event.detail || {};
+  if (!url || !videoId || !isTelegramProgressiveUrl(url)) return;
+  if (activeJobs.has(videoId)) return;
+
+  const controller = new AbortController();
+  activeJobs.add(videoId);
+  activeJobControllers.set(videoId, controller);
+  emitStatus(videoId, "recording", "Downloading Telegram video…", 0);
+
+  downloadTelegramProgressiveVideo(
+    url,
+    filename,
+    videoId,
+    controller.signal
+  )
+    .catch((error) => {
+      if (error?.name === "AbortError") return;
+      console.error("[Media Downloader] Telegram video download failed:", error);
+      emitStatus(
+        videoId,
+        "error",
+        error?.message || "Telegram video download failed."
+      );
+    })
+    .finally(() => {
+      activeJobs.delete(videoId);
+      activeJobControllers.delete(videoId);
+    });
+});
+
 window.addEventListener(TRIM_EVENT, (event) => {
   const { url, filename, videoId, startTime } = event.detail || {};
   if (!url || !videoId) return;
@@ -594,6 +626,131 @@ async function downloadKnownBlob(url, filename, videoId, signal) {
   emitStatus(videoId, "complete", "Blob video downloaded.", 100);
 }
 
+function isTelegramProgressiveUrl(value) {
+  try {
+    const url = new URL(value, document.baseURI);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "web.telegram.org" &&
+      /\/progressive\//i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function downloadTelegramProgressiveVideo(
+  url,
+  filename,
+  videoId,
+  signal
+) {
+  // Telegram's progressive URLs are virtual resources resolved by Telegram
+  // Web's Service Worker. It requires a byte Range and caps each response at
+  // 512 KiB, so download ranges in parallel just like Telegram's own download
+  // endpoint does. A plain fetch throws before producing a Response.
+  const chunkSize = 512 * 1024;
+  const first = await fetchTelegramProgressiveRange(
+    url,
+    0,
+    chunkSize - 1,
+    signal
+  );
+  const { fullSize, contentType } = first;
+  if (!Number.isSafeInteger(fullSize) || fullSize <= 0) {
+    throw new Error("Telegram did not provide a valid video size.");
+  }
+
+  const chunkCount = Math.ceil(fullSize / chunkSize);
+  const chunks = new Array(chunkCount);
+  chunks[0] = first.data;
+  let loaded = first.data.byteLength;
+  let nextIndex = 1;
+  const workerCount = Math.min(8, Math.max(0, chunkCount - 1));
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= chunkCount) return;
+      signal.throwIfAborted();
+      const start = index * chunkSize;
+      const part = await fetchTelegramProgressiveRange(
+        url,
+        start,
+        Math.min(fullSize - 1, start + chunkSize - 1),
+        signal
+      );
+      chunks[index] = part.data;
+      loaded += part.data.byteLength;
+      emitStatus(
+        videoId,
+        "progress",
+        "Downloading Telegram video in parallel…",
+        Math.min(99, (loaded / fullSize) * 100)
+      );
+    }
+  });
+  await Promise.all(workers);
+  signal.throwIfAborted();
+  const blob = new Blob(chunks, { type: contentType || "video/mp4" });
+  if (!blob.size) throw new Error("Telegram returned an empty video file.");
+  if (blob.size !== fullSize) {
+    throw new Error("Telegram returned an incomplete video file.");
+  }
+
+  const prefix = await blob.slice(0, 512).text();
+  signal.throwIfAborted();
+  if (
+    /(?:text\/html|application\/xhtml\+xml)/i.test(contentType) ||
+    /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(prefix)
+  ) {
+    throw new Error(
+      "Telegram returned a web page instead of the requested video."
+    );
+  }
+
+  await validateVideoBlob(blob, signal);
+  signal.throwIfAborted();
+  const extension = /webm/i.test(contentType || blob.type) ? "webm" : "mp4";
+  sendBlobForDownload(blob, replaceExtension(filename, extension), videoId);
+  emitStatus(videoId, "complete", "Telegram video downloaded.", 100);
+}
+
+async function fetchTelegramProgressiveRange(url, start, end, signal) {
+  const response = await nativeFetch.call(window, url, {
+    headers: { Range: `bytes=${start}-${end}` },
+    credentials: "include",
+    redirect: "follow",
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Telegram video request failed (${response.status}).`);
+  }
+
+  const contentRange = response.headers.get("Content-Range") || "";
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(contentRange);
+  if (!match) {
+    throw new Error("Telegram returned an invalid video range.");
+  }
+  const returnedStart = Number(match[1]);
+  const returnedEnd = Number(match[2]);
+  const fullSize = Number(match[3]);
+  if (returnedStart !== start || returnedEnd < returnedStart) {
+    throw new Error("Telegram returned an unexpected video range.");
+  }
+
+  const data = await response.arrayBuffer();
+  signal.throwIfAborted();
+  if (data.byteLength !== returnedEnd - returnedStart + 1) {
+    throw new Error("Telegram returned an incomplete video range.");
+  }
+  return {
+    data,
+    fullSize,
+    contentType: response.headers.get("Content-Type") || "",
+  };
+}
+
 async function trimKnownBlob(url, filename, videoId, signal, startTime) {
   const response = await fetch(url, { signal });
   const blob = await response.blob();
@@ -774,8 +931,15 @@ function isCompleteTrackSource(source) {
       params.has("byte_end") ||
       params.has("range");
   } catch {}
-  if (hasExplicitByteWindow || source.status !== 200) return false;
+  if (hasExplicitByteWindow) return false;
+
+  // Twitter/X commonly serves its canonical .mp4 track URL with status 206
+  // while CORS hides Content-Range from page JavaScript. A fresh request to
+  // that same URL, without a Range header, still downloads the complete track.
+  // Recognize the canonical file URL before rejecting non-200 responses so we
+  // can switch to the independent downloader instead of waiting for playback.
   if (/\.(?:mp4|m4a|webm|mov)(?:$|[?#])/i.test(source.url)) return true;
+  if (source.status !== 200) return false;
   return (
     /^(?:audio|video)\//i.test(source.contentType || "") &&
     !/\.(?:m4s|ts)(?:$|[?#])/i.test(source.url)

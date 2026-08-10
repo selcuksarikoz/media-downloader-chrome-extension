@@ -52,6 +52,7 @@ const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
 const BLOB_STATUS_EVENT = "imd:blob-video-status";
 const BLOB_DATA_EVENT = "imd:blob-data-for-download";
+const PAGE_MEDIA_DOWNLOAD_EVENT = "imd:download-page-media";
 const BLOB_PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
 const BLOB_MUX_EVENT = "imd:mux-blob-tracks";
 const BLOB_MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
@@ -3127,6 +3128,11 @@ async function downloadMedia(media, preferredUrl) {
     return;
   }
 
+  if (media.tagName === "VIDEO" && isTelegramProgressiveUrl(src)) {
+    streamPageVideo(media, src);
+    return;
+  }
+
   chrome.runtime.sendMessage(
     {
       action: "download",
@@ -3152,6 +3158,44 @@ async function downloadMedia(media, preferredUrl) {
           : "Image download started.",
       );
     },
+  );
+}
+
+function isTelegramProgressiveUrl(value) {
+  try {
+    const url = new URL(value, document.baseURI);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "web.telegram.org" &&
+      /\/progressive\//i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Download a page-owned media URL through the page's Service Worker. */
+function streamPageVideo(video, url) {
+  const detail = {
+    url,
+    filename: getSuggestedVideoName(video),
+    videoId: video.dataset.imdCaptureId,
+  };
+  canceledBlobJobs.delete(detail.videoId);
+  blobDownloadRequests.set(detail.videoId, detail);
+  blobJobIntent.set(detail.videoId, "download");
+  showToast("Video download started.");
+  sendBlobStoreMessage({
+    action: "job-start",
+    jobId: detail.videoId,
+    filename: detail.filename,
+    folder: settings.downloadFolder,
+    saveAs: settings.showSaveAs,
+  });
+  window.dispatchEvent(
+    new CustomEvent(PAGE_MEDIA_DOWNLOAD_EVENT, {
+      detail,
+    }),
   );
 }
 
