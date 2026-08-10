@@ -39,6 +39,7 @@ const pipState = new WeakMap();
 const mediaHoverListeners = new WeakMap();
 const instagramNativeControlState = new WeakMap();
 const videoTrimRecordings = new Map();
+const blobJobIntent = new Map();
 const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
 const BLOB_TRIM_EVENT = "imd:trim-blob-video";
 const BLOB_CONTROL_EVENT = "imd:control-blob-video";
@@ -217,9 +218,28 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
 
   updateBlobDownloadPanel(videoId, status, message, progress);
 
-  if (status === "error" || status === "canceled") {
+  if (status === "complete") {
+    showToast(
+      blobJobIntent.get(videoId) === "trim"
+        ? "Trim saved."
+        : "Download complete.",
+    );
+  } else if (status === "error") {
     console.error(message);
     sendBlobStoreMessage({ action: "cancel", jobId: videoId });
+    showToast(message || "Download failed.");
+  } else if (status === "canceled") {
+    console.error(message);
+    sendBlobStoreMessage({ action: "cancel", jobId: videoId });
+    showToast("Download canceled.");
+  }
+
+  if (
+    status === "complete" ||
+    status === "error" ||
+    status === "canceled"
+  ) {
+    blobJobIntent.delete(videoId);
   }
 });
 
@@ -1545,6 +1565,7 @@ function attachMediaActionHandlers(media, btns) {
         if (dataUrl) {
           openLightbox(media, dataUrl, blobUrl);
           setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
+          showToast("Frame captured.");
         }
       })
       .catch((error) => {
@@ -1586,6 +1607,11 @@ function attachMediaActionHandlers(media, btns) {
         ? await copyVideoFrameToClipboard(media)
         : await copyImageToClipboard(media);
       btns.copyBtn.title = "Copied!";
+      showToast(
+        copiedType
+          ? `Copied to clipboard (${copiedType})`
+          : "Copied to clipboard.",
+      );
       setTimeout(() => {
         btns.copyBtn.title =
           isVideo && copiedType
@@ -1598,6 +1624,7 @@ function attachMediaActionHandlers(media, btns) {
       console.error("Copy to clipboard failed:", error);
       btns.copyBtn.title = "Copy failed";
       restoreTitle();
+      showToast("Copy to clipboard failed.");
     }
   });
 }
@@ -1856,11 +1883,15 @@ function openPreviewInBackground(url) {
         "[Media Downloader] Preview failed:",
         runtime.lastError.message,
       );
+      showToast("Preview failed.");
       return;
     }
     if (response?.ok === false) {
       console.warn("[Media Downloader] Preview failed:", response.error);
+      showToast(response.error || "Preview failed.");
+      return;
     }
+    showToast("Preview opened.");
   });
 }
 
@@ -2764,7 +2795,13 @@ async function downloadMedia(media, preferredUrl) {
       if (!response?.ok) {
         console.error("Download failed:", response?.error || "Unknown error");
         showToast(response?.error || "Download failed.");
+        return;
       }
+      showToast(
+        media.tagName === "VIDEO"
+          ? "Video download started."
+          : "Image download started.",
+      );
     },
   );
 }
@@ -2778,6 +2815,8 @@ function streamBlobVideo(video, url) {
     maxConcurrent: settings.maxConcurrentDownloads,
   };
   blobDownloadRequests.set(detail.videoId, detail);
+  blobJobIntent.set(detail.videoId, "download");
+  showToast("Video download started.");
   sendBlobStoreMessage({
     action: "job-start",
     jobId: detail.videoId,
@@ -3316,9 +3355,21 @@ function captureVideoFrameFromTab(video) {
 /** Toggle Picture-in-Picture mode for a video element. */
 function togglePictureInPicture(video) {
   if (document.pictureInPictureElement === video) {
-    document.exitPictureInPicture().catch(console.error);
+    document
+      .exitPictureInPicture()
+      .then(() => showToast("Picture-in-Picture closed."))
+      .catch((error) => {
+        console.error(error);
+        showToast("Failed to close Picture-in-Picture.");
+      });
   } else {
-    video.requestPictureInPicture().catch(console.error);
+    video
+      .requestPictureInPicture()
+      .then(() => showToast("Picture-in-Picture enabled."))
+      .catch((error) => {
+        console.error(error);
+        showToast("Picture-in-Picture is not available.");
+      });
   }
 }
 
@@ -3365,6 +3416,8 @@ function triggerTrim(media, trimBtn) {
         folder: settings.downloadFolder,
         saveAs: settings.showSaveAs,
       });
+      blobJobIntent.set(media.dataset.imdCaptureId, "trim");
+      showToast("Trim recording started.");
       window.dispatchEvent(
         new CustomEvent(BLOB_TRIM_EVENT, {
           detail: {
@@ -3387,10 +3440,12 @@ function triggerTrim(media, trimBtn) {
   } catch (error) {
     console.error("Trim recording failed:", error);
     if (trimBtn) trimBtn.disabled = false;
+    showToast("Trim recording failed.");
     return;
   }
 
   videoTrimRecordings.set(media, rec);
+  showToast("Trim recording started.");
   if (trimBtn) {
     trimBtn.title = "Save trim";
     trimBtn.innerHTML = STOP_ICON;
@@ -3422,10 +3477,12 @@ function triggerTrim(media, trimBtn) {
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      showToast("Trim saved.");
     })
     .catch((error) => {
       clearInterval(elapsedTimer);
       console.error("Trim recording failed:", error);
+      showToast("Trim recording failed.");
     })
     .finally(() => {
       clearInterval(elapsedTimer);
@@ -3494,7 +3551,16 @@ function openContextMenu(media, x, y, linkEl) {
     openLinkBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      chrome.runtime.sendMessage({ action: "openTab", url: linkEl.href });
+      chrome.runtime.sendMessage(
+        { action: "openTab", url: linkEl.href },
+        () => {
+          if (chrome.runtime.lastError) {
+            showToast("Failed to open link.");
+            return;
+          }
+          showToast("Link opened in a new tab.");
+        },
+      );
       closeContextMenu();
     });
     menu.appendChild(openLinkBtn);
