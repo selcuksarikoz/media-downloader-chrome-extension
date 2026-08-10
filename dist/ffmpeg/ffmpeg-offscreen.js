@@ -29,8 +29,9 @@ async function startIndependentMux(message) {
   jobs.set(muxId, job);
   try {
     const downloads = new Map();
+    const trackProgress = new Array(tracks.length).fill(0);
     const preparedTracks = await Promise.all(
-      tracks.map(async (track) => {
+      tracks.map(async (track, trackIndex) => {
         if (!/^https?:/i.test(track.url || "")) {
           throw new Error("The original track URL is unavailable.");
         }
@@ -40,6 +41,13 @@ async function startIndependentMux(message) {
             track.url,
             job.controller.signal,
             track.fullSize,
+            (progress) => {
+              trackProgress[trackIndex] = progress;
+              const average =
+                trackProgress.reduce((total, value) => total + value, 0) /
+                trackProgress.length;
+              reportProgress(job, Math.min(90, average * 0.9));
+            },
           );
           downloads.set(track.url, download);
         }
@@ -59,6 +67,7 @@ async function startIndependentMux(message) {
       }),
     );
     if (!jobs.has(muxId)) return;
+    reportProgress(job, 92, "Muxing downloaded tracks…");
 
     const worker = new Worker(
       chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"),
@@ -97,7 +106,7 @@ async function startIndependentMux(message) {
   }
 }
 
-async function fetchCompleteTrack(url, signal, knownFullSize) {
+async function fetchCompleteTrack(url, signal, knownFullSize, onProgress) {
   // Some CDNs (notably video.twimg.com) return only a small initial MP4 range
   // even when a normal GET is made. Start with an explicit range, read the
   // complete size from Content-Range, then fetch every remaining byte range.
@@ -109,8 +118,14 @@ async function fetchCompleteTrack(url, signal, knownFullSize) {
     signal,
     knownFullSize,
   );
+  onProgress?.(
+    first.fullSize > 0
+      ? Math.min(100, (first.data.byteLength / first.fullSize) * 100)
+      : 0,
+  );
 
   if (!first.isPartial) {
+    onProgress?.(100);
     return {
       blob: new Blob([first.data], {
         type: first.contentType || "application/octet-stream",
@@ -127,6 +142,7 @@ async function fetchCompleteTrack(url, signal, knownFullSize) {
   const chunkCount = Math.ceil(first.fullSize / chunkSize);
   const chunks = new Array(chunkCount);
   chunks[0] = first.data;
+  let loaded = first.data.byteLength;
   let nextIndex = 1;
   const workerCount = Math.min(8, Math.max(0, chunkCount - 1));
   await Promise.all(
@@ -156,6 +172,8 @@ async function fetchCompleteTrack(url, signal, knownFullSize) {
           throw new Error("The media server returned an unexpected track range.");
         }
         chunks[index] = part.data;
+        loaded += part.data.byteLength;
+        onProgress?.(Math.min(100, (loaded / first.fullSize) * 100));
       }
     }),
   );
@@ -260,6 +278,20 @@ function reportResult(job, result) {
       saveAs: job.message.saveAs,
       tabId: job.message.tabId,
       ...result,
+    })
+    .catch(() => {});
+}
+
+function reportProgress(job, progress, message = "Downloading original tracks…") {
+  chrome.runtime
+    .sendMessage({
+      target: "background",
+      action: "independentMuxProgress",
+      muxId: job.message.muxId,
+      videoId: job.message.videoId,
+      tabId: job.message.tabId,
+      message,
+      progress,
     })
     .catch(() => {});
 }

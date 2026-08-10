@@ -9,6 +9,7 @@ const CHUNK_STORE = "chunks";
 const portJobSets = new Map();
 const activeBlobUrls = new Map();
 const activePreparedDownloads = new Map();
+const downloadProgressTimers = new Map();
 const OFFSCREEN_DOCUMENT_PATH = "ffmpeg/ffmpeg-offscreen.html";
 let creatingOffscreenDocument = null;
 
@@ -19,6 +20,20 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (
+    message?.target === "background" &&
+    message.action === "independentMuxProgress"
+  ) {
+    if (message.tabId) {
+      chrome.tabs.sendMessage(message.tabId, {
+        action: "independentMuxProgress",
+        videoId: message.videoId,
+        message: message.message,
+        progress: message.progress,
+      }).catch(() => {});
+    }
+    return;
+  }
   if (message?.target === "background" && message.action === "independentMuxResult") {
     handleIndependentMuxResult(message);
     return;
@@ -49,7 +64,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.action === "download") {
     downloadMedia(message)
-      .then(() => sendResponse({ ok: true }))
+      .then((downloadId) => sendResponse({ ok: true, downloadId }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -411,6 +426,7 @@ function createDownloadableUrl(blob) {
 chrome.downloads.onChanged.addListener((delta) => {
   const state = delta.state?.current;
   if (state !== "complete" && state !== "interrupted") return;
+  stopDownloadProgress(delta.id, state);
   const prepared = activePreparedDownloads.get(delta.id);
   if (prepared) {
     activePreparedDownloads.delete(delta.id);
@@ -626,7 +642,7 @@ setTimeout(() => finalizeInterruptedJobs(null), 5000);
 // Regular (URL) media downloads
 // ---------------------------------------------------------------------------
 
-function downloadMedia({ url, folder, saveAs, mediaType }) {
+function downloadMedia({ url, folder, saveAs, mediaType, videoId }) {
   return new Promise((resolve, reject) => {
     let filename = getFilenameFromUrl(url, mediaType);
 
@@ -645,15 +661,60 @@ function downloadMedia({ url, folder, saveAs, mediaType }) {
         saveAs: saveAs === true,
         conflictAction: "overwrite",
       },
-      () => {
+      (downloadId) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
-        resolve();
+        if (videoId) startDownloadProgress(downloadId, videoId);
+        resolve(downloadId);
       },
     );
   });
+}
+
+function startDownloadProgress(downloadId, videoId) {
+  if (!Number.isInteger(downloadId) || !videoId) return;
+  const publish = async () => {
+    try {
+      const [item] = await chrome.downloads.search({ id: downloadId });
+      if (!item) return;
+      const progress =
+        item.totalBytes > 0
+          ? Math.min(100, (item.bytesReceived / item.totalBytes) * 100)
+          : null;
+      chrome.runtime.sendMessage({
+        action: "popupMediaStatus",
+        videoId,
+        status: item.state === "complete" ? "complete" : "progress",
+        message: "Downloading video…",
+        progress,
+      }).catch(() => {});
+      if (item.state === "complete" || item.state === "interrupted") {
+        stopDownloadProgress(downloadId, item.state);
+      }
+    } catch {}
+  };
+  downloadProgressTimers.set(downloadId, {
+    videoId,
+    timer: setInterval(publish, 500),
+  });
+  publish();
+}
+
+function stopDownloadProgress(downloadId, state) {
+  const tracked = downloadProgressTimers.get(downloadId);
+  if (!tracked) return;
+  clearInterval(tracked.timer);
+  downloadProgressTimers.delete(downloadId);
+  chrome.runtime.sendMessage({
+    action: "popupMediaStatus",
+    videoId: tracked.videoId,
+    status: state === "complete" ? "complete" : "error",
+    message:
+      state === "complete" ? "Video downloaded." : "Video download interrupted.",
+    progress: state === "complete" ? 100 : null,
+  }).catch(() => {});
 }
 
 function downloadPreparedUrl(

@@ -1344,6 +1344,7 @@ function waitForMediaCompletion(
   return new Promise((resolve, reject) => {
     let checkTimer;
     let settled = false;
+    let lastProgress = 0;
     const reportProgress = () => {
       let furthestBufferedTime = 0;
       for (let index = 0; index < video.buffered.length; index += 1) {
@@ -1352,9 +1353,14 @@ function waitForMediaCompletion(
           video.buffered.end(index)
         );
       }
+      const furthestTime = Math.max(
+        furthestBufferedTime,
+        Number.isFinite(video.currentTime) ? video.currentTime : 0,
+      );
       const progress = Number.isFinite(video.duration) && video.duration > 0
-        ? (furthestBufferedTime / video.duration) * 100
+        ? Math.max(lastProgress, (furthestTime / video.duration) * 100)
         : undefined;
+      if (Number.isFinite(progress)) lastProgress = Math.min(100, progress);
       emitStatus(
         videoId,
         "progress",

@@ -33,6 +33,8 @@ let mediaMutationObserver = null;
 const mediaControls = new Map();
 const trackedMedia = new Map();
 const capturedVideos = new Map();
+const dismissedPopupVideoIds = new Set();
+const popupVideoStatuses = new Map();
 const blobDownloadRequests = new Map();
 const activeBlobJobIds = new Set();
 const pipState = new WeakMap();
@@ -381,6 +383,106 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.action === "getPopupMedia") {
+    sendResponse({ ok: true, media: getPopupMediaList() });
+    return;
+  }
+  if (message?.action === "independentMuxProgress" && message.videoId) {
+    window.dispatchEvent(
+      new CustomEvent(BLOB_STATUS_EVENT, {
+        detail: {
+          videoId: message.videoId,
+          status: "progress",
+          message: message.message,
+          progress: message.progress,
+        },
+      }),
+    );
+    sendResponse({ ok: true });
+    return;
+  }
+  if (message?.action === "removePopupMedia" && message.videoId) {
+    dismissedPopupVideoIds.add(message.videoId);
+    sendResponse({ ok: true, media: getPopupMediaList() });
+    return;
+  }
+  if (message?.action === "clearPopupMedia") {
+    capturedVideos.forEach((_video, videoId) => {
+      dismissedPopupVideoIds.add(videoId);
+    });
+    sendResponse({ ok: true, media: [] });
+    return;
+  }
+  if (message?.action === "rescanPopupMedia") {
+    dismissedPopupVideoIds.clear();
+    processAllMedia();
+    sendResponse({ ok: true, media: getPopupMediaList() });
+    return;
+  }
+  if (message?.action === "downloadPopupMedia" && message.videoId) {
+    const video = capturedVideos.get(message.videoId);
+    if (!video?.isConnected) {
+      sendResponse({ ok: false, error: "This video is no longer on the page." });
+      return;
+    }
+    if (activeBlobJobIds.has(message.videoId)) {
+      sendResponse({ ok: false, error: "This video is already downloading." });
+      return;
+    }
+    downloadMedia(video)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error: error?.message || "Video download failed.",
+        })
+      );
+    return true;
+  }
+});
+
+function getPopupMediaList() {
+  let position = 0;
+  const media = [];
+  capturedVideos.forEach((video, videoId) => {
+    if (
+      !video?.isConnected ||
+      dismissedPopupVideoIds.has(videoId) ||
+      !(video.currentSrc || video.src)
+    ) {
+      return;
+    }
+    position += 1;
+    const source = video.currentSrc || video.src;
+    let sourceLabel = "Page stream";
+    if (source.startsWith("blob:")) {
+      sourceLabel = "Blob stream";
+    } else {
+      try {
+        sourceLabel = new URL(source, document.baseURI).hostname;
+      } catch {}
+    }
+    const poster = video.poster || "";
+    const downloadStatus = popupVideoStatuses.get(videoId);
+    media.push({
+      id: videoId,
+      title: `Video ${position}`,
+      pageTitle: document.title || location.hostname,
+      sourceLabel,
+      duration: Number.isFinite(video.duration) ? video.duration : 0,
+      width: video.videoWidth || 0,
+      height: video.videoHeight || 0,
+      poster:
+        /^(?:https?:|data:image\/)/i.test(poster) ? poster : "",
+      active: activeBlobJobIds.has(videoId),
+      playing: !video.paused && !video.ended,
+      downloadStatus,
+    });
+  });
+  return media;
+}
+
 function abortError() {
   return new DOMException("Mux canceled.", "AbortError");
 }
@@ -449,8 +551,19 @@ const mediaResizeObserver = new ResizeObserver((entries) => {
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
   if (videoId) {
+    popupVideoStatuses.set(videoId, { status, message, progress });
     if (ACTIVE_DOWNLOAD_STATES.has(status)) activeBlobJobIds.add(videoId);
     else activeBlobJobIds.delete(videoId);
+
+    try {
+      chrome.runtime.sendMessage({
+        action: "popupMediaStatus",
+        videoId,
+        status,
+        message,
+        progress,
+      });
+    } catch {}
   }
   const video = capturedVideos.get(videoId);
   const allBtns = video
@@ -998,7 +1111,9 @@ function cleanupMedia(media) {
   const group = mediaControls.get(media);
   if (group) detachActionGroup(group);
   if (media.dataset.imdCaptureId) {
-    capturedVideos.delete(media.dataset.imdCaptureId);
+    const videoId = media.dataset.imdCaptureId;
+    capturedVideos.delete(videoId);
+    popupVideoStatuses.delete(videoId);
   }
   const pipListeners = pipState.get(media);
   if (pipListeners) {
@@ -2369,7 +2484,12 @@ function openLightbox(media, url, downloadUrl) {
         // downloadMedia is async; for blob: URLs it dispatches the download
         // request and the media bridge fetches the blob. Close only after it
         // resolves so the blob URL is not revoked before the fetch completes.
-        downloadMedia(img, mediaUrl).finally(() => close());
+        downloadMedia(img, mediaUrl)
+          .catch((error) => {
+            console.error("Media download failed:", error);
+            showToast(error.message || "Download failed.");
+          })
+          .finally(() => close());
       });
       actions
         .querySelector(".imd-preview-btn")
@@ -3143,31 +3263,29 @@ async function downloadMedia(media, preferredUrl) {
     return;
   }
 
-  chrome.runtime.sendMessage(
-    {
+  const response = await new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
       action: "download",
       url: src,
       mediaType: media.tagName === "VIDEO" ? "video" : "image",
+      videoId: media.dataset.imdCaptureId,
       folder: settings.downloadFolder,
       saveAs: settings.showSaveAs,
-    },
-    (response) => {
+    }, (result) => {
       if (chrome.runtime.lastError) {
-        console.error("Download failed:", chrome.runtime.lastError.message);
-        showToast(`Download failed: ${chrome.runtime.lastError.message}`);
+        reject(new Error(chrome.runtime.lastError.message));
         return;
       }
-      if (!response?.ok) {
-        console.error("Download failed:", response?.error || "Unknown error");
-        showToast(response?.error || "Download failed.");
-        return;
-      }
-      showToast(
-        media.tagName === "VIDEO"
-          ? "Video download started."
-          : "Image download started.",
-      );
-    },
+      resolve(result);
+    });
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Download failed.");
+  }
+  showToast(
+    media.tagName === "VIDEO"
+      ? "Video download started."
+      : "Image download started.",
   );
 }
 

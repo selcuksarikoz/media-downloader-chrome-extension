@@ -7,11 +7,13 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
+    modulePreload: false,
     rollupOptions: {
       input: {
         background: resolve(__dirname, "background.js"),
         content: resolve(__dirname, "content.js"),
         "media-bridge": resolve(__dirname, "media-bridge.js"),
+        popup: resolve(__dirname, "popup.html"),
         options: resolve(__dirname, "options.html"),
         styles: resolve(__dirname, "styles.scss"),
       },

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Media Downloader</title>
+    <script type="module" crossorigin src="/popup.js"></script>
+    <link rel="stylesheet" crossorigin href="/popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <h1>Media Downloader</h1>
+        <span id="count" class="count" aria-live="polite">0 found</span>
+      </header>
+
+      <section id="notice" class="notice" hidden></section>
+      <section id="media-list" class="media-list" aria-live="polite"></section>
+
+      <section id="empty" class="empty" hidden>
+        <p>No videos detected on this page.</p>
+        <button id="scan-empty" class="text-button" type="button">
+          Scan again
+        </button>
+      </section>
+
+      <footer class="footer">
+        <button id="scan" class="footer-button" type="button">Scan again</button>
+        <button id="clear" class="footer-button" type="button">
+          Clear list
+        </button>
+        <button id="download-all" class="footer-button primary" type="button">
+          Download all
+        </button>
+      </footer>
+    </main>
+  </body>
+</html>
