@@ -154,7 +154,8 @@ window.addEventListener(BLOB_PERSIST_CHUNK_EVENT, (event) => {
 });
 
 window.addEventListener(BLOB_MUX_EVENT, async (event) => {
-  const { requestId, videoId, filename, tracks, startTime } = event.detail || {};
+  const { requestId, videoId, filename, tracks, startTime, duration } =
+    event.detail || {};
   if (!requestId || !videoId || !tracks?.length) return;
   let response = { ok: false };
   try {
@@ -165,6 +166,7 @@ window.addEventListener(BLOB_MUX_EVENT, async (event) => {
         filename,
         tracks,
         startTime,
+        duration,
       );
       response = { ok: true };
       window.dispatchEvent(
@@ -174,7 +176,12 @@ window.addEventListener(BLOB_MUX_EVENT, async (event) => {
       );
       return;
     }
-    const result = await muxTracksLocally(videoId, tracks, startTime);
+    const result = await muxTracksLocally(
+      videoId,
+      tracks,
+      startTime,
+      duration,
+    );
     if (canceledBlobJobs.has(videoId)) throw abortError();
     const outputName = replaceFileExtension(filename, result.extension);
     try {
@@ -198,7 +205,13 @@ window.addEventListener(BLOB_MUX_EVENT, async (event) => {
   );
 });
 
-function muxTracksIndependently(videoId, filename, tracks, startTime) {
+function muxTracksIndependently(
+  videoId,
+  filename,
+  tracks,
+  startTime,
+  duration,
+) {
   const muxId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return new Promise((resolve, reject) => {
     const entry = { muxId, resolve, reject };
@@ -217,6 +230,7 @@ function muxTracksIndependently(videoId, filename, tracks, startTime) {
           fullSize: track.fullSize,
         })),
         startTime,
+        duration,
       },
       (response) => {
         if (chrome.runtime.lastError || !response?.ok) {
@@ -262,7 +276,7 @@ async function getFfmpegHostFrame() {
   return ffmpegHostPromise;
 }
 
-async function muxTracksLocally(videoId, tracks, startTime) {
+async function muxTracksLocally(videoId, tracks, startTime, duration) {
   const muxId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const frame = await getFfmpegHostFrame();
   return new Promise((resolve, reject) => {
@@ -315,6 +329,7 @@ async function muxTracksLocally(videoId, tracks, startTime) {
         muxId,
         tracks: payload,
         startTime,
+        duration,
       },
       "*",
     );
@@ -635,6 +650,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   ) {
     blobJobIntent.delete(videoId);
   }
+  if (video) refreshMediaActionState(video);
 });
 
 window.addEventListener(BLOB_DATA_EVENT, async (event) => {
@@ -981,7 +997,10 @@ function init() {
     if (changes.showPreviewButton) updatePreviewButtonVisibility();
     if (changes.showVideoControls) updateVideoControls();
     if (changes.blacklistedDomains) applyDomainAccess();
-    if (changes.useContextMenu) rebuildAllMedia();
+    if (changes.useContextMenu) {
+      closeContextMenu();
+      rebuildAllMedia();
+    }
   });
 }
 
@@ -1043,6 +1062,19 @@ function hasForbiddenFolder(folder) {
 /** Process all existing img/video elements on the page. */
 function processAllMedia() {
   document.querySelectorAll("img, video").forEach(trackMedia);
+}
+
+/** Create a stable-enough per-page media ID even on non-secure HTTP pages. */
+function createCaptureId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    const values = new Uint32Array(4);
+    globalThis.crypto.getRandomValues(values);
+    return `imd-${Array.from(values, (value) => value.toString(16)).join("-")}`;
+  }
+  return `imd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /** Track a media element with observers and process it. */
@@ -1149,13 +1181,11 @@ function updateAllButtonPositions() {
   });
 }
 
-/** Show/hide preview buttons based on settings and blob status. */
+/** Show/hide preview buttons based on the user setting. */
 function updatePreviewButtonVisibility() {
-  mediaControls.forEach((group, media) => {
+  mediaControls.forEach((group) => {
     const button = group.querySelector(".imd-preview-btn");
-    const isBlobVideo =
-      media.tagName === "VIDEO" && getVideoUrl(media).startsWith("blob:");
-    button.hidden = !settings.showPreviewButton || isBlobVideo;
+    if (button) button.hidden = !settings.showPreviewButton;
   });
   repositionOpenControls();
 }
@@ -1195,7 +1225,7 @@ function processMedia(media) {
   delete media.dataset.imdWaiting;
   media.dataset.imdProcessed = "true";
   if (!isImage && !media.dataset.imdCaptureId) {
-    media.dataset.imdCaptureId = crypto.randomUUID();
+    media.dataset.imdCaptureId = createCaptureId();
   }
   if (!isImage) capturedVideos.set(media.dataset.imdCaptureId, media);
   if (!isImage) syncInstagramNativeVideoControls(media);
@@ -1989,15 +2019,14 @@ function buildMediaActionButtons(media) {
     isImage ? "Copy image to clipboard" : "Copy current frame to clipboard",
     COPY_ICON,
   );
-  const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
-  previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
+  previewBtn.hidden = !settings.showPreviewButton;
   const buttons = [downloadBtn, previewBtn];
   if (trimBtn) buttons.push(trimBtn);
   if (lightboxBtn) buttons.push(lightboxBtn);
   if (captureBtn) buttons.push(captureBtn);
   if (copyBtn) buttons.push(copyBtn);
   if (pipBtn) buttons.push(pipBtn);
-  return {
+  const controls = {
     downloadBtn,
     previewBtn,
     captureBtn,
@@ -2007,6 +2036,61 @@ function buildMediaActionButtons(media) {
     copyBtn,
     buttons,
   };
+  syncActionButtonState(media, controls);
+  return controls;
+}
+
+/** Derive transient button state from the media/job model, never from the DOM. */
+function syncActionButtonState(media, btns) {
+  if (media.tagName !== "VIDEO") return;
+  const videoId = media.dataset.imdCaptureId;
+  const blobIntent = videoId ? blobJobIntent.get(videoId) : null;
+  const blobBusy = Boolean(videoId && activeBlobJobIds.has(videoId));
+  const regularTrimActive = videoTrimRecordings.has(media);
+  const trimActive = regularTrimActive || blobIntent === "trim";
+  const conflictingJob = regularTrimActive || blobBusy;
+
+  btns.downloadBtn.disabled = conflictingJob;
+  btns.downloadBtn.classList.toggle("imd-recording", conflictingJob);
+  setButtonLabel(
+    btns.downloadBtn,
+    conflictingJob ? "Video operation in progress" : "Download Video",
+  );
+
+  if (!btns.trimBtn) return;
+  btns.trimBtn.disabled = blobBusy && blobIntent !== "trim";
+  btns.trimBtn.dataset.recording = trimActive ? "true" : "false";
+  btns.trimBtn.innerHTML = trimActive ? STOP_ICON : TRIM_ICON;
+  setButtonLabel(
+    btns.trimBtn,
+    trimActive
+      ? "Save trim"
+      : btns.trimBtn.disabled
+        ? "Video operation in progress"
+        : "Trim from current time",
+  );
+}
+
+/** Keep native tooltip and accessible name in sync. */
+function setButtonLabel(button, label) {
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+
+/** Refresh persistent hover controls and the currently open context menu. */
+function refreshMediaActionState(media) {
+  const roots = [];
+  const hoverGroup = mediaControls.get(media);
+  if (hoverGroup) roots.push(hoverGroup);
+  if (contextMenuEl && contextMenuMedia === media) roots.push(contextMenuEl);
+  roots.forEach((root) => {
+    const downloadBtn = root.querySelector(".imd-down-btn");
+    if (!downloadBtn) return;
+    syncActionButtonState(media, {
+      downloadBtn,
+      trimBtn: root.querySelector(".imd-trim-btn"),
+    });
+  });
 }
 
 /** Attach the click handlers for the media action buttons. */
@@ -2016,12 +2100,16 @@ function attachMediaActionHandlers(media, btns) {
     e.stopPropagation();
     downloadMedia(media).catch((error) => {
       console.error("Media download failed:", error);
+      showToast(error?.message || "Download failed.");
     });
   });
   btns.previewBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    previewMedia(media);
+    previewMedia(media).catch((error) => {
+      console.warn("[Media Downloader] Preview failed:", error);
+      showToast(error?.message || "Preview failed.");
+    });
   });
   btns.captureBtn?.addEventListener("click", (e) => {
     e.preventDefault();
@@ -2054,7 +2142,7 @@ function attachMediaActionHandlers(media, btns) {
   btns.trimBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    triggerTrim(media, null);
+    triggerTrim(media, btns.trimBtn);
   });
   btns.copyBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -2062,9 +2150,12 @@ function attachMediaActionHandlers(media, btns) {
     const restoreTitle = () => {
       setTimeout(() => {
         const isVideo = media.tagName === "VIDEO";
-        btns.copyBtn.title = isVideo
-          ? "Copy current frame to clipboard"
-          : "Copy image to clipboard";
+        setButtonLabel(
+          btns.copyBtn,
+          isVideo
+            ? "Copy current frame to clipboard"
+            : "Copy image to clipboard",
+        );
       }, 1500);
     };
     try {
@@ -2072,23 +2163,25 @@ function attachMediaActionHandlers(media, btns) {
       const { copiedType } = isVideo
         ? await copyVideoFrameToClipboard(media)
         : await copyImageToClipboard(media);
-      btns.copyBtn.title = "Copied!";
+      setButtonLabel(btns.copyBtn, "Copied!");
       showToast(
         copiedType
           ? `Copied to clipboard (${copiedType})`
           : "Copied to clipboard.",
       );
       setTimeout(() => {
-        btns.copyBtn.title =
+        setButtonLabel(
+          btns.copyBtn,
           isVideo && copiedType
             ? `Copy current frame to clipboard (${copiedType})`
             : isVideo
               ? "Copy current frame to clipboard"
-              : "Copy image to clipboard";
+              : "Copy image to clipboard",
+        );
       }, 1500);
     } catch (error) {
       console.error("Copy to clipboard failed:", error);
-      btns.copyBtn.title = "Copy failed";
+      setButtonLabel(btns.copyBtn, "Copy failed");
       restoreTitle();
       showToast("Copy to clipboard failed.");
     }
@@ -2312,52 +2405,56 @@ function captureVideoFrameFromSource(
   });
 }
 
-/** Preview media in the background tab (uses highest resolution for images/videos). */
+/** Preview an image, or the current frame of a video, in a background tab. */
 async function previewMedia(media, preferredUrl) {
   if (media.tagName === "VIDEO") {
-    const url = resolveHighestResolutionVideoUrl(media);
-    if (url) openPreviewInBackground(url);
+    const { blobUrl, dataUrl } = await captureVideoFrame(media);
+    try {
+      if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
+        throw new Error("Captured video frame is not a valid image.");
+      }
+      await openPreviewInBackground(dataUrl);
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
     return;
   }
 
   if (preferredUrl) {
-    openPreviewInBackground(preferredUrl);
+    await openPreviewInBackground(preferredUrl);
     return;
   }
 
-  try {
-    const url = await resolveHighestResolutionImageUrl(media);
-    if (url) openPreviewInBackground(url);
-  } catch (error) {
-    console.error("Image resolution detection failed.", error);
-  }
+  const url = await resolveHighestResolutionImageUrl(media);
+  if (!url) throw new Error("Image has no preview URL.");
+  await openPreviewInBackground(url);
 }
 
 /** Open a URL in the background preview tab via the extension runtime. */
 function openPreviewInBackground(url) {
+  if (typeof url !== "string" || !url) {
+    throw new TypeError("Preview URL must be a non-empty string.");
+  }
   const runtime = globalThis.chrome?.runtime;
   if (typeof runtime?.sendMessage !== "function") {
-    console.warn(
-      "[Media Downloader] Extension context is unavailable. Reload the page.",
+    throw new Error(
+      "Extension context is unavailable. Reload the page.",
     );
-    return;
   }
 
-  runtime.sendMessage({ action: "preview", url }, (response) => {
-    if (runtime.lastError) {
-      console.warn(
-        "[Media Downloader] Preview failed:",
-        runtime.lastError.message,
-      );
-      showToast("Preview failed.");
-      return;
-    }
-    if (response?.ok === false) {
-      console.warn("[Media Downloader] Preview failed:", response.error);
-      showToast(response.error || "Preview failed.");
-      return;
-    }
-    showToast("Preview opened.");
+  return new Promise((resolve, reject) => {
+    runtime.sendMessage({ action: "preview", url }, (response) => {
+      if (runtime.lastError) {
+        reject(new Error(runtime.lastError.message));
+        return;
+      }
+      if (response?.ok !== true) {
+        reject(new Error(response?.error || "Preview failed."));
+        return;
+      }
+      showToast("Preview opened.");
+      resolve();
+    });
   });
 }
 
@@ -2496,7 +2593,10 @@ function openLightbox(media, url, downloadUrl) {
         .addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          previewMedia(img, mediaUrl);
+          previewMedia(img, mediaUrl).catch((error) => {
+            console.error("Image preview failed:", error);
+            showToast(error?.message || "Preview failed.");
+          });
           close();
         });
       const anchor =
@@ -3515,7 +3615,14 @@ async function captureVideoFrameBlobWithFallbacks(
     console.warn("[Media Downloader] Direct frame capture failed:", error);
     const sourceUrl = getVideoUrl(video);
     if (sourceUrl && !sourceUrl.startsWith("blob:") && !sourceUrl.startsWith("data:")) {
-      return await captureVideoFrameFromSource(video, captureType);
+      try {
+        return await captureVideoFrameFromSource(video, captureType);
+      } catch (sourceError) {
+        console.warn(
+          "[Media Downloader] Source frame capture failed:",
+          sourceError,
+        );
+      }
     }
     const mseBlob = await requestMediaSourceBlob(sourceUrl);
     if (mseBlob && mseBlob.size) {
@@ -3560,7 +3667,6 @@ async function captureVideoFrameBlob(video, captureType = settings.captureType) 
           await ensurePresentedFrame(video, attempt > 0);
         }
         const blob = await drawVideoFrameToBlob(video, captureType);
-        if (wasPlaying) video.pause();
         return blob;
       } catch (error) {
         lastError = error;
@@ -3602,11 +3708,13 @@ async function drawVideoFrameToBlob(video, captureType = settings.captureType) {
     video.videoColorSpace &&
     (video.videoColorSpace.transfer === "pq" ||
       video.videoColorSpace.transfer === "hlg");
-  const contextOptions =
-    isHdr &&
+  const contextOptions = {
+    willReadFrequently: true,
+    ...(isHdr &&
     "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
       ? { colorSpace: "display-p3" }
-      : undefined;
+      : {}),
+  };
   const context = canvas.getContext("2d", contextOptions);
   if (!context) throw new Error("Canvas is unavailable.");
   // HDR frames are tone-mapped to SDR by the canvas; draw at native
@@ -3767,7 +3875,9 @@ async function captureFrameFromMediaProbe(
             const canvas = document.createElement("canvas");
             canvas.width = probe.videoWidth;
             canvas.height = probe.videoHeight;
-            const context = canvas.getContext("2d");
+            const context = canvas.getContext("2d", {
+              willReadFrequently: true,
+            });
             if (!context) throw new Error("Canvas is unavailable.");
             context.imageSmoothingEnabled = false;
             context.drawImage(probe, 0, 0);
@@ -3861,7 +3971,7 @@ function captureVideoFrameFromTab(video) {
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
-        const context = canvas.getContext("2d");
+        const context = canvas.getContext("2d", { willReadFrequently: true });
         context.imageSmoothingEnabled = false;
         context.drawImage(image, sx, sy, width, height, 0, 0, width, height);
         // The player may cover a paused video with a poster overlay that is
@@ -3936,39 +4046,55 @@ function triggerTrim(media, trimBtn) {
   const recording = videoTrimRecordings.get(media);
   if (recording) {
     recording.save();
+    if (trimBtn) {
+      trimBtn.disabled = true;
+      setButtonLabel(trimBtn, "Finalizing trim…");
+    }
     return;
   }
 
-  const isBlob = getVideoUrl(media).startsWith("blob:");
-  if (isBlob) {
-    if (trimBtn && trimBtn.dataset.recording === "true") {
+  const mediaUrl = getVideoUrl(media);
+  const usesPageBridge =
+    mediaUrl.startsWith("blob:") || isInstagramDirectVideoUrl(mediaUrl);
+  if (usesPageBridge) {
+    const videoId = media.dataset.imdCaptureId;
+    const intent = blobJobIntent.get(videoId);
+    if (intent === "trim") {
       window.dispatchEvent(
         new CustomEvent(BLOB_CONTROL_EVENT, {
-          detail: { videoId: media.dataset.imdCaptureId, action: "save" },
+          detail: { videoId, action: "save" },
         }),
       );
+      if (trimBtn) {
+        trimBtn.disabled = true;
+        setButtonLabel(trimBtn, "Finalizing trim…");
+      }
+      showToast("Finalizing trim…");
+    } else if (activeBlobJobIds.has(videoId)) {
+      showToast("A video operation is already in progress.");
     } else {
-      canceledBlobJobs.delete(media.dataset.imdCaptureId);
+      canceledBlobJobs.delete(videoId);
+      blobJobIntent.set(videoId, "trim");
+      refreshMediaActionState(media);
       if (trimBtn) {
         trimBtn.dataset.recording = "true";
-        trimBtn.title = "Save trim";
+        setButtonLabel(trimBtn, "Save trim");
         trimBtn.innerHTML = STOP_ICON;
       }
       sendBlobStoreMessage({
         action: "job-start",
-        jobId: media.dataset.imdCaptureId,
+        jobId: videoId,
         filename: getSuggestedVideoName(media),
         folder: settings.downloadFolder,
         saveAs: settings.showSaveAs,
       });
-      blobJobIntent.set(media.dataset.imdCaptureId, "trim");
       showToast("Trim recording started.");
       window.dispatchEvent(
         new CustomEvent(BLOB_TRIM_EVENT, {
           detail: {
-            url: getVideoUrl(media),
+            url: mediaUrl,
             filename: getSuggestedVideoName(media),
-            videoId: media.dataset.imdCaptureId,
+            videoId,
             startTime: media.currentTime,
           },
         }),
@@ -3989,17 +4115,19 @@ function triggerTrim(media, trimBtn) {
   }
 
   videoTrimRecordings.set(media, rec);
+  refreshMediaActionState(media);
   showToast("Trim recording started.");
   if (trimBtn) {
-    trimBtn.title = "Save trim";
+    setButtonLabel(trimBtn, "Save trim");
     trimBtn.innerHTML = STOP_ICON;
+    trimBtn.dataset.recording = "true";
     trimBtn.disabled = false;
   }
 
   let elapsedTimer = setInterval(() => {
     const elapsed = media.currentTime - rec.startTime;
     if (elapsed > 0 && trimBtn) {
-      trimBtn.title = `Save (${elapsed.toFixed(1)}s)`;
+      setButtonLabel(trimBtn, `Save (${elapsed.toFixed(1)}s)`);
     }
   }, 500);
 
@@ -4031,10 +4159,12 @@ function triggerTrim(media, trimBtn) {
     .finally(() => {
       clearInterval(elapsedTimer);
       videoTrimRecordings.delete(media);
+      refreshMediaActionState(media);
       if (trimBtn) {
-        trimBtn.title = "Trim from current time";
+        setButtonLabel(trimBtn, "Trim from current time");
         trimBtn.innerHTML = TRIM_ICON;
         trimBtn.dataset.recording = "false";
+        trimBtn.disabled = false;
       }
     });
 }
@@ -4084,7 +4214,7 @@ function openContextMenu(media, x, y, linkEl) {
   const menu = document.createElement("div");
   menu.className = "imd-context-menu";
   menu.setAttribute("role", "menu");
-  menu.addEventListener("click", (e) => e.stopPropagation());
+  isolateActionGroupEvents(menu);
 
   if (linkEl) {
     const openLinkBtn = createActionButton(
@@ -4092,14 +4222,19 @@ function openContextMenu(media, x, y, linkEl) {
       "Open link in new tab",
       OPEN_LINK_ICON,
     );
+    openLinkBtn.setAttribute("role", "menuitem");
     openLinkBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       chrome.runtime.sendMessage(
         { action: "openTab", url: linkEl.href },
-        () => {
+        (response) => {
           if (chrome.runtime.lastError) {
             showToast("Failed to open link.");
+            return;
+          }
+          if (response?.ok !== true) {
+            showToast(response?.error || "Failed to open link.");
             return;
           }
           showToast("Link opened in a new tab.");
@@ -4114,6 +4249,7 @@ function openContextMenu(media, x, y, linkEl) {
     const btns = buildMediaActionButtons(media);
     attachMediaActionHandlers(media, btns);
     btns.buttons.forEach((button) => {
+      button.setAttribute("role", "menuitem");
       button.addEventListener("click", closeContextMenu);
       menu.appendChild(button);
     });
@@ -4149,7 +4285,7 @@ function positionContextMenu(menu, x, y) {
 }
 
 function handleContextMenuEvent(event) {
-  if (!extensionActive) return;
+  if (!extensionActive || !settings.useContextMenu) return;
 
   const path = event.composedPath();
   let media = null;
@@ -4164,7 +4300,9 @@ function handleContextMenuEvent(event) {
 
   if (!media) return;
 
+  event.preventDefault();
   event.stopPropagation();
+  event.stopImmediatePropagation();
 
   let linkEl =
     path.find((el) => el.tagName === "A" && el.hasAttribute("href")) ||

@@ -6,7 +6,12 @@ window.addEventListener("message", (event) => {
   const { action, muxId } = event.data;
 
   if (action === "mux" && muxId && event.data.tracks?.length) {
-    startMux(muxId, event.data.tracks, event.data.startTime);
+    startMux(
+      muxId,
+      event.data.tracks,
+      event.data.startTime,
+      event.data.duration,
+    );
     return;
   }
 
@@ -27,7 +32,7 @@ window.addEventListener("message", (event) => {
   }
 });
 
-async function startMux(muxId, tracks, startTime) {
+async function startMux(muxId, tracks, startTime, duration) {
   if (jobs.has(muxId)) return;
   const job = { controller: new AbortController(), worker: null };
   jobs.set(muxId, job);
@@ -98,7 +103,7 @@ async function startMux(muxId, tracks, startTime) {
     }
     sendResult(muxId, event.data);
   };
-  worker.postMessage({ muxId, tracks: preparedTracks, startTime });
+  worker.postMessage({ muxId, tracks: preparedTracks, startTime, duration });
 }
 
 function sendResult(muxId, result) {

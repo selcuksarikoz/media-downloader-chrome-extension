@@ -552,7 +552,31 @@ window.addEventListener(TRIM_EVENT, (event) => {
 
   if (activeJobs.has(videoId)) return;
 
-  const source = blobKinds.get(url);
+  let source = blobKinds.get(url);
+  if (!source && url.startsWith("blob:")) {
+    const record = [...recentMediaSourceRecords]
+      .reverse()
+      .find((candidate) =>
+        candidate.buffers.some((buffer) => buffer.chunks.length),
+      );
+    if (record) {
+      source = { kind: "media-source", record };
+      blobKinds.set(url, source);
+    }
+  }
+
+  if (isInstagramPage()) {
+    startInstagramTrim({
+      url,
+      filename,
+      videoId,
+      video,
+      startTime,
+      source,
+    });
+    return;
+  }
+
   if (source?.kind === "media-source") source.record.lockCount += 1;
   const job = {
     url,
@@ -566,6 +590,122 @@ window.addEventListener(TRIM_EVENT, (event) => {
 
   startJob(job);
 });
+
+function startInstagramTrim({
+  url,
+  filename,
+  videoId,
+  video,
+  startTime,
+  source,
+}) {
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const trimStart = Number.isFinite(startTime)
+    ? Math.max(0, startTime)
+    : Math.max(0, video.currentTime || 0);
+  let finishTrim;
+  let rejectTrim;
+  let settled = false;
+
+  const stopRequested = new Promise((resolve, reject) => {
+    finishTrim = resolve;
+    rejectTrim = reject;
+  });
+  const save = () => {
+    if (settled) return;
+    settled = true;
+    const trimEnd = Math.max(0, video.currentTime || 0);
+    finishTrim(Math.max(0, trimEnd - trimStart));
+  };
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    controller.abort();
+    rejectTrim(signal.reason || new DOMException("Canceled", "AbortError"));
+  };
+  const reportProgress = () => {
+    const elapsed = Math.max(0, (video.currentTime || 0) - trimStart);
+    emitStatus(videoId, "progress", `Recording ${elapsed.toFixed(1)}s…`);
+  };
+
+  activeJobs.add(videoId);
+  activeJobControllers.set(videoId, controller);
+  activeRecordings.set(videoId, { save, cancel });
+  if (source?.kind === "media-source") source.record.lockCount += 1;
+  video.addEventListener("timeupdate", reportProgress, { passive: true });
+  emitStatus(videoId, "recording", "Starting trim recording…", 0);
+  if (video.paused) video.play().catch(() => {});
+
+  stopRequested
+    .then(async (duration) => {
+      signal.throwIfAborted();
+      if (!Number.isFinite(duration) || duration < 0.1) {
+        throw new Error("Play the video before saving a trim.");
+      }
+      emitStatus(videoId, "recording", "Downloading and trimming video…", 0);
+      const tracks = await getInstagramTrimTracks(url, source, signal);
+      await requestFastMux(
+        videoId,
+        replaceExtension(filename, "mp4"),
+        tracks,
+        trimStart,
+        signal,
+        duration,
+      );
+      emitStatus(videoId, "complete", "Trim saved.", 100);
+    })
+    .catch((error) => {
+      if (error?.name === "AbortError") return;
+      const message = error?.message || error?.name || "Trim failed.";
+      console.error("[Media Downloader] Instagram trim failed:", error);
+      emitStatus(videoId, "error", message);
+    })
+    .finally(() => {
+      video.removeEventListener("timeupdate", reportProgress);
+      activeRecordings.delete(videoId);
+      activeJobs.delete(videoId);
+      activeJobControllers.delete(videoId);
+      releaseMediaSourceLock(source);
+    });
+}
+
+async function getInstagramTrimTracks(url, source, signal) {
+  if (source?.kind === "media-source") {
+    const independentTracks = getIndependentTracks(source.record.buffers);
+    if (independentTracks.length) return independentTracks;
+
+    const capturedTracks = source.record.buffers
+      .filter(
+        (buffer) =>
+          buffer?.chunks?.length && /^(audio|video)\//i.test(buffer.mimeType),
+      )
+      .map((buffer) => ({
+        mimeType: buffer.mimeType,
+        blob: new Blob(getOrderedCapturedChunks(buffer.chunks), {
+          type: buffer.mimeType.split(";")[0] || "application/octet-stream",
+        }),
+      }));
+    if (capturedTracks.some((track) => /^video\//i.test(track.mimeType))) {
+      return capturedTracks;
+    }
+  }
+
+  if (source?.kind === "blob" || url.startsWith("blob:")) {
+    const response = await nativeFetch.call(window, url, { signal });
+    const blob = await response.blob();
+    signal.throwIfAborted();
+    if (blob.size) {
+      return [{ mimeType: blob.type || "video/mp4", blob }];
+    }
+  }
+
+  if (isInstagramDirectVideoUrl(url)) {
+    return [{ mimeType: "video/mp4", url }];
+  }
+
+  throw new Error("Instagram video source could not be prepared for trimming.");
+}
 
 window.addEventListener(CONTROL_EVENT, (event) => {
   const { videoId, action } = event.detail || {};
@@ -1323,7 +1463,14 @@ function getTrackFullSize(source) {
   return Number.isSafeInteger(size) && size > 0 ? size : undefined;
 }
 
-function requestFastMux(videoId, filename, tracks, startTime, signal) {
+function requestFastMux(
+  videoId,
+  filename,
+  tracks,
+  startTime,
+  signal,
+  duration,
+) {
   return new Promise((resolve, reject) => {
     const requestId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let settled = false;
@@ -1358,7 +1505,14 @@ function requestFastMux(videoId, filename, tracks, startTime, signal) {
     signal.addEventListener("abort", onAbort, { once: true });
     window.dispatchEvent(
       new CustomEvent(MUX_EVENT, {
-        detail: { requestId, videoId, filename, tracks, startTime },
+        detail: {
+          requestId,
+          videoId,
+          filename,
+          tracks,
+          startTime,
+          duration,
+        },
       })
     );
   });

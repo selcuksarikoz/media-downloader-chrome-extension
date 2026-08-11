@@ -22,7 +22,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function startIndependentMux(message) {
-  const { muxId, tracks, startTime } = message;
+  const { muxId, tracks, startTime, duration } = message;
   if (!muxId || !tracks?.length || jobs.has(muxId)) return;
 
   const job = { controller: new AbortController(), worker: null, message };
@@ -95,7 +95,7 @@ async function startIndependentMux(message) {
       }
       reportResult(job, event.data);
     };
-    worker.postMessage({ muxId, tracks: preparedTracks, startTime });
+    worker.postMessage({ muxId, tracks: preparedTracks, startTime, duration });
   } catch (error) {
     jobs.delete(muxId);
     reportResult(job, {

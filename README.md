@@ -33,8 +33,11 @@ controls directly to page media.
   navigates mid-recording (a partial file is saved if recording was interrupted).
   Background downloads fall back to a data URL when blob URLs are unavailable
   in the service worker context.
-- The capture button saves the video's current frame as JPG, PNG, or WebP. It
-  does not start a video recording.
+- The preview button captures the video's current frame as JPG, PNG, or WebP and
+  opens that image in a new background tab. It works with direct and blob video
+  sources and does not open the video URL.
+- The capture button captures the video's current frame and opens it in the
+  in-page image lightbox. It does not start a video recording.
 - The **Trim** button (scissors icon) records a video segment starting from the
   current playback position. Click once to begin recording, click again (or let
   the video reach the end) to save the trimmed segment as MP4. The button shows
@@ -55,9 +58,9 @@ in the settings.
   frame, open full size, picture-in-picture, trim, copy to clipboard).
 - Right-clicking a link that wraps media shows an "Open link in new tab" button at
   the top of the menu, opening the link in a background tab.
-- The menu respects the same visibility rules as the hover buttons (for example, the
-  preview button is hidden when disabled or for blob videos, and PiP only shows when
-  supported).
+- The menu respects the same visibility rules as the hover buttons (for example,
+  Preview follows its setting and PiP only shows when supported). Video Preview
+  remains available for blob videos because it previews a captured image frame.
 - The native browser context menu is suppressed over media while this mode is on.
 - The menu closes on outside click, `Escape`, scroll, resize, or when the window
   loses focus.

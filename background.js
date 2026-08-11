@@ -13,12 +13,6 @@ const downloadProgressTimers = new Map();
 const OFFSCREEN_DOCUMENT_PATH = "ffmpeg/ffmpeg-offscreen.html";
 let creatingOffscreenDocument = null;
 
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install" || details.reason === "update") {
-    chrome.runtime.openOptionsPage();
-  }
-});
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (
     message?.target === "background" &&
@@ -55,7 +49,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
-  if (!message.url) return;
+  if (message?.action === "captureTab") {
+    chrome.tabs.captureVisibleTab(
+      sender.tab?.windowId,
+      { format: "png" },
+      (dataUrl) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          sendResponse({
+            ok: false,
+            error: chrome.runtime.lastError?.message || "Tab capture failed.",
+          });
+          return;
+        }
+        sendResponse({ ok: true, dataUrl });
+      },
+    );
+    return true;
+  }
   if (message.action === "downloadMuxUrl") {
     downloadPreparedUrl(message, sender.tab?.id)
       .then((downloadId) => sendResponse({ ok: true, downloadId }))
@@ -75,24 +85,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.action === "openTab") {
-    chrome.tabs.create({ url: message.url, active: false });
-    return;
-  }
-  if (message.action === "captureTab") {
-    chrome.tabs.captureVisibleTab(
-      sender.tab?.windowId,
-      { format: "png" },
-      (dataUrl) => {
-        if (chrome.runtime.lastError || !dataUrl) {
-          sendResponse({
-            ok: false,
-            error: chrome.runtime.lastError?.message || "Tab capture failed.",
-          });
-          return;
-        }
-        sendResponse({ ok: true, dataUrl });
-      },
-    );
+    if (typeof message.url !== "string" || !message.url) {
+      sendResponse({ ok: false, error: "Tab URL must be a non-empty string." });
+      return;
+    }
+    chrome.tabs.create({ url: message.url, active: false })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 });
@@ -644,6 +643,10 @@ setTimeout(() => finalizeInterruptedJobs(null), 5000);
 
 function downloadMedia({ url, folder, saveAs, mediaType, videoId }) {
   return new Promise((resolve, reject) => {
+    if (typeof url !== "string" || !url) {
+      reject(new TypeError("Download URL must be a non-empty string."));
+      return;
+    }
     let filename = getFilenameFromUrl(url, mediaType);
 
     if (typeof folder === "string") {
@@ -723,6 +726,10 @@ function downloadPreparedUrl(
   offscreenMuxId,
 ) {
   return new Promise((resolve, reject) => {
+    if (typeof url !== "string" || !url) {
+      reject(new TypeError("Prepared download URL must be a non-empty string."));
+      return;
+    }
     filename = (filename || `video-${Date.now()}.mp4`).replace(
       /[^a-zA-Z0-9.\-_]/g,
       "_",
@@ -788,6 +795,9 @@ function getFilenameFromUrl(url, mediaType = "image") {
 // ---------------------------------------------------------------------------
 
 async function openPreviewTab(url, sourceTabId) {
+  if (typeof url !== "string" || !url) {
+    throw new TypeError("Preview URL must be a non-empty string.");
+  }
   const sourceTab = sourceTabId
     ? await chrome.tabs.get(sourceTabId)
     : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];

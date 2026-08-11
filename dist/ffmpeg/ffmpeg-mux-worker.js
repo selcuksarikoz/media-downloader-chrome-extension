@@ -9,7 +9,7 @@ self.onmessage = async (event) => {
     self.close();
     return;
   }
-  const { muxId, tracks, startTime } = event.data || {};
+  const { muxId, tracks, startTime, duration } = event.data || {};
   if (!muxId || !tracks?.length) return;
   let ffmpeg;
   const inputNames = [];
@@ -74,6 +74,9 @@ self.onmessage = async (event) => {
     for (const name of inputNames) args.push("-i", name);
     if (Number.isFinite(startTime) && startTime > 0) {
       args.push("-ss", String(startTime));
+    }
+    if (Number.isFinite(duration) && duration > 0) {
+      args.push("-t", String(duration));
     }
     args.push(
       "-map",
