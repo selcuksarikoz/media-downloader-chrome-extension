@@ -352,9 +352,13 @@ export function triggerTrim(media, trimBtn) {
     } else {
       const startTime = Math.max(0, Number(media.currentTime) || 0);
       const filename = getTimestampedVideoName();
-      // Blob/MediaSource trims are recorded into chunks during playback and do
-      // not need FFmpeg. Preload it only for direct/progressive source trims.
-      if (!mediaUrl.startsWith("blob:")) {
+      // Blob/MediaSource and Telegram progressive trims are recorded into
+      // chunks during playback and do not need FFmpeg. Preload it only for
+      // sources that use the source-trim fallback.
+      if (
+        !mediaUrl.startsWith("blob:") &&
+        !isTelegramProgressiveUrl(mediaUrl)
+      ) {
         preloadFfmpeg().catch((error) => {
           console.warn("[Media Downloader] FFmpeg preload failed:", error);
         });

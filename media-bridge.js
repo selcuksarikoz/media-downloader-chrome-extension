@@ -565,13 +565,19 @@ window.addEventListener(TRIM_EVENT, (event) => {
     }
   }
 
-  // MediaSource videos already expose a live capture stream. Record their
-  // trim chunks while playback is happening, then concatenate those chunks on
-  // Save. Running the captured source through FFmpeg after Save repeats work
-  // that MediaRecorder has already completed and makes a short trim wait much
-  // longer than its recording time.
-  if (source?.kind === "media-source") {
-    source.record.lockCount += 1;
+  // MediaSource and Telegram's same-origin progressive player expose a live
+  // capture stream. Record trim chunks while playback is happening, then
+  // concatenate those chunks on Save. Keep the source/FFmpeg trim below as a
+  // fallback when this Chrome build cannot record the live stream.
+  const canRecordLiveTrim =
+    typeof video.captureStream === "function" &&
+    Boolean(window.MediaRecorder) &&
+    Boolean(getRecorderMimeType(isHdrVideo(video)));
+  if (
+    canRecordLiveTrim &&
+    (source?.kind === "media-source" || isTelegramProgressiveUrl(url))
+  ) {
+    if (source?.kind === "media-source") source.record.lockCount += 1;
     startJob({
       url,
       filename,
