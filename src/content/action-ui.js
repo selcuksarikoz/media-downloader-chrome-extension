@@ -13,7 +13,6 @@ import {
   setCachedModals,
 } from './state.js';
 import { getInstagramReelLink, getActionRect } from './instagram.js';
-import { getVideoUrl } from './video-resolution.js';
 
 export function createActionButton(className, title, icon) {
   const button = document.createElement("button");
@@ -65,7 +64,6 @@ export function syncActionButtonState(media, btns) {
 
 export function buildMediaActionButtons(media) {
   const isImage = media.tagName === "IMG";
-  const isBlobVideo = !isImage && getVideoUrl(media).startsWith("blob:");
   const downloadBtn = createActionButton(
     "imd-down-btn",
     `Download ${isImage ? "Image" : "Video"}`,
@@ -95,7 +93,7 @@ export function buildMediaActionButtons(media) {
     isImage ? "Copy image to clipboard" : "Copy current frame to clipboard",
     COPY_ICON,
   );
-  previewBtn.hidden = !settings.showPreviewButton || isBlobVideo;
+  previewBtn.hidden = !settings.showPreviewButton || !isImage;
   const buttons = [downloadBtn, previewBtn];
   if (trimBtn) buttons.push(trimBtn);
   if (lightboxBtn) buttons.push(lightboxBtn);
@@ -240,9 +238,7 @@ export function updatePreviewButtonVisibility() {
   mediaControls.forEach((group, media) => {
     const button = group.querySelector(".imd-preview-btn");
     if (!button) return;
-    const isBlobVideo =
-      media.tagName === "VIDEO" && getVideoUrl(media).startsWith("blob:");
-    button.hidden = !settings.showPreviewButton || isBlobVideo;
+    button.hidden = !settings.showPreviewButton || media.tagName !== "IMG";
   });
 }
 
