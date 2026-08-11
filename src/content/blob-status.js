@@ -24,7 +24,9 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   if (videoId) {
     if (
       blobJobIntent.get(videoId) === "trim" &&
-      /(?:downloading and trimming|finalizing trim)/i.test(message || "")
+      /(?:downloading and trimming|finalizing .*trim|saving collected trim)/i.test(
+        message || "",
+      )
     ) {
       finalizingBlobJobIds.add(videoId);
     }
@@ -233,8 +235,15 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
   fill.classList.toggle("imd-indeterminate", percent === null && isActive);
   panel.querySelector(".imd-download-percent").textContent =
     percent === null ? "" : `${percent}%`;
-  panel.querySelector(".imd-save-download").hidden = !(
-    isTrimJob && isActive && !finalizingBlobJobIds.has(videoId)
+  const saveButton = panel.querySelector(".imd-save-download");
+  const canSaveCollectedDownload =
+    !isTrimJob &&
+    /(?:collecting segments|recording (?:video stream|\d))/i.test(message || "");
+  saveButton.textContent = isTrimJob ? "Save Trim" : "Save Now";
+  saveButton.hidden = !(
+    isActive &&
+    (isTrimJob || canSaveCollectedDownload) &&
+    !finalizingBlobJobIds.has(videoId)
   );
   panel.querySelector(".imd-cancel-download").hidden = !isActive;
 

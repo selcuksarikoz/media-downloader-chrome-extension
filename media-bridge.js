@@ -585,6 +585,7 @@ function startSourceTrim({
 }) {
   const controller = new AbortController();
   const signal = controller.signal;
+  const wasPaused = video.paused;
   const trimStart = Number.isFinite(startTime)
     ? Math.max(0, startTime)
     : Math.max(0, video.currentTime || 0);
@@ -605,11 +606,20 @@ function startSourceTrim({
       ? requestedEnd
       : video.currentTime;
     trimEnd = Math.max(trimEnd, Math.max(trimStart, currentEnd || 0));
+    video.removeEventListener("timeupdate", reportProgress);
+    video.removeEventListener("ended", saveAtEnd);
+    activeRecordings.delete(videoId);
+    if (wasPaused) nativePause.call(video);
+    emitStatus(videoId, "recording", "Finalizing saved trim…", lastProgress);
     finishTrim(Math.max(0, trimEnd - trimStart));
   };
   const cancel = () => {
     if (settled) return;
     settled = true;
+    video.removeEventListener("timeupdate", reportProgress);
+    video.removeEventListener("ended", saveAtEnd);
+    activeRecordings.delete(videoId);
+    if (wasPaused) nativePause.call(video);
     controller.abort();
     rejectTrim(signal.reason || new DOMException("Canceled", "AbortError"));
   };
@@ -643,7 +653,7 @@ function startSourceTrim({
       if (!Number.isFinite(duration) || duration < 0.1) {
         throw new Error("Play the video before saving a trim.");
       }
-      emitStatus(videoId, "recording", "Downloading and trimming video…", 0);
+      emitStatus(videoId, "recording", "Saving collected trim…", lastProgress);
       const tracks = await getSourceTrimTracks(url, source, signal);
       await requestFastMux(
         videoId,
@@ -673,9 +683,6 @@ function startSourceTrim({
 
 async function getSourceTrimTracks(url, source, signal) {
   if (source?.kind === "media-source") {
-    const independentTracks = getIndependentTracks(source.record.buffers);
-    if (independentTracks.length) return independentTracks;
-
     const capturedTracks = source.record.buffers
       .filter(
         (buffer) =>
@@ -690,6 +697,9 @@ async function getSourceTrimTracks(url, source, signal) {
     if (capturedTracks.some((track) => /^video\//i.test(track.mimeType))) {
       return capturedTracks;
     }
+
+    const independentTracks = getIndependentTracks(source.record.buffers);
+    if (independentTracks.length) return independentTracks;
   }
 
   if (source?.kind === "blob" || url.startsWith("blob:")) {
@@ -713,7 +723,16 @@ window.addEventListener(CONTROL_EVENT, (event) => {
   if (!videoId || (action !== "save" && action !== "cancel")) return;
 
   if (action === "save") {
-    activeRecordings.get(videoId)?.save();
+    const recording = activeRecordings.get(videoId);
+    if (recording) {
+      recording.save();
+    } else if (activeJobs.has(videoId)) {
+      emitStatus(
+        videoId,
+        "recording",
+        "Waiting for a savable media segment…"
+      );
+    }
     return;
   }
 
@@ -1194,7 +1213,7 @@ async function downloadCapturedMediaSource(
           signal
         )
       ) return;
-      if (!isMediaFullyBuffered(video)) {
+      if (waitResult !== "saved" && !isMediaFullyBuffered(video)) {
         await waitForMediaCompletion(
           video,
           videoId,
@@ -1585,12 +1604,21 @@ function waitForMediaCompletion(
       if (error) reject(error);
       else resolve(result);
     };
-    const finish = () => settle();
+    const finish = () => settle(null, "complete");
+    const save = () => {
+      emitStatus(
+        videoId,
+        "recording",
+        "Finalizing collected video…",
+        lastProgress
+      );
+      settle(null, "saved");
+    };
     const cancel = () => settle(signal.reason || new DOMException("Canceled", "AbortError"));
     const fail = () =>
       settle(new Error("Video playback failed while collecting segments."));
 
-    activeRecordings.set(videoId, { save: finish, cancel });
+    activeRecordings.set(videoId, { save, cancel });
     if (signal.aborted) {
       cancel();
       return;
