@@ -74,6 +74,11 @@ export async function getFfmpegHostFrame() {
   return promise;
 }
 
+/** Start loading FFmpeg while a trim is recording instead of after Save. */
+export function preloadFfmpeg() {
+  return getFfmpegHostFrame().then(() => undefined);
+}
+
 export async function muxTracksLocally(videoId, tracks, startTime, duration) {
   const muxId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const frame = await getFfmpegHostFrame();

@@ -11,6 +11,7 @@ import {
   PAGE_MEDIA_DOWNLOAD_EVENT, TRIM_ICON, STOP_ICON,
 } from './constants.js';
 import { sendBlobStoreMessage } from './blob-store.js';
+import { preloadFfmpeg } from './blob-mux.js';
 import { downloadBlobFile } from './blob-status.js';
 import { showToast } from './toast.js';
 import { refreshMediaActionState, setButtonLabel } from './action-ui.js';
@@ -351,6 +352,9 @@ export function triggerTrim(media, trimBtn) {
     } else {
       const startTime = Math.max(0, Number(media.currentTime) || 0);
       const filename = getTimestampedVideoName();
+      preloadFfmpeg().catch((error) => {
+        console.warn("[Media Downloader] FFmpeg preload failed:", error);
+      });
       canceledBlobJobs.delete(videoId);
       blobJobIntent.set(videoId, "trim");
       refreshMediaActionState(media);

@@ -2,8 +2,39 @@ import createFFmpegCore from "./ffmpeg-core.js";
 
 const CORE_URL = new URL("./ffmpeg-core.js", import.meta.url).href;
 const WASM_URL = new URL("./ffmpeg-core.wasm", import.meta.url).href;
+let ffmpegCorePromise = null;
+let activeLogSink = null;
+
+function getFfmpegCore() {
+  if (!ffmpegCorePromise) {
+    ffmpegCorePromise = createFFmpegCore({
+      print: (line) => activeLogSink?.(line),
+      printErr: (line) => activeLogSink?.(line),
+      mainScriptUrlOrBlob: `${CORE_URL}#${btoa(
+        JSON.stringify({ wasmURL: WASM_URL, workerURL: "" }),
+      )}`,
+    }).catch((error) => {
+      ffmpegCorePromise = null;
+      throw error;
+    });
+  }
+  return ffmpegCorePromise;
+}
 
 self.onmessage = async (event) => {
+  if (event.data?.action === "warmup") {
+    try {
+      await getFfmpegCore();
+      self.postMessage({ action: "warmed", ok: true });
+    } catch (error) {
+      self.postMessage({
+        action: "warmed",
+        ok: false,
+        error: error?.message || String(error),
+      });
+    }
+    return;
+  }
   if (event.data?.action === "release") {
     URL.revokeObjectURL(event.data.url);
     self.close();
@@ -23,13 +54,8 @@ self.onmessage = async (event) => {
     if (ffmpegLogs.length > 30) ffmpegLogs.shift();
   };
   try {
-    ffmpeg = await createFFmpegCore({
-      print: captureLog,
-      printErr: captureLog,
-      mainScriptUrlOrBlob: `${CORE_URL}#${btoa(
-        JSON.stringify({ wasmURL: WASM_URL, workerURL: "" }),
-      )}`,
-    });
+    activeLogSink = captureLog;
+    ffmpeg = await getFfmpegCore();
 
     const mountedBlobs = [];
     for (let i = 0; i < tracks.length; i++) {
@@ -170,6 +196,7 @@ self.onmessage = async (event) => {
     });
     self.close();
   } finally {
+    activeLogSink = null;
     if (ffmpeg) {
       try {
         ffmpeg.FS.unmount(inputDirectory);

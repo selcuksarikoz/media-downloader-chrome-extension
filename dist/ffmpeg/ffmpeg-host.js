@@ -1,5 +1,24 @@
 const CHANNEL = "imd:ffmpeg-host";
 const jobs = new Map();
+let preloadedWorker = createMuxWorker();
+preloadedWorker.postMessage({ action: "warmup" });
+
+function createMuxWorker() {
+  const worker = new Worker(
+    chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"),
+    { type: "module" },
+  );
+  worker.addEventListener("error", () => {
+    if (preloadedWorker === worker) preloadedWorker = null;
+  }, { once: true });
+  return worker;
+}
+
+function takePreloadedWorker() {
+  const worker = preloadedWorker || createMuxWorker();
+  preloadedWorker = null;
+  return worker;
+}
 
 window.addEventListener("message", (event) => {
   if (event.source !== parent || event.data?.channel !== CHANNEL) return;
@@ -73,9 +92,7 @@ async function startMux(muxId, tracks, startTime, duration) {
     );
     if (!jobs.has(muxId)) return;
 
-    worker = new Worker(chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"), {
-      type: "module",
-    });
+    worker = takePreloadedWorker();
     job.worker = worker;
   } catch (error) {
     jobs.delete(muxId);
