@@ -673,7 +673,7 @@ function startSourceTrim({
         throw new Error("Play the video before saving a trim.");
       }
       emitStatus(videoId, "recording", "Saving collected trim…", lastProgress);
-      const tracks = await getSourceTrimTracks(url, source, signal);
+      const tracks = await getSourceTrimTracks(url, source, videoId, signal);
       await requestFastMux(
         videoId,
         replaceExtension(filename, "mp4"),
@@ -700,7 +700,7 @@ function startSourceTrim({
     });
 }
 
-async function getSourceTrimTracks(url, source, signal) {
+async function getSourceTrimTracks(url, source, videoId, signal) {
   if (source?.kind === "media-source") {
     const capturedTracks = source.record.buffers
       .filter(
@@ -728,6 +728,16 @@ async function getSourceTrimTracks(url, source, signal) {
     if (blob.size) {
       return [{ mimeType: blob.type || "video/mp4", blob }];
     }
+  }
+
+  if (isTelegramProgressiveUrl(url)) {
+    const { blob, contentType } = await fetchTelegramProgressiveBlob(
+      url,
+      videoId,
+      signal,
+      "Downloading Telegram trim source in parallel…"
+    );
+    return [{ mimeType: contentType || blob.type || "video/mp4", blob }];
   }
 
   if (/^https?:/i.test(url)) {
@@ -1064,6 +1074,25 @@ async function downloadTelegramProgressiveVideo(
   videoId,
   signal
 ) {
+  const { blob, contentType } = await fetchTelegramProgressiveBlob(
+    url,
+    videoId,
+    signal,
+    "Downloading Telegram video in parallel…"
+  );
+  await validateVideoBlob(blob, signal);
+  signal.throwIfAborted();
+  const extension = /webm/i.test(contentType || blob.type) ? "webm" : "mp4";
+  sendBlobForDownload(blob, replaceExtension(filename, extension), videoId);
+  emitStatus(videoId, "complete", "Telegram video downloaded.", 100);
+}
+
+async function fetchTelegramProgressiveBlob(
+  url,
+  videoId,
+  signal,
+  progressMessage
+) {
   // Telegram's progressive URLs are virtual resources resolved by Telegram
   // Web's Service Worker. It requires a byte Range and caps each response at
   // 512 KiB, so download ranges in parallel just like Telegram's own download
@@ -1103,7 +1132,7 @@ async function downloadTelegramProgressiveVideo(
       emitStatus(
         videoId,
         "progress",
-        "Downloading Telegram video in parallel…",
+        progressMessage,
         Math.min(99, (loaded / fullSize) * 100)
       );
     }
@@ -1127,11 +1156,7 @@ async function downloadTelegramProgressiveVideo(
     );
   }
 
-  await validateVideoBlob(blob, signal);
-  signal.throwIfAborted();
-  const extension = /webm/i.test(contentType || blob.type) ? "webm" : "mp4";
-  sendBlobForDownload(blob, replaceExtension(filename, extension), videoId);
-  emitStatus(videoId, "complete", "Telegram video downloaded.", 100);
+  return { blob, contentType };
 }
 
 async function fetchTelegramProgressiveRange(url, start, end, signal) {
