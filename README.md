@@ -58,9 +58,8 @@ Use the extension only for media that you own or have permission to save.
   playback position. Click once to begin, then click **Save Trim** (or let the
   video reach the end) to lock the end point and save the segment as MP4. Direct,
   Blob, and reusable MediaSource inputs are supported. Final muxing or encoding
-  can continue briefly after the end point is locked. To keep exact cut points
-  while reducing FFmpeg processing time, trim output is optimized to a maximum
-  of 720p and 24 FPS; full downloads keep their original quality.
+  can continue briefly after the end point is locked. Trim output preserves the
+  source resolution and frame rate; full downloads keep the original media data.
 - The **Copy** button (clipboard icon) copies images in highest resolution and
   video current frames using the selected frame capture format so you can paste
   them directly into any application.

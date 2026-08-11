@@ -99,9 +99,9 @@ self.onmessage = async (event) => {
       "-map",
       audioIndex >= 0 ? `${audioIndex}:a:0` : `${videoIndex}:a:0?`,
     );
-    // Stream-copy cannot make a non-keyframe trim exact. Keep full downloads on
-    // the lossless packet-copy path, but make exact trim encoding substantially
-    // cheaper by limiting only trim outputs to 720p/24 fps.
+    // Stream-copy cannot make a non-keyframe trim exact. Re-encode trims at the
+    // source resolution and frame rate so the requested first frame is valid
+    // without reducing the source's visual quality.
     if (isTrim || videoNeedsH264) {
       args.push(
         "-c:v",
@@ -109,7 +109,7 @@ self.onmessage = async (event) => {
         "-preset",
         "ultrafast",
         "-crf",
-        isTrim ? "28" : "21",
+        "21",
         "-pix_fmt",
         "yuv420p",
         "-profile:v",
@@ -117,9 +117,6 @@ self.onmessage = async (event) => {
         "-tag:v",
         "avc1",
       );
-      if (isTrim) {
-        args.push("-vf", "scale=-2:min(720\\,ih),fps=24");
-      }
     } else {
       args.push("-c:v", "copy");
     }
