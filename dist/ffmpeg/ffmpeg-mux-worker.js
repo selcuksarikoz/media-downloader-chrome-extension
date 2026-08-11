@@ -54,10 +54,10 @@ self.onmessage = async (event) => {
     if (videoIndex < 0) throw new Error("No video track was captured.");
 
     const videoNeedsH264 =
-      /(?:vp0?9|av0?1)/i.test(tracks[videoIndex].mimeType || "") ||
+      /(?:vp0?[89]|av0?1)/i.test(tracks[videoIndex].mimeType || "") ||
       await blobContainsCodecTag(
         tracks[videoIndex].blob,
-        ["vp09", "av01"],
+        ["vp08", "vp09", "av01"],
       );
 
     const videoMimeType = tracks[videoIndex].mimeType || "";
@@ -80,9 +80,9 @@ self.onmessage = async (event) => {
     const args = [];
     // Input-side seeking lets FFmpeg jump to the nearest keyframe before it
     // starts decoding. Keeping -ss after every -i made a short trim near the
-    // end of a long video decode everything from timestamp 0 first. The trim
-    // is still re-encoded below, so FFmpeg decodes the short keyframe lead-in
-    // and produces an exact, independently playable first frame.
+    // end of a long video decode everything from timestamp 0 first. Trims are
+    // re-encoded from this nearby seek point so the requested first frame stays
+    // exact and independently decodable.
     for (const name of inputNames) {
       if (isTrim && startTime > 0) args.push("-ss", String(startTime));
       args.push("-i", name);
@@ -99,9 +99,9 @@ self.onmessage = async (event) => {
       "-map",
       audioIndex >= 0 ? `${audioIndex}:a:0` : `${videoIndex}:a:0?`,
     );
-    // Stream-copy can only begin on an existing keyframe. A trim commonly
-    // starts between keyframes, which leaves a blank/undecodable lead-in.
-    // Re-encode trims so their first requested frame is a real keyframe.
+    // Stream-copy cannot make a non-keyframe trim exact. Keep full downloads on
+    // the lossless packet-copy path, but make exact trim encoding substantially
+    // cheaper by limiting only trim outputs to 720p/24 fps.
     if (isTrim || videoNeedsH264) {
       args.push(
         "-c:v",
@@ -109,7 +109,7 @@ self.onmessage = async (event) => {
         "-preset",
         "ultrafast",
         "-crf",
-        "21",
+        isTrim ? "28" : "21",
         "-pix_fmt",
         "yuv420p",
         "-profile:v",
@@ -117,6 +117,9 @@ self.onmessage = async (event) => {
         "-tag:v",
         "avc1",
       );
+      if (isTrim) {
+        args.push("-vf", "scale=-2:min(720\\,ih),fps=24");
+      }
     } else {
       args.push("-c:v", "copy");
     }
