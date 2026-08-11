@@ -352,9 +352,13 @@ export function triggerTrim(media, trimBtn) {
     } else {
       const startTime = Math.max(0, Number(media.currentTime) || 0);
       const filename = getTimestampedVideoName();
-      preloadFfmpeg().catch((error) => {
-        console.warn("[Media Downloader] FFmpeg preload failed:", error);
-      });
+      // Blob/MediaSource trims are recorded into chunks during playback and do
+      // not need FFmpeg. Preload it only for direct/progressive source trims.
+      if (!mediaUrl.startsWith("blob:")) {
+        preloadFfmpeg().catch((error) => {
+          console.warn("[Media Downloader] FFmpeg preload failed:", error);
+        });
+      }
       canceledBlobJobs.delete(videoId);
       blobJobIntent.set(videoId, "trim");
       refreshMediaActionState(media);

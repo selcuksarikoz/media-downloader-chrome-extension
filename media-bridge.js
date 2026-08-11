@@ -565,6 +565,25 @@ window.addEventListener(TRIM_EVENT, (event) => {
     }
   }
 
+  // MediaSource videos already expose a live capture stream. Record their
+  // trim chunks while playback is happening, then concatenate those chunks on
+  // Save. Running the captured source through FFmpeg after Save repeats work
+  // that MediaRecorder has already completed and makes a short trim wait much
+  // longer than its recording time.
+  if (source?.kind === "media-source") {
+    source.record.lockCount += 1;
+    startJob({
+      url,
+      filename,
+      videoId,
+      video,
+      source,
+      startTime,
+      isTrim: true,
+    });
+    return;
+  }
+
   startSourceTrim({
     url,
     filename,
