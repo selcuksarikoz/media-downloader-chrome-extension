@@ -120,7 +120,8 @@ function handleContextMenuEvent(event) {
 
   if (!media) return;
 
-  event.preventDefault();
+  // Intentionally do not call preventDefault(): our media action menu and the
+  // browser's native context menu are both meant to open on the same click.
   event.stopPropagation();
   event.stopImmediatePropagation();
 
