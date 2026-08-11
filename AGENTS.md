@@ -146,6 +146,30 @@ For action-related changes, verify at minimum:
 Do not declare an action fix complete from a successful build alone. Add a
 targeted check when practical and exercise the affected interaction in Chrome.
 
+## Code organization: DRY and SOLID
+
+- **Single Responsibility**: Every module file must have one clear purpose.
+  Separate concerns: constants, state, UI rendering, action logic, media
+  capture, blob operations, messaging, and utilities belong in distinct files.
+- **No file may exceed 500 lines** of application logic (excluding blank lines
+  and comments). If a file approaches this limit, extract the next logical
+  responsibility into its own module.
+- **DRY**: Shared helpers (e.g. `showToast`, `createCaptureId`,
+  `getFrameCaptureFormat`) live in a single utility module and are imported
+  where needed. Never duplicate a function across files.
+- **Module structure**: Source files for each entry point live under
+  `src/<entry>/` (e.g. `src/content/`, `src/background/`, `src/bridge/`). Each
+  module uses ES module `import`/`export`. The entry point (`index.js`) wires
+  side-effect imports and calls `init()`.
+- **Dependency direction**: Utility modules import nothing from feature modules.
+  Feature modules import from utilities and state. The entry point imports
+  everything and orchestrates startup. Avoid circular side-effect dependencies
+  at module evaluation time.
+- **State ownership**: Mutable runtime state (Maps, Sets, WeakMaps, scalars)
+  lives in a dedicated `state.js` module with setter functions. Modules import
+  state values and setters; no module reassigns another module's top-level
+  binding directly.
+
 ## Build and repository hygiene
 
 - Edit source files, not minified `dist` files. `dist/` is tracked and is the
@@ -158,3 +182,14 @@ targeted check when practical and exercise the affected interaction in Chrome.
 - Required final checks: `node --check` for changed plain JavaScript files,
   `npm run build`, and `git diff --check`. Report any browser path that could not
   be exercised and why.
+
+## Decision-making: act, don't overthink
+
+- Do not overthink small, well-scoped requests. When the intent is clear, act
+  directly instead of exploring every alternative or asking for confirmation.
+- Never re-encode, re-process, or transform an already-available image just to
+  change its format (for example, do not convert existing images to
+  "progressive" JPEG). If the goal is only faster rendering, set the browser's
+  native loading hints instead.
+- Every image the extension creates for display or processing must set
+  `decoding = "async"` so it renders without blocking the page.

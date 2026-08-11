@@ -11,7 +11,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         background: resolve(__dirname, "background.js"),
-        content: resolve(__dirname, "content.js"),
+        content: resolve(__dirname, "src/content/index.js"),
         "media-bridge": resolve(__dirname, "media-bridge.js"),
         popup: resolve(__dirname, "popup.html"),
         options: resolve(__dirname, "options.html"),
