@@ -63,12 +63,19 @@ self.onmessage = async (event) => {
     const videoMimeType = tracks[videoIndex].mimeType || "";
     const audioMimeType =
       audioIndex >= 0 ? tracks[audioIndex].mimeType || "" : videoMimeType;
+    const isTrim =
+      Number.isFinite(startTime) &&
+      startTime >= 0 &&
+      Number.isFinite(duration) &&
+      duration > 0;
     const videoRequiresMp4 =
-      videoNeedsH264 || /mp4|avc1|avc3|h26[45]|hevc/i.test(videoMimeType);
+      isTrim || videoNeedsH264 ||
+      /mp4|avc1|avc3|h26[45]|hevc/i.test(videoMimeType);
     const useWebm =
       !videoRequiresMp4 && /webm|vp8|vp9/i.test(videoMimeType);
     const audioNeedsAac =
-      !useWebm && audioIndex >= 0 && /webm|opus|vorbis/i.test(audioMimeType);
+      isTrim ||
+      (!useWebm && audioIndex >= 0 && /webm|opus|vorbis/i.test(audioMimeType));
     outputName = useWebm ? "output.webm" : "output.mp4";
     const args = [];
     for (const name of inputNames) args.push("-i", name);
@@ -84,7 +91,10 @@ self.onmessage = async (event) => {
       "-map",
       audioIndex >= 0 ? `${audioIndex}:a:0` : `${videoIndex}:a:0?`,
     );
-    if (videoNeedsH264) {
+    // Stream-copy can only begin on an existing keyframe. A trim commonly
+    // starts between keyframes, which leaves a blank/undecodable lead-in.
+    // Re-encode trims so their first requested frame is a real keyframe.
+    if (isTrim || videoNeedsH264) {
       args.push(
         "-c:v",
         "libx264",
@@ -102,7 +112,9 @@ self.onmessage = async (event) => {
     } else {
       args.push("-c:v", "copy");
     }
-    if (audioIndex >= 0) {
+    if (isTrim) {
+      args.push("-c:a", "aac", "-b:a", "160k");
+    } else if (audioIndex >= 0) {
       if (audioNeedsAac) {
         args.push("-c:a", "aac", "-b:a", "160k");
       } else {

@@ -6,6 +6,7 @@ import {
   settings, mediaControls, trackedMedia, visibleMedia, pipState,
   mediaHoverListeners, lastPointerPosition, contextMenuEl, contextMenuMedia,
   blobJobIntent, activeBlobJobIds, videoTrimRecordings,
+  finalizingBlobJobIds,
   visibilityStyleCacheFrame, visibilityStyleCache, cachedModalsFrame,
   cachedModals,
   setLastPointerPosition, setVisibilityStyleCacheFrame, setCachedModalsFrame,
@@ -36,6 +37,7 @@ export function syncActionButtonState(media, btns) {
   const blobBusy = Boolean(videoId && activeBlobJobIds.has(videoId));
   const regularTrimActive = videoTrimRecordings.has(media);
   const trimActive = regularTrimActive || blobIntent === "trim";
+  const trimFinalizing = Boolean(videoId && finalizingBlobJobIds.has(videoId));
   const conflictingJob = regularTrimActive || blobBusy;
 
   btns.downloadBtn.disabled = conflictingJob;
@@ -46,16 +48,18 @@ export function syncActionButtonState(media, btns) {
   );
 
   if (!btns.trimBtn) return;
-  btns.trimBtn.disabled = blobBusy && blobIntent !== "trim";
+  btns.trimBtn.disabled = trimFinalizing || (blobBusy && blobIntent !== "trim");
   btns.trimBtn.dataset.recording = trimActive ? "true" : "false";
   btns.trimBtn.innerHTML = trimActive ? STOP_ICON : TRIM_ICON;
   setButtonLabel(
     btns.trimBtn,
-    trimActive
-      ? "Save trim"
-      : btns.trimBtn.disabled
-        ? "Video operation in progress"
-        : "Trim from current time",
+    trimFinalizing
+      ? "Finalizing trim…"
+      : trimActive
+        ? "Save trim"
+        : btns.trimBtn.disabled
+          ? "Video operation in progress"
+          : "Trim from current time",
   );
 }
 

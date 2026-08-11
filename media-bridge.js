@@ -565,33 +565,17 @@ window.addEventListener(TRIM_EVENT, (event) => {
     }
   }
 
-  if (isInstagramPage()) {
-    startInstagramTrim({
-      url,
-      filename,
-      videoId,
-      video,
-      startTime,
-      source,
-    });
-    return;
-  }
-
-  if (source?.kind === "media-source") source.record.lockCount += 1;
-  const job = {
+  startSourceTrim({
     url,
     filename,
     videoId,
     video,
     source,
     startTime,
-    isTrim: true,
-  };
-
-  startJob(job);
+  });
 });
 
-function startInstagramTrim({
+function startSourceTrim({
   url,
   filename,
   videoId,
@@ -607,15 +591,20 @@ function startInstagramTrim({
   let finishTrim;
   let rejectTrim;
   let settled = false;
+  let trimEnd = trimStart;
+  let lastProgress = 0;
 
   const stopRequested = new Promise((resolve, reject) => {
     finishTrim = resolve;
     rejectTrim = reject;
   });
-  const save = () => {
+  const save = (requestedEnd) => {
     if (settled) return;
     settled = true;
-    const trimEnd = Math.max(0, video.currentTime || 0);
+    const currentEnd = Number.isFinite(requestedEnd)
+      ? requestedEnd
+      : video.currentTime;
+    trimEnd = Math.max(trimEnd, Math.max(trimStart, currentEnd || 0));
     finishTrim(Math.max(0, trimEnd - trimStart));
   };
   const cancel = () => {
@@ -625,15 +614,26 @@ function startInstagramTrim({
     rejectTrim(signal.reason || new DOMException("Canceled", "AbortError"));
   };
   const reportProgress = () => {
-    const elapsed = Math.max(0, (video.currentTime || 0) - trimStart);
-    emitStatus(videoId, "progress", `Recording ${elapsed.toFixed(1)}s…`);
+    const currentTime = Number(video.currentTime) || 0;
+    if (currentTime >= trimStart) trimEnd = Math.max(trimEnd, currentTime);
+    const elapsed = Math.max(0, trimEnd - trimStart);
+    const remaining = Number.isFinite(video.duration)
+      ? Math.max(0, video.duration - trimStart)
+      : 0;
+    if (remaining > 0) {
+      lastProgress = Math.max(lastProgress, Math.min(100, (elapsed / remaining) * 100));
+    }
+    emitStatus(videoId, "progress", `Recording ${elapsed.toFixed(1)}s…`, lastProgress);
+    if (remaining > 0 && trimEnd >= video.duration - 0.15) save(video.duration);
   };
+  const saveAtEnd = () => save(video.duration);
 
   activeJobs.add(videoId);
   activeJobControllers.set(videoId, controller);
   activeRecordings.set(videoId, { save, cancel });
   if (source?.kind === "media-source") source.record.lockCount += 1;
   video.addEventListener("timeupdate", reportProgress, { passive: true });
+  video.addEventListener("ended", saveAtEnd, { once: true });
   emitStatus(videoId, "recording", "Starting trim recording…", 0);
   if (video.paused) video.play().catch(() => {});
 
@@ -644,7 +644,7 @@ function startInstagramTrim({
         throw new Error("Play the video before saving a trim.");
       }
       emitStatus(videoId, "recording", "Downloading and trimming video…", 0);
-      const tracks = await getInstagramTrimTracks(url, source, signal);
+      const tracks = await getSourceTrimTracks(url, source, signal);
       await requestFastMux(
         videoId,
         replaceExtension(filename, "mp4"),
@@ -658,11 +658,12 @@ function startInstagramTrim({
     .catch((error) => {
       if (error?.name === "AbortError") return;
       const message = error?.message || error?.name || "Trim failed.";
-      console.error("[Media Downloader] Instagram trim failed:", error);
+      console.error("[Media Downloader] Video trim failed:", error);
       emitStatus(videoId, "error", message);
     })
     .finally(() => {
       video.removeEventListener("timeupdate", reportProgress);
+      video.removeEventListener("ended", saveAtEnd);
       activeRecordings.delete(videoId);
       activeJobs.delete(videoId);
       activeJobControllers.delete(videoId);
@@ -670,7 +671,7 @@ function startInstagramTrim({
     });
 }
 
-async function getInstagramTrimTracks(url, source, signal) {
+async function getSourceTrimTracks(url, source, signal) {
   if (source?.kind === "media-source") {
     const independentTracks = getIndependentTracks(source.record.buffers);
     if (independentTracks.length) return independentTracks;
@@ -700,11 +701,11 @@ async function getInstagramTrimTracks(url, source, signal) {
     }
   }
 
-  if (isInstagramDirectVideoUrl(url)) {
+  if (/^https?:/i.test(url)) {
     return [{ mimeType: "video/mp4", url }];
   }
 
-  throw new Error("Instagram video source could not be prepared for trimming.");
+  throw new Error("The original video source could not be prepared for trimming.");
 }
 
 window.addEventListener(CONTROL_EVENT, (event) => {
@@ -870,7 +871,8 @@ function startJob(job) {
   emitStatus(
     videoId,
     "recording",
-    isTrim ? "Starting trim recording…" : "Preparing video download…"
+    isTrim ? "Starting trim recording…" : "Preparing video download…",
+    0
   );
   let operation;
   if (isTrim) {
@@ -879,7 +881,8 @@ function startJob(job) {
       videoId,
       filename,
       controller.signal,
-      startTime
+      startTime,
+      true
     );
   } else if (source?.kind === "blob") {
     operation = downloadKnownBlob(url, filename, videoId, controller.signal);
@@ -1310,7 +1313,7 @@ async function downloadCapturedMediaSource(
       "Retrying with real-time video capture…",
       0
     );
-    await recordMediaSource(video, videoId, filename, signal, startTime);
+    await recordMediaSource(video, videoId, filename, signal, startTime, startTime != null);
   }
 }
 
@@ -1662,12 +1665,19 @@ async function accelerateMediaCollection(video, signal, restartFromBeginning) {
   }
 }
 
-async function recordMediaSource(video, videoId, filename, signal, startTime) {
+async function recordMediaSource(
+  video,
+  videoId,
+  filename,
+  signal,
+  startTime,
+  isTrim = false
+) {
   signal.throwIfAborted();
   if (typeof video.captureStream !== "function" || !window.MediaRecorder) {
     throw new Error("This browser cannot record MediaSource video streams.");
   }
-  const hasStartTime = startTime != null && Number.isFinite(startTime) && startTime > 0;
+  const hasStartTime = isTrim && startTime != null && Number.isFinite(startTime);
   const hdr = isHdrVideo(video);
   const mimeType = getRecorderMimeType(hdr);
   if (!mimeType) {
@@ -1677,17 +1687,24 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   const outputName = replaceExtension(filename, ext);
 
   const captureVideo = video;
-  const wasLooping = captureVideo.loop;
+  const playbackState = {
+    paused: captureVideo.paused,
+    currentTime: captureVideo.currentTime,
+    playbackRate: captureVideo.playbackRate,
+    defaultPlaybackRate: captureVideo.defaultPlaybackRate,
+    muted: captureVideo.muted,
+    loop: captureVideo.loop,
+  };
   // The page usually recycles this element for the next reel/story by swapping
   // its source. Lock the source for the duration of the recording so the
   // download keeps capturing the original media instead of stalling or
   // switching to unrelated content.
   protectedVideos.add(captureVideo);
   const releaseCaptureHost = hostVideoForCapture(captureVideo);
-  // Automatic downloads record a single full pass; disable looping so the
-  // recording ends deterministically. Trims are user-stopped, so leave loop
-  // untouched there.
-  if (!hasStartTime) captureVideo.loop = false;
+  // Both actions must stop at the original end. Leaving loop enabled lets a
+  // trim wrap to zero, makes progress move backwards, and records unrelated
+  // frames from the beginning again.
+  captureVideo.loop = false;
   // Seeking a MediaSource-backed video is asynchronous. The recorder must not
   // start before the seek completes and the first frame at the target position
   // is rendered, otherwise the captureStream video track produces no frames
@@ -1718,7 +1735,7 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   } catch (error) {
     releaseCaptureHost();
     protectedVideos.delete(captureVideo);
-    if (!hasStartTime) captureVideo.loop = wasLooping;
+    restoreRecordingPlaybackState(captureVideo, playbackState, isTrim);
     throw error;
   }
   const chunks = [];
@@ -1726,12 +1743,20 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
   let releaseFramePump = () => {};
   let recordingStartPos = 0;
   let recordingElapsed = 0;
+  let recordingProgress = 0;
   let lastTimeupdateAt = Date.now();
   const reportProgress = () => {
     lastTimeupdateAt = Date.now();
-    recordingElapsed = Math.max(0, captureVideo.currentTime - recordingStartPos);
+    recordingElapsed = Math.max(
+      recordingElapsed,
+      Math.max(0, captureVideo.currentTime - recordingStartPos)
+    );
     const label = `Recording ${recordingElapsed.toFixed(1)}s…`;
-    emitStatus(videoId, "progress", label, getRecordingProgress(captureVideo, recordingStartPos));
+    recordingProgress = Math.max(
+      recordingProgress,
+      getRecordingProgress(captureVideo, recordingStartPos) || 0
+    );
+    emitStatus(videoId, "progress", label, recordingProgress);
   };
 
   const completion = new Promise((resolve, reject) => {
@@ -1804,6 +1829,9 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     captureVideo.addEventListener("timeupdate", reportProgress);
     await completion;
     signal.throwIfAborted();
+    if (isTrim) {
+      emitStatus(videoId, "recording", "Finalizing trim…", recordingProgress);
+    }
     const recordedBlob = new Blob(chunks, { type: recorder.mimeType });
     if (!recordedBlob.size) {
       throw new Error("No video data was captured; no file was created.");
@@ -1819,14 +1847,29 @@ async function recordMediaSource(video, videoId, filename, signal, startTime) {
     releaseFramePump();
     releaseCaptureHost();
     protectedVideos.delete(captureVideo);
-    if (!hasStartTime) captureVideo.loop = wasLooping;
     activeRecordings.delete(videoId);
     signal.removeEventListener("abort", cancel);
     captureVideo.removeEventListener("ended", stop);
     captureVideo.removeEventListener("timeupdate", reportProgress);
     if (recorder.state !== "inactive") recorder.stop();
-    captureVideo.pause();
+    restoreRecordingPlaybackState(captureVideo, playbackState, isTrim);
   }
+}
+
+function restoreRecordingPlaybackState(video, state, isTrim) {
+  video.loop = state.loop;
+  if (!isTrim) {
+    video.muted = state.muted;
+    try {
+      video.defaultPlaybackRate = state.defaultPlaybackRate;
+      video.playbackRate = state.playbackRate;
+    } catch {}
+    try {
+      if (Number.isFinite(state.currentTime)) video.currentTime = state.currentTime;
+    } catch {}
+  }
+  if (state.paused) nativePause.call(video);
+  else nativePlay.call(video).catch(() => {});
 }
 
 /** Resolve once an in-flight seek on the video completes. */

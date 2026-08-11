@@ -4,6 +4,7 @@ import {
 import {
   settings, popupVideoStatuses, activeBlobJobIds, capturedVideos,
   mediaControls, blobJobIntent, canceledBlobJobs,
+  finalizingBlobJobIds,
   blobDownloadStack, blobDownloadPanels, blobDownloadRequests,
   setBlobDownloadStack,
 } from './state.js';
@@ -15,8 +16,23 @@ import { refreshMediaActionState } from './action-ui.js';
 
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
+  const normalizedProgress = normalizeJobProgress(
+    popupVideoStatuses.get(videoId),
+    status,
+    progress,
+  );
   if (videoId) {
-    popupVideoStatuses.set(videoId, { status, message, progress });
+    if (
+      blobJobIntent.get(videoId) === "trim" &&
+      /(?:downloading and trimming|finalizing trim)/i.test(message || "")
+    ) {
+      finalizingBlobJobIds.add(videoId);
+    }
+    popupVideoStatuses.set(videoId, {
+      status,
+      message,
+      progress: normalizedProgress,
+    });
     if (ACTIVE_DOWNLOAD_STATES.has(status)) activeBlobJobIds.add(videoId);
     else activeBlobJobIds.delete(videoId);
 
@@ -26,7 +42,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
         videoId,
         status,
         message,
-        progress,
+        progress: normalizedProgress,
       });
     } catch {}
   }
@@ -73,7 +89,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     });
   }
 
-  updateBlobDownloadPanel(videoId, status, message, progress);
+  updateBlobDownloadPanel(videoId, status, message, normalizedProgress);
 
   if (status === "complete") {
     showToast(
@@ -98,10 +114,24 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     status === "error" ||
     status === "canceled"
   ) {
+    finalizingBlobJobIds.delete(videoId);
     blobJobIntent.delete(videoId);
   }
   if (video) refreshMediaActionState(video);
 });
+
+function normalizeJobProgress(previous, status, progress) {
+  if (status === "complete") return 100;
+  const current = Number.isFinite(progress)
+    ? Math.max(0, Math.min(100, progress))
+    : null;
+  if (!ACTIVE_DOWNLOAD_STATES.has(status)) return current;
+  if (!ACTIVE_DOWNLOAD_STATES.has(previous?.status)) return current;
+  if (!Number.isFinite(previous.progress)) return current;
+  return Number.isFinite(current)
+    ? Math.max(previous.progress, current)
+    : previous.progress;
+}
 
 window.addEventListener(BLOB_DATA_EVENT, async (event) => {
   const { blob, filename, videoId } = event.detail || {};
@@ -179,12 +209,23 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
     blobDownloadPanels.set(videoId, panel);
     blobDownloadStack.appendChild(panel);
   }
+  const isTrimJob = blobJobIntent.get(videoId) === "trim";
   const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
-  const canSave = status === "recording" || status === "progress";
-  const percent = Number.isFinite(progress)
+  const wasActive = panel.dataset.active === "true";
+  if (isActive && !wasActive) panel.dataset.maxProgress = "0";
+  panel.dataset.active = isActive ? "true" : "false";
+
+  const rawPercent = Number.isFinite(progress)
     ? Math.max(0, Math.min(100, Math.round(progress)))
     : null;
+  const previousPercent = Number(panel.dataset.maxProgress);
+  const percent = rawPercent === null
+    ? (Number.isFinite(previousPercent) ? previousPercent : null)
+    : Math.max(Number.isFinite(previousPercent) ? previousPercent : 0, rawPercent);
+  if (percent !== null) panel.dataset.maxProgress = String(percent);
 
+  panel.querySelector(".imd-download-title").textContent =
+    isTrimJob ? "Trim video" : "Video download";
   panel.querySelector(".imd-download-message").textContent =
     message || "Preparing video download\u2026";
   const fill = panel.querySelector(".imd-download-progress-fill");
@@ -192,7 +233,9 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
   fill.classList.toggle("imd-indeterminate", percent === null && isActive);
   panel.querySelector(".imd-download-percent").textContent =
     percent === null ? "" : `${percent}%`;
-  panel.querySelector(".imd-save-download").hidden = !canSave;
+  panel.querySelector(".imd-save-download").hidden = !(
+    isTrimJob && isActive && !finalizingBlobJobIds.has(videoId)
+  );
   panel.querySelector(".imd-cancel-download").hidden = !isActive;
 
   if (typeof blobDownloadStack.showPopover === "function") {
@@ -243,11 +286,15 @@ function createBlobDownloadPanel(videoId) {
       <span class="imd-download-percent"></span>
       <span>Keep this tab open</span>
       <div class="imd-download-actions">
-        <button type="button" class="imd-save-download">Save Now</button>
+        <button type="button" class="imd-save-download">Save Trim</button>
         <button type="button" class="imd-cancel-download">Cancel</button>
       </div>
     </div>`;
   panel.querySelector(".imd-save-download").addEventListener("click", () => {
+    finalizingBlobJobIds.add(videoId);
+    const video = capturedVideos.get(videoId);
+    if (video) refreshMediaActionState(video);
+    panel.querySelector(".imd-save-download").hidden = true;
     dispatchBlobControl(videoId, "save");
   });
   panel.querySelector(".imd-cancel-download").addEventListener("click", () => {

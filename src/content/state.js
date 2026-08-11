@@ -16,6 +16,7 @@ export const mediaHoverListeners = new WeakMap();
 export const instagramNativeControlState = new WeakMap();
 export const videoTrimRecordings = new Map();
 export const blobJobIntent = new Map();
+export const finalizingBlobJobIds = new Set();
 export const canceledBlobJobs = new Set();
 export const activeMuxWorkers = new Map();
 export const muxOutputWorkers = new Map();

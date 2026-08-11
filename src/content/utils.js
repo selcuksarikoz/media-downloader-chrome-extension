@@ -39,6 +39,10 @@ export function getSuggestedVideoName(video) {
   return `video-${Date.now()}.mp4`;
 }
 
+export function getTimestampedVideoName(extension = "mp4") {
+  return `video-${Date.now()}.${extension}`;
+}
+
 export function isInstagramPage() {
   return (
     location.hostname === "instagram.com" ||

@@ -317,9 +317,19 @@ chrome.runtime.onMessage.addListener((message) => {
 function applyStatus(videoId, update, shouldRender = true) {
   reportedVideoIds.add(videoId);
   if (Number.isFinite(update.progress)) {
-    itemProgress.set(videoId, update.progress);
+    const previous = itemProgress.get(videoId);
+    const next = Math.max(0, Math.min(100, update.progress));
+    itemProgress.set(
+      videoId,
+      Number.isFinite(previous) &&
+        (update.status === "progress" || update.status === "recording")
+        ? Math.max(previous, next)
+        : next,
+    );
   } else if (update.status === "progress" || update.status === "recording") {
-    itemProgress.set(videoId, null);
+    if (!Number.isFinite(itemProgress.get(videoId))) {
+      itemProgress.set(videoId, null);
+    }
   }
   if (update.status === "complete") {
     itemStates.set(videoId, "complete");

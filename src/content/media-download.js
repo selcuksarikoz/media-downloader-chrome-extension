@@ -1,10 +1,10 @@
 import {
   settings, canceledBlobJobs, blobDownloadRequests, activeBlobJobIds,
-  blobJobIntent, videoTrimRecordings,
+  blobJobIntent, finalizingBlobJobIds, videoTrimRecordings,
 } from './state.js';
 import {
   getSuggestedVideoName, isTelegramProgressiveUrl, isInstagramDirectVideoUrl,
-  isInstagramPage,
+  isInstagramPage, getTimestampedVideoName,
 } from './utils.js';
 import {
   BLOB_DOWNLOAD_EVENT, BLOB_TRIM_EVENT, BLOB_CONTROL_EVENT,
@@ -225,8 +225,17 @@ export function startTrimRecording(video) {
   });
 
   const startTime = video.currentTime;
+  const wasPaused = video.paused;
+  const wasLooping = video.loop;
   const chunks = [];
   let rejectPromise = null;
+  let restored = false;
+  const restorePlayback = () => {
+    if (restored) return;
+    restored = true;
+    video.loop = wasLooping;
+    if (wasPaused) video.pause();
+  };
 
   recorder.addEventListener("dataavailable", (e) => {
     if (e.data.size) chunks.push(e.data);
@@ -235,16 +244,19 @@ export function startTrimRecording(video) {
   const promise = new Promise((resolve, reject) => {
     rejectPromise = reject;
     recorder.addEventListener("stop", () => {
+      restorePlayback();
       const blob = new Blob(chunks, { type: recorder.mimeType });
       resolve(blob);
     });
     recorder.addEventListener(
       "error",
-      () =>
+      () => {
+        restorePlayback();
         reject(
           recorder.error ||
             new DOMException("Recording failed", "MediaRecorderError"),
-        ),
+        );
+      },
       { once: true },
     );
   });
@@ -252,23 +264,24 @@ export function startTrimRecording(video) {
   if (video.paused) {
     video.play().catch(() => {});
   }
+  video.loop = false;
 
   recorder.start(1000);
 
+  const save = () => {
+    video.removeEventListener("timeupdate", endCheck);
+    if (recorder.state !== "inactive") recorder.stop();
+    else restorePlayback();
+  };
   const endCheck = () => {
-    if (video.currentTime >= video.duration - 0.15) {
-      if (recorder.state !== "inactive") recorder.stop();
-    }
+    if (video.currentTime >= video.duration - 0.15) save();
   };
   video.addEventListener("timeupdate", endCheck, { passive: true });
 
   return {
     startTime,
     promise,
-    save: () => {
-      video.removeEventListener("timeupdate", endCheck);
-      if (recorder.state !== "inactive") recorder.stop();
-    },
+    save,
     cancel: () => {
       video.removeEventListener("timeupdate", endCheck);
       if (recorder.state !== "inactive") {
@@ -276,6 +289,7 @@ export function startTrimRecording(video) {
         recorder.stop();
         rejectPromise?.(new Error("Recording cancelled."));
       }
+      restorePlayback();
     },
   };
 }
@@ -315,11 +329,13 @@ export function triggerTrim(media, trimBtn) {
 
   const mediaUrl = getVideoUrl(media);
   const usesPageBridge =
-    mediaUrl.startsWith("blob:") || isInstagramDirectVideoUrl(mediaUrl);
+    mediaUrl.startsWith("blob:") || /^https?:/i.test(mediaUrl);
   if (usesPageBridge) {
     const videoId = media.dataset.imdCaptureId;
     const intent = blobJobIntent.get(videoId);
     if (intent === "trim") {
+      finalizingBlobJobIds.add(videoId);
+      refreshMediaActionState(media);
       window.dispatchEvent(
         new CustomEvent(BLOB_CONTROL_EVENT, {
           detail: { videoId, action: "save" },
@@ -333,6 +349,8 @@ export function triggerTrim(media, trimBtn) {
     } else if (activeBlobJobIds.has(videoId)) {
       showToast("A video operation is already in progress.");
     } else {
+      const startTime = Math.max(0, Number(media.currentTime) || 0);
+      const filename = getTimestampedVideoName();
       canceledBlobJobs.delete(videoId);
       blobJobIntent.set(videoId, "trim");
       refreshMediaActionState(media);
@@ -344,7 +362,7 @@ export function triggerTrim(media, trimBtn) {
       sendBlobStoreMessage({
         action: "job-start",
         jobId: videoId,
-        filename: getSuggestedVideoName(media),
+        filename,
         folder: settings.downloadFolder,
         saveAs: settings.showSaveAs,
       });
@@ -353,9 +371,9 @@ export function triggerTrim(media, trimBtn) {
         new CustomEvent(BLOB_TRIM_EVENT, {
           detail: {
             url: mediaUrl,
-            filename: getSuggestedVideoName(media),
+            filename,
             videoId,
-            startTime: media.currentTime,
+            startTime,
           },
         }),
       );
@@ -396,10 +414,7 @@ export function triggerTrim(media, trimBtn) {
       clearInterval(elapsedTimer);
       if (!blob || !blob.size) return;
       const ext = blob.type.includes("webm") ? "webm" : "mp4";
-      const filename = getSuggestedVideoName(media).replace(
-        /\.[^.]+$/,
-        `-trim-${Math.round(rec.startTime)}.${ext}`,
-      );
+      const filename = getTimestampedVideoName(ext);
       downloadBlobFile(
         blob,
         filename,
@@ -423,5 +438,5 @@ export function triggerTrim(media, trimBtn) {
         trimBtn.dataset.recording = "false";
         trimBtn.disabled = false;
       }
-    });
+  });
 }
