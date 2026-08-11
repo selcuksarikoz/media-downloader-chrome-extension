@@ -78,8 +78,16 @@ self.onmessage = async (event) => {
       (!useWebm && audioIndex >= 0 && /webm|opus|vorbis/i.test(audioMimeType));
     outputName = useWebm ? "output.webm" : "output.mp4";
     const args = [];
-    for (const name of inputNames) args.push("-i", name);
-    if (Number.isFinite(startTime) && startTime > 0) {
+    // Input-side seeking lets FFmpeg jump to the nearest keyframe before it
+    // starts decoding. Keeping -ss after every -i made a short trim near the
+    // end of a long video decode everything from timestamp 0 first. The trim
+    // is still re-encoded below, so FFmpeg decodes the short keyframe lead-in
+    // and produces an exact, independently playable first frame.
+    for (const name of inputNames) {
+      if (isTrim && startTime > 0) args.push("-ss", String(startTime));
+      args.push("-i", name);
+    }
+    if (!isTrim && Number.isFinite(startTime) && startTime > 0) {
       args.push("-ss", String(startTime));
     }
     if (Number.isFinite(duration) && duration > 0) {

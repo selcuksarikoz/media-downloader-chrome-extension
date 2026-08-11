@@ -1,8 +1,22 @@
 # Media Downloader
 
-A Chrome extension for downloading images and videos from websites, especially
-Instagram, TikTok, and Telegram Web. It adds download, preview, and frame-capture
-controls directly to page media.
+A Chrome Manifest V3 extension for downloading images and videos from websites,
+including Instagram, Telegram Web, TikTok, and YouTube. It adds download, trim,
+copy, lightbox, and frame-capture controls directly to page media.
+
+## Site Compatibility
+
+Support depends on the media sources that each site exposes to the browser. Site
+updates can change which actions are available.
+
+| Site | Available actions | Notes |
+| --- | --- | --- |
+| Instagram | Download images and videos, trim videos, capture or copy the current frame, copy images, open the image lightbox, and use Picture-in-Picture. | Works with supported posts, Reels, and Stories when a direct CDN URL or captured MediaSource data is available. |
+| Telegram Web | Download images and videos, trim videos, capture or copy frames, copy images, open the image lightbox, and use Picture-in-Picture. | Progressive virtual video sources can be collected through ranged requests; Blob and MediaSource fallbacks are also supported. |
+| TikTok | Download visible images and videos, trim videos, capture or copy frames, copy images, open the image lightbox, and use Picture-in-Picture. | Availability depends on the direct, Blob, or MediaSource URL exposed by the current player. |
+| YouTube | Capture or copy the current frame and use Picture-in-Picture. Full download and trim are attempted for non-DRM progressive media or reusable captured MediaSource tracks. | Download and trim support is best effort. DRM-protected, encrypted, and some live or adaptive streams are not supported. |
+
+Use the extension only for media that you own or have permission to save.
 
 ## Behavior
 
@@ -24,24 +38,27 @@ controls directly to page media.
   Ctrl+scroll provides smooth zoom (1x–10x); scroll or use the scrollbar to pan
   when zoomed. Click outside the image or press ESC to close.
 - Regular image and video URLs use `chrome.downloads`.
-- Blob URLs are copied directly when readable.
+- Readable Blob URLs and captured source data are reused when available.
 - Single-buffer MediaSource streams reuse captured segments.
-- Separate MediaSource audio/video buffers are recorded in real time as MP4.
+- Separate captured MediaSource audio/video tracks are combined into one output
+  when possible; playback-assisted recording is used as a fallback.
 - Video downloads start immediately without a concurrency queue. Recorded
   segments are streamed to the extension's storage,
   so a download is finalized and saved even if the tab is closed or the page
   navigates mid-recording (a partial file is saved if recording was interrupted).
   Background downloads fall back to a data URL when blob URLs are unavailable
-  in the service worker context.
-- The preview button captures the video's current frame as JPG, PNG, or WebP and
-  opens that image in a new background tab. It works with direct and blob video
-  sources and does not open the video URL.
+  in the service worker context. **Save Now** stops an active collection or
+  recording pass and saves the valid media collected so far.
+- Preview is an image action. Videos use **Capture Frame** or **Copy Frame**, so
+  Blob and MediaSource videos never open a source URL or Base64 page as a video
+  preview.
 - The capture button captures the video's current frame and opens it in the
   in-page image lightbox. It does not start a video recording.
-- The **Trim** button (scissors icon) records a video segment starting from the
-  current playback position. Click once to begin recording, click again (or let
-  the video reach the end) to save the trimmed segment as MP4. The button shows
-  the elapsed recording time. Works on both blob and regular videos.
+- The **Trim** button (scissors icon) starts a video segment at the current
+  playback position. Click once to begin, then click **Save Trim** (or let the
+  video reach the end) to lock the end point and save the segment as MP4. Direct,
+  Blob, and reusable MediaSource inputs are supported. Final muxing or encoding
+  can continue briefly after the end point is locked.
 - The **Copy** button (clipboard icon) copies images in highest resolution and
   video current frames using the selected frame capture format so you can paste
   them directly into any application.
@@ -53,15 +70,16 @@ Instead of the hover action buttons, the extension can show a custom in-page men
 when you right-click media. Enable **Use right-click menu instead of hover buttons**
 in the settings.
 
-- Right-clicking an image or video opens a floating, pill-shaped menu with the same
-  circular action buttons that normally appear on hover (download, preview, capture
-  frame, open full size, picture-in-picture, trim, copy to clipboard).
+- Right-clicking an image or video opens a floating, pill-shaped menu with the
+  same applicable circular actions that normally appear on hover. Preview and
+  full-size lightbox actions are for images; Capture Frame, Picture-in-Picture,
+  and Trim are for videos.
 - Right-clicking a link that wraps media shows an "Open link in new tab" button at
   the top of the menu, opening the link in a background tab.
 - The menu respects the same visibility rules as the hover buttons (for example,
-  Preview follows its setting and PiP only shows when supported). Video Preview
-  remains available for blob videos because it previews a captured image frame.
-- The native browser context menu is suppressed over media while this mode is on.
+  image Preview follows its setting and PiP only shows when supported).
+- The custom media menu and Chrome's native context menu intentionally open
+  together, so native browser actions remain available.
 - The menu closes on outside click, `Escape`, scroll, resize, or when the window
   loses focus.
 - Download and trim buttons reflect live recording status (spinner/disabled state)
