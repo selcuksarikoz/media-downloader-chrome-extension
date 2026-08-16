@@ -123,10 +123,10 @@ function handleContextMenuEvent(event) {
 
   if (!media) return;
 
-  // Context-menu mode owns this interaction. Opening the browser menu as well
-  // leaves two independent menus fighting over focus and subsequent clicks.
-  event.preventDefault();
+  // Intentionally do not call preventDefault(): our media action menu and the
+  // browser's native context menu are both meant to open on the same click.
   event.stopPropagation();
+  event.stopImmediatePropagation();
 
   let linkEl =
     path.find((el) => el.tagName === "A" && el.hasAttribute("href")) ||
