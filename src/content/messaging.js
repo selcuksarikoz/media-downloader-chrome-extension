@@ -3,12 +3,16 @@ import {
   dismissedPopupVideoIds,
   popupVideoStatuses,
   activeBlobJobIds,
+  activeDirectDownloadIds,
+  pendingVideoActionIds,
   activeIndependentMuxes,
 } from './state.js';
 import { BLOB_STATUS_EVENT, BLOB_MUX_RESULT_EVENT } from './constants.js';
 import { releaseMuxUrl } from './blob-mux.js';
 import { processAllMedia } from './media-tracking.js';
 import { downloadMedia } from './media-download.js';
+import { refreshMediaActionState } from './action-ui.js';
+import { showToast } from './toast.js';
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.action === "independentMuxResult" && message.muxId) {
@@ -29,6 +33,23 @@ chrome.runtime.onMessage.addListener((message) => {
   }
   if (message?.action === "releaseMuxUrl" && message.url) {
     releaseMuxUrl(message.url);
+    return;
+  }
+  if (message?.action === "directDownloadStatus" && message.videoId) {
+    const { videoId, status, progress, message: statusMessage } = message;
+    popupVideoStatuses.set(videoId, {
+      status,
+      progress: Number.isFinite(progress) ? progress : null,
+      message: statusMessage,
+    });
+    if (status === "progress") activeDirectDownloadIds.add(videoId);
+    else activeDirectDownloadIds.delete(videoId);
+    const video = capturedVideos.get(videoId);
+    if (video) refreshMediaActionState(video);
+    if (status === "complete") showToast("Download complete.");
+    else if (status === "error") {
+      showToast(statusMessage || "Video download failed.");
+    }
   }
 });
 
@@ -75,7 +96,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "This video is no longer on the page." });
       return;
     }
-    if (activeBlobJobIds.has(message.videoId)) {
+    if (
+      activeBlobJobIds.has(message.videoId) ||
+      activeDirectDownloadIds.has(message.videoId) ||
+      pendingVideoActionIds.has(message.videoId)
+    ) {
       sendResponse({ ok: false, error: "This video is already downloading." });
       return;
     }
@@ -124,7 +149,8 @@ export function getPopupMediaList() {
       height: video.videoHeight || 0,
       poster:
         /^(?:https?:|data:image\/)/i.test(poster) ? poster : "",
-      active: activeBlobJobIds.has(videoId),
+      active:
+        activeBlobJobIds.has(videoId) || activeDirectDownloadIds.has(videoId),
       playing: !video.paused && !video.ended,
       downloadStatus,
     });

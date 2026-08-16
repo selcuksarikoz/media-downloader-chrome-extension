@@ -1,6 +1,7 @@
 import {
   settings, canceledBlobJobs, blobDownloadRequests, activeBlobJobIds,
-  blobJobIntent, finalizingBlobJobIds, videoTrimRecordings,
+  activeDirectDownloadIds, blobJobIntent, finalizingBlobJobIds,
+  pendingVideoActionIds, videoTrimRecordings,
 } from './state.js';
 import {
   getSuggestedVideoName, isTelegramProgressiveUrl, isInstagramDirectVideoUrl,
@@ -25,23 +26,54 @@ import { captureVideoFrame } from './capture-core.js';
 
 /** Download the highest resolution version of an image or video. */
 export async function downloadMedia(media, preferredUrl) {
-  const src =
-    preferredUrl ||
-    (media.tagName === "IMG"
+  const requestedVideoId = media.tagName === "VIDEO"
+    ? media.dataset.imdCaptureId
+    : null;
+  if (
+    requestedVideoId &&
+    (
+      pendingVideoActionIds.has(requestedVideoId) ||
+      activeBlobJobIds.has(requestedVideoId) ||
+      activeDirectDownloadIds.has(requestedVideoId)
+    )
+  ) {
+    showToast("A video operation is already in progress.");
+    return;
+  }
+  const releasePendingAction = () => {
+    if (!requestedVideoId) return;
+    pendingVideoActionIds.delete(requestedVideoId);
+    refreshMediaActionState(media);
+  };
+  if (requestedVideoId) {
+    pendingVideoActionIds.add(requestedVideoId);
+    refreshMediaActionState(media);
+  }
+
+  let src;
+  try {
+    src = preferredUrl || (media.tagName === "IMG"
       ? await resolveHighestResolutionImageUrl(media)
       : await resolveHighestResolutionVideoUrl(media));
+  } catch (error) {
+    releasePendingAction();
+    throw error;
+  }
   if (!src) {
-    console.error("Media has no source.");
+    releasePendingAction();
+    showToast("Media source is not available.");
     return;
   }
 
   if (media.tagName === "VIDEO" && src.startsWith("blob:")) {
     await streamBlobVideo(media, src);
+    releasePendingAction();
     return;
   }
 
   if (media.tagName === "VIDEO" && isTelegramProgressiveUrl(src)) {
     streamPageVideo(media, src);
+    releasePendingAction();
     return;
   }
 
@@ -50,26 +82,46 @@ export async function downloadMedia(media, preferredUrl) {
     isInstagramDirectVideoUrl(src)
   ) {
     streamPageVideo(media, src);
+    releasePendingAction();
     return;
   }
 
-  const response = await new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({
-      action: "download",
-      url: src,
-      mediaType: media.tagName === "VIDEO" ? "video" : "image",
-      videoId: media.dataset.imdCaptureId,
-      folder: settings.downloadFolder,
-      saveAs: settings.showSaveAs,
-    }, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(result);
+  const directVideoId = requestedVideoId;
+  if (directVideoId) {
+    activeDirectDownloadIds.add(directVideoId);
+  }
+  releasePendingAction();
+
+  let response;
+  try {
+    response = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: "download",
+        url: src,
+        mediaType: media.tagName === "VIDEO" ? "video" : "image",
+        videoId: directVideoId,
+        folder: settings.downloadFolder,
+        saveAs: settings.showSaveAs,
+      }, (result) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(result);
+      });
     });
-  });
+  } catch (error) {
+    if (directVideoId) {
+      activeDirectDownloadIds.delete(directVideoId);
+      refreshMediaActionState(media);
+    }
+    throw error;
+  }
   if (!response?.ok) {
+    if (directVideoId) {
+      activeDirectDownloadIds.delete(directVideoId);
+      refreshMediaActionState(media);
+    }
     throw new Error(response?.error || "Download failed.");
   }
   showToast(
@@ -318,6 +370,17 @@ export function togglePictureInPicture(video) {
 
 /** Start or stop a trim recording for a video (used by button and context menu). */
 export function triggerTrim(media, trimBtn) {
+  const videoId = media.dataset.imdCaptureId;
+  if (
+    videoId &&
+    (
+      pendingVideoActionIds.has(videoId) ||
+      activeDirectDownloadIds.has(videoId)
+    )
+  ) {
+    showToast("A video operation is already in progress.");
+    return;
+  }
   const recording = videoTrimRecordings.get(media);
   if (recording) {
     recording.save();

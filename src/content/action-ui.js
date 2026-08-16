@@ -5,12 +5,13 @@ import {
 import {
   settings, mediaControls, trackedMedia, visibleMedia, pipState,
   mediaHoverListeners, lastPointerPosition, contextMenuEl, contextMenuMedia,
-  blobJobIntent, activeBlobJobIds, videoTrimRecordings,
+  blobJobIntent, activeBlobJobIds, activeDirectDownloadIds,
+  pendingVideoActionIds, videoTrimRecordings,
   finalizingBlobJobIds,
   visibilityStyleCacheFrame, visibilityStyleCache, cachedModalsFrame,
-  cachedModals,
+  cachedModals, repositionFrame, pointerFrame,
   setLastPointerPosition, setVisibilityStyleCacheFrame, setCachedModalsFrame,
-  setCachedModals,
+  setCachedModals, setRepositionFrame, setPointerFrame,
 } from './state.js';
 import { getInstagramReelLink, getActionRect } from './instagram.js';
 
@@ -37,7 +38,12 @@ export function syncActionButtonState(media, btns) {
   const regularTrimActive = videoTrimRecordings.has(media);
   const trimActive = regularTrimActive || blobIntent === "trim";
   const trimFinalizing = Boolean(videoId && finalizingBlobJobIds.has(videoId));
-  const conflictingJob = regularTrimActive || blobBusy;
+  const directDownloadBusy = Boolean(
+    videoId && activeDirectDownloadIds.has(videoId)
+  );
+  const actionPending = Boolean(videoId && pendingVideoActionIds.has(videoId));
+  const conflictingJob =
+    regularTrimActive || blobBusy || directDownloadBusy || actionPending;
 
   btns.downloadBtn.disabled = conflictingJob;
   btns.downloadBtn.classList.toggle("imd-recording", conflictingJob);
@@ -47,7 +53,9 @@ export function syncActionButtonState(media, btns) {
   );
 
   if (!btns.trimBtn) return;
-  btns.trimBtn.disabled = trimFinalizing || (blobBusy && blobIntent !== "trim");
+  btns.trimBtn.disabled =
+    trimFinalizing || directDownloadBusy || actionPending ||
+    (blobBusy && blobIntent !== "trim");
   btns.trimBtn.dataset.recording = trimActive ? "true" : "false";
   btns.trimBtn.innerHTML = trimActive ? STOP_ICON : TRIM_ICON;
   setButtonLabel(
@@ -123,20 +131,9 @@ export function refreshMediaActionState(media) {
 }
 
 export function isolateActionGroupEvents(group) {
-  const eventTypes = [
-    "pointerdown", "pointerup", "mousedown", "mouseup",
-    "touchstart", "touchend", "click", "dblclick",
-  ];
+  const eventTypes = ["pointerdown", "mousedown", "touchstart", "click", "dblclick"];
   eventTypes.forEach((type) => {
-    group.addEventListener(
-      type,
-      (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-      },
-      { passive: false },
-    );
+    group.addEventListener(type, (event) => event.stopPropagation());
   });
 }
 
@@ -171,7 +168,9 @@ export function showActionGroup(group, media) {
     try {
       group.showPopover();
     } catch (error) {
-      if (error.name !== "InvalidStateError") throw error;
+      if (error.name !== "InvalidStateError") {
+        console.warn("[Media Downloader] Controls could not be shown:", error);
+      }
     }
   }
   group.classList.add("imd-show");
@@ -188,7 +187,9 @@ export function hideActionGroup(group) {
     try {
       group.hidePopover();
     } catch (error) {
-      if (error.name !== "InvalidStateError") throw error;
+      if (error.name !== "InvalidStateError") {
+        console.warn("[Media Downloader] Controls could not be hidden:", error);
+      }
     }
   }
 }
@@ -276,24 +277,20 @@ export function repositionOpenControls() {
 
 export function scheduleReposition() {
   if (repositionFrame !== null) return;
-  repositionFrame = requestAnimationFrame(() => {
-    repositionFrame = null;
+  setRepositionFrame(requestAnimationFrame(() => {
+    setRepositionFrame(null);
     repositionOpenControls();
-  });
+  }));
 }
-
-let repositionFrame = null;
 
 export function schedulePointerReconciliation() {
   if (!lastPointerPosition) return;
   if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
-  pointerFrame = requestAnimationFrame(() => {
-    pointerFrame = null;
+  setPointerFrame(requestAnimationFrame(() => {
+    setPointerFrame(null);
     reconcileControlsAtPoint(lastPointerPosition.x, lastPointerPosition.y);
-  });
+  }));
 }
-
-let pointerFrame = null;
 
 export function reconcileControlsAtPoint(x, y) {
   const topMedia = findTopMediaAtPoint(x, y);

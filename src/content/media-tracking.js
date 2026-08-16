@@ -158,7 +158,7 @@ export function attachMediaActionHandlers(media, btns) {
   btns.downloadBtn.addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
     downloadMedia(media).catch((error) => {
-      console.error("Media download failed:", error);
+      console.warn("[Media Downloader] Download could not be started:", error);
       showToast(error?.message || "Download failed.");
     });
   });
@@ -174,13 +174,12 @@ export function attachMediaActionHandlers(media, btns) {
     captureVideoFrame(media)
       .then(({ blobUrl, dataUrl }) => {
         if (dataUrl) {
-          openLightbox(media, dataUrl, blobUrl);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
+          openLightbox(media, dataUrl, blobUrl, { revokeDownloadUrl: true });
           showToast("Frame captured.");
         }
       })
       .catch((error) => {
-        console.error("Video frame capture failed:", error);
+        console.warn("[Media Downloader] Video frame capture failed:", error);
         showToast(`Frame capture failed: ${error?.message || "unknown error"}`);
       });
   });
@@ -209,7 +208,7 @@ export function attachMediaActionHandlers(media, btns) {
         setButtonLabel(btns.copyBtn, isVideo ? "Copy current frame to clipboard" : "Copy image to clipboard");
       }, 1500);
     } catch (error) {
-      console.error("Copy to clipboard failed:", error);
+      console.warn("[Media Downloader] Copy to clipboard failed:", error);
       setButtonLabel(btns.copyBtn, "Copy failed");
       showToast("Copy to clipboard failed.");
     }
@@ -314,21 +313,13 @@ export function findTrackedAncestor(el) {
   let node = el;
   while (node && node !== document.body) {
     if (trackedMedia.has(node)) return node;
-    const found = node.querySelector?.("img[data-imd-media-type], video[data-imd-media-type]");
-    if (found && trackedMedia.has(found)) return found;
-    node = node.parentElement;
+    node = node.parentElement || node.getRootNode?.()?.host;
   }
   return null;
 }
 
 export function getMediaAtPoint(x, y) {
-  const originals = [];
-  for (const [el] of trackedMedia) {
-    originals.push([el, el.style.pointerEvents]);
-    el.style.pointerEvents = "auto";
-  }
   const stack = document.elementsFromPoint(x, y);
-  for (let i = originals.length - 1; i >= 0; i--) originals[i][0].style.pointerEvents = originals[i][1];
   for (const el of stack) {
     const found = findTrackedAncestor(el);
     if (found) return found;

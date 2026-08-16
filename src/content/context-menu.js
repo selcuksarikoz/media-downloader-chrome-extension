@@ -21,11 +21,11 @@ import { showToast } from './toast.js';
 
 /** Close and remove the custom right-click menu if it is open. */
 export function closeContextMenu() {
-  if (contextMenuEl) {
-    contextMenuEl.remove();
-    setContextMenuEl(null);
-    setContextMenuMedia(null);
-  }
+  const activeElement = document.activeElement;
+  if (contextMenuEl?.contains(activeElement)) activeElement.blur();
+  contextMenuEl?.remove();
+  setContextMenuEl(null);
+  setContextMenuMedia(null);
 }
 
 /** Open the custom right-click menu for a media element near the cursor. */
@@ -70,7 +70,12 @@ export function openContextMenu(media, x, y, linkEl) {
     attachMediaActionHandlers(media, btns);
     btns.buttons.forEach((button) => {
       button.setAttribute("role", "menuitem");
-      button.addEventListener("click", closeContextMenu);
+      button.addEventListener("click", () => {
+        // Never remove the event target during capture. Let its action listener
+        // run first, release any DOM focus, then remove the menu normally.
+        button.blur();
+        closeContextMenu();
+      });
       menu.appendChild(button);
     });
   }
@@ -112,18 +117,16 @@ function handleContextMenuEvent(event) {
 
   for (const el of path) {
     if (trackedMedia.has(el)) { media = el; break; }
-    const found = el.querySelector?.("img[data-imd-media-type], video[data-imd-media-type]");
-    if (found && trackedMedia.has(found)) { media = found; break; }
   }
 
   if (!media) media = getMediaAtPoint(event.clientX, event.clientY);
 
   if (!media) return;
 
-  // Intentionally do not call preventDefault(): our media action menu and the
-  // browser's native context menu are both meant to open on the same click.
+  // Context-menu mode owns this interaction. Opening the browser menu as well
+  // leaves two independent menus fighting over focus and subsequent clicks.
+  event.preventDefault();
   event.stopPropagation();
-  event.stopImmediatePropagation();
 
   let linkEl =
     path.find((el) => el.tagName === "A" && el.hasAttribute("href")) ||

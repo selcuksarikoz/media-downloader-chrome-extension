@@ -100,11 +100,10 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
         : "Download complete.",
     );
   } else if (status === "error") {
-    console.error(message);
+    console.warn("[Media Downloader] Video job failed:", message);
     sendBlobStoreMessage({ action: "cancel", jobId: videoId });
     showToast(message || "Download failed.");
   } else if (status === "canceled") {
-    console.error(message);
     canceledBlobJobs.add(videoId);
     cancelLocalMux(videoId);
     sendBlobStoreMessage({ action: "cancel", jobId: videoId });
@@ -176,7 +175,7 @@ export function downloadBlobFile(blob, filename, folder, saveAs) {
       },
       () => {
         if (chrome.runtime.lastError) {
-          console.error(
+          console.warn(
             "Blob download failed:",
             chrome.runtime.lastError.message,
           );

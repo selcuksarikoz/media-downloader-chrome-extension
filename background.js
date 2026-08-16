@@ -10,6 +10,9 @@ const portJobSets = new Map();
 const activeBlobUrls = new Map();
 const activePreparedDownloads = new Map();
 const downloadProgressTimers = new Map();
+const downloadFocusTargets = new Map();
+const DIRECT_DOWNLOAD_STORAGE_KEY = "activeDirectDownloads";
+let directDownloadPersistQueue = Promise.resolve();
 const OFFSCREEN_DOCUMENT_PATH = "ffmpeg/ffmpeg-offscreen.html";
 let creatingOffscreenDocument = null;
 
@@ -73,7 +76,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.action === "download") {
-    downloadMedia(message)
+    downloadMedia(message, sender.tab?.id)
       .then((downloadId) => sendResponse({ ok: true, downloadId }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -222,10 +225,11 @@ async function fetchMedia(url) {
 
 function handleBlobStorePort(port) {
   const jobIds = new Set();
+  const sourceTabId = port.sender?.tab?.id;
   portJobSets.set(port, jobIds);
   port.onMessage.addListener((message) => {
     if (message?.jobId) jobIds.add(message.jobId);
-    handleStoreMessage(message)
+    handleStoreMessage(message, sourceTabId)
       .then(() => {
         if (message?.requestId) {
           port.postMessage({ requestId: message.requestId, ok: true });
@@ -249,11 +253,11 @@ function handleBlobStorePort(port) {
 
 const jobQueues = new Map();
 
-function handleStoreMessage(message) {
+function handleStoreMessage(message, tabId) {
   if (!message?.jobId) return Promise.resolve();
   const jobId = message.jobId;
   const previous = jobQueues.get(jobId) || Promise.resolve();
-  const next = previous.then(() => handleStoreMessageNow(message));
+  const next = previous.then(() => handleStoreMessageNow(message, tabId));
   const chained = next.catch(() => {});
   jobQueues.set(jobId, chained);
   chained.finally(() => {
@@ -262,7 +266,7 @@ function handleStoreMessage(message) {
   return next;
 }
 
-async function handleStoreMessageNow(message) {
+async function handleStoreMessageNow(message, tabId) {
   const { jobId } = message;
   if (message.action === "job-start") {
     const meta = (await getJobMeta(jobId)) || {};
@@ -271,6 +275,7 @@ async function handleStoreMessageNow(message) {
       filename: message.filename || meta.filename || "",
       folder: message.folder || meta.folder || "",
       saveAs: message.saveAs === true || meta.saveAs === true,
+      tabId: Number.isInteger(tabId) ? tabId : meta.tabId,
       status: "recording",
       seq: meta.seq || 0,
       finalBlob: meta.finalBlob || null,
@@ -288,6 +293,7 @@ async function handleStoreMessageNow(message) {
       filename: message.filename || meta.filename || "",
       folder: message.folder || meta.folder || "",
       saveAs: message.saveAs === true || meta.saveAs === true,
+      tabId: Number.isInteger(tabId) ? tabId : meta.tabId,
       status: "done",
       seq: meta.seq || 0,
       finalBlob: message.blob,
@@ -376,6 +382,7 @@ async function downloadJob(jobId) {
             reject(new Error(chrome.runtime.lastError.message));
             return;
           }
+          trackSourceFocus(id, meta.tabId);
           resolve(id);
         },
       );
@@ -425,6 +432,11 @@ function createDownloadableUrl(blob) {
 chrome.downloads.onChanged.addListener((delta) => {
   const state = delta.state?.current;
   if (state !== "complete" && state !== "interrupted") return;
+  const focusTabId = downloadFocusTargets.get(delta.id);
+  if (focusTabId) {
+    downloadFocusTargets.delete(delta.id);
+    restoreSourceTabFocus(focusTabId);
+  }
   stopDownloadProgress(delta.id, state);
   const prepared = activePreparedDownloads.get(delta.id);
   if (prepared) {
@@ -641,7 +653,7 @@ setTimeout(() => finalizeInterruptedJobs(null), 5000);
 // Regular (URL) media downloads
 // ---------------------------------------------------------------------------
 
-function downloadMedia({ url, folder, saveAs, mediaType, videoId }) {
+function downloadMedia({ url, folder, saveAs, mediaType, videoId }, tabId) {
   return new Promise((resolve, reject) => {
     if (typeof url !== "string" || !url) {
       reject(new TypeError("Download URL must be a non-empty string."));
@@ -669,15 +681,49 @@ function downloadMedia({ url, folder, saveAs, mediaType, videoId }) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
-        if (videoId) startDownloadProgress(downloadId, videoId);
+        trackSourceFocus(downloadId, tabId);
+        if (videoId) startDownloadProgress(downloadId, videoId, tabId);
         resolve(downloadId);
       },
     );
   });
 }
 
-function startDownloadProgress(downloadId, videoId) {
+/**
+ * Dia can leave its web contents without an active click target after closing
+ * a native download sheet. Restore the originating window only when its tab is
+ * still active, so a user-initiated tab switch is never undone.
+ */
+async function restoreSourceTabFocus(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.active || !Number.isInteger(tab.windowId)) return;
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await chrome.tabs.update(tabId, { active: true });
+  } catch {}
+}
+
+async function trackSourceFocus(downloadId, tabId) {
+  if (!Number.isInteger(downloadId) || !Number.isInteger(tabId)) return;
+  downloadFocusTargets.set(downloadId, tabId);
+  try {
+    const [item] = await chrome.downloads.search({ id: downloadId });
+    if (!item) {
+      downloadFocusTargets.delete(downloadId);
+      return;
+    }
+    if (item?.state !== "complete" && item?.state !== "interrupted") return;
+    if (downloadFocusTargets.get(downloadId) !== tabId) return;
+    downloadFocusTargets.delete(downloadId);
+    restoreSourceTabFocus(tabId);
+  } catch {}
+}
+
+function startDownloadProgress(downloadId, videoId, tabId) {
   if (!Number.isInteger(downloadId) || !videoId) return;
+  const existing = downloadProgressTimers.get(downloadId);
+  if (existing) clearInterval(existing.timer);
   const publish = async () => {
     try {
       const [item] = await chrome.downloads.search({ id: downloadId });
@@ -686,22 +732,34 @@ function startDownloadProgress(downloadId, videoId) {
         item.totalBytes > 0
           ? Math.min(100, (item.bytesReceived / item.totalBytes) * 100)
           : null;
+      if (item.state === "complete" || item.state === "interrupted") {
+        stopDownloadProgress(downloadId, item.state);
+        return;
+      }
       chrome.runtime.sendMessage({
         action: "popupMediaStatus",
         videoId,
-        status: item.state === "complete" ? "complete" : "progress",
+        status: "progress",
         message: "Downloading video…",
         progress,
       }).catch(() => {});
-      if (item.state === "complete" || item.state === "interrupted") {
-        stopDownloadProgress(downloadId, item.state);
+      if (tabId) {
+        chrome.tabs.sendMessage(tabId, {
+          action: "directDownloadStatus",
+          videoId,
+          status: "progress",
+          message: "Downloading video…",
+          progress,
+        }).catch(() => {});
       }
     } catch {}
   };
   downloadProgressTimers.set(downloadId, {
     videoId,
+    tabId,
     timer: setInterval(publish, 500),
   });
+  persistDirectDownloadProgress();
   publish();
 }
 
@@ -710,6 +768,7 @@ function stopDownloadProgress(downloadId, state) {
   if (!tracked) return;
   clearInterval(tracked.timer);
   downloadProgressTimers.delete(downloadId);
+  persistDirectDownloadProgress();
   chrome.runtime.sendMessage({
     action: "popupMediaStatus",
     videoId: tracked.videoId,
@@ -718,7 +777,60 @@ function stopDownloadProgress(downloadId, state) {
       state === "complete" ? "Video downloaded." : "Video download interrupted.",
     progress: state === "complete" ? 100 : null,
   }).catch(() => {});
+  if (tracked.tabId) {
+    chrome.tabs.sendMessage(tracked.tabId, {
+      action: "directDownloadStatus",
+      videoId: tracked.videoId,
+      status: state === "complete" ? "complete" : "error",
+      message:
+        state === "complete" ? "Video downloaded." : "Video download interrupted.",
+      progress: state === "complete" ? 100 : null,
+    }).catch(() => {});
+  }
 }
+
+function persistDirectDownloadProgress() {
+  const entries = [...downloadProgressTimers].map(
+    ([downloadId, { videoId, tabId }]) => ({ downloadId, videoId, tabId }),
+  );
+  directDownloadPersistQueue = directDownloadPersistQueue
+    .catch(() => {})
+    .then(() => chrome.storage.session.set({
+      [DIRECT_DOWNLOAD_STORAGE_KEY]: entries,
+    }))
+    .catch(() => {});
+}
+
+async function restoreDirectDownloadProgress() {
+  try {
+    const stored = await chrome.storage.session.get(DIRECT_DOWNLOAD_STORAGE_KEY);
+    const entries = stored[DIRECT_DOWNLOAD_STORAGE_KEY];
+    if (!Array.isArray(entries)) return;
+    for (const { downloadId, videoId, tabId } of entries) {
+      if (!Number.isInteger(downloadId) || !videoId) continue;
+      const [item] = await chrome.downloads.search({ id: downloadId });
+      if (!item || item.state === "complete" || item.state === "interrupted") {
+        if (tabId) {
+          const complete = item?.state === "complete";
+          chrome.tabs.sendMessage(tabId, {
+            action: "directDownloadStatus",
+            videoId,
+            status: complete ? "complete" : "error",
+            message: complete
+              ? "Video downloaded."
+              : "Video download was interrupted.",
+            progress: complete ? 100 : null,
+          }).catch(() => {});
+        }
+        continue;
+      }
+      startDownloadProgress(downloadId, videoId, tabId);
+    }
+    persistDirectDownloadProgress();
+  } catch {}
+}
+
+restoreDirectDownloadProgress();
 
 function downloadPreparedUrl(
   { url, filename, folder, saveAs },
@@ -753,6 +865,7 @@ function downloadPreparedUrl(
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
+        trackSourceFocus(downloadId, tabId);
         activePreparedDownloads.set(downloadId, { url, tabId, offscreenMuxId });
         resolve(downloadId);
       },

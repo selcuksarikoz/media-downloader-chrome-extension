@@ -11,28 +11,42 @@ import { repositionOpenControls } from './action-ui.js';
  * `url` is the display URL (data: URLs render reliably on every page).
  * `downloadUrl` is the original media URL used for downloads/previews.
  */
-export function openLightbox(media, url, downloadUrl) {
-  if (media.tagName !== "IMG" && !url) return;
-  if (lightboxOpen) return;
+export async function openLightbox(media, url, downloadUrl, options = {}) {
+  const revokeUnusedDownloadUrl = () => {
+    if (options.revokeDownloadUrl && downloadUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(downloadUrl);
+    }
+  };
+  if (media.tagName !== "IMG" && !url) {
+    revokeUnusedDownloadUrl();
+    return false;
+  }
+  if (lightboxOpen) {
+    revokeUnusedDownloadUrl();
+    return false;
+  }
 
-  const promise = url
-    ? Promise.resolve(url)
-    : resolveHighestResolutionImageUrl(media);
-  promise
-    .then((resolvedUrl) => {
-      if (!resolvedUrl) return;
+  // Reserve the lightbox before resolving a remote image URL. Without this,
+  // repeated clicks can create multiple full-page overlays; closing one then
+  // leaves an invisible overlay intercepting every page interaction.
+  setLightboxOpen(true);
+  let overlay = null;
+  let actions = null;
+  let cleanup = null;
+  try {
+      const resolvedUrl = url || await resolveHighestResolutionImageUrl(media);
+      if (!resolvedUrl) {
+        setLightboxOpen(false);
+        revokeUnusedDownloadUrl();
+        return false;
+      }
       const mediaUrl = downloadUrl || resolvedUrl;
-
-      setLightboxOpen(true);
-
-      const activeVideo = document.querySelector("video:not([paused])");
-      if (activeVideo) activeVideo.pause();
 
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = true;
       });
 
-      const overlay = document.createElement("div");
+      overlay = document.createElement("div");
       overlay.className = "imd-lightbox-overlay";
 
       const container = document.createElement("div");
@@ -50,11 +64,17 @@ export function openLightbox(media, url, downloadUrl) {
       // CORS headers the load fails; retry without crossOrigin and remember
       // the canvas will be tainted.
       let corsClean = true;
+      let retriedWithoutCors = false;
       img.addEventListener("error", () => {
-        if (!img.crossOrigin) return;
-        corsClean = false;
-        img.crossOrigin = null;
-        img.src = resolvedUrl;
+        if (!retriedWithoutCors && img.crossOrigin) {
+          retriedWithoutCors = true;
+          corsClean = false;
+          img.crossOrigin = null;
+          img.src = resolvedUrl;
+          return;
+        }
+        showToast("Image could not be loaded.");
+        close();
       });
       img.crossOrigin = "anonymous";
       img.src = resolvedUrl;
@@ -63,7 +83,7 @@ export function openLightbox(media, url, downloadUrl) {
       container.appendChild(stage);
       overlay.appendChild(container);
 
-      const actions = document.createElement("div");
+      actions = document.createElement("div");
       actions.className = "imd-lightbox-actions";
       actions.innerHTML = `
       <div class="imd-lightbox-actions-row">
@@ -120,33 +140,39 @@ export function openLightbox(media, url, downloadUrl) {
         },
         { once: true },
       );
-      actions.querySelector(".imd-down-btn").addEventListener("click", (e) => {
+      actions.querySelector(".imd-down-btn").addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (crop?.isActive()) {
           crop.save();
           return;
         }
-        // downloadMedia is async; for blob: URLs it dispatches the download
-        // request and the media bridge fetches the blob. Close only after it
-        // resolves so the blob URL is not revoked before the fetch completes.
-        downloadMedia(img, mediaUrl)
-          .catch((error) => {
-            console.error("Media download failed:", error);
-            showToast(error.message || "Download failed.");
-          })
-          .finally(() => close());
+        e.currentTarget.disabled = true;
+        const downloadPromise = downloadMedia(img, mediaUrl);
+        // Do not keep a full-page overlay mounted while Chrome accepts the
+        // download. Owned blob URLs remain valid for the cleanup grace period.
+        close();
+        try {
+          await downloadPromise;
+        } catch (error) {
+          console.warn("[Media Downloader] Download could not be started:", error);
+          showToast(error?.message || "Download failed.");
+        }
       });
       actions
         .querySelector(".imd-preview-btn")
-        .addEventListener("click", (e) => {
+        .addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          previewMedia(img, mediaUrl).catch((error) => {
-            console.error("Image preview failed:", error);
-            showToast(error?.message || "Preview failed.");
-          });
+          e.currentTarget.disabled = true;
+          const previewPromise = previewMedia(img, mediaUrl);
           close();
+          try {
+            await previewPromise;
+          } catch (error) {
+            console.warn("[Media Downloader] Image preview failed:", error);
+            showToast(error?.message || "Preview failed.");
+          }
         });
       const anchor =
         document.getElementById("MediaViewer")?.open
@@ -198,15 +224,24 @@ export function openLightbox(media, url, downloadUrl) {
       });
       startCrop = crop.start;
 
-      const cleanup = () => {
-        crop.cancel();
+      let closed = false;
+      cleanup = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          crop.cancel();
+        } catch (error) {
+          console.warn("[Media Downloader] Crop cleanup failed:", error);
+        }
         infoAbort.abort();
         document.removeEventListener("keydown", escHandler, true);
         overlay.removeEventListener("scroll", repositionOpenControls);
+        const activeElement = document.activeElement;
+        if (actions.contains(activeElement)) activeElement.blur();
         overlay.remove();
         actions.remove();
         setLightboxOpen(false);
-        if (mediaUrl.startsWith("blob:")) {
+        if (options.revokeDownloadUrl && mediaUrl.startsWith("blob:")) {
           setTimeout(() => URL.revokeObjectURL(mediaUrl), 60_000);
         }
         document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
@@ -335,8 +370,15 @@ export function openLightbox(media, url, downloadUrl) {
         },
         { passive: false },
       );
-    })
-    .catch((error) => {
-      console.error("Lightbox failed to load image:", error);
-    });
+      return true;
+  } catch (error) {
+    cleanup?.();
+    overlay?.remove();
+    actions?.remove();
+    setLightboxOpen(false);
+    revokeUnusedDownloadUrl();
+    console.warn("[Media Downloader] Lightbox could not be opened:", error);
+    showToast("Image could not be opened.");
+    return false;
+  }
 }

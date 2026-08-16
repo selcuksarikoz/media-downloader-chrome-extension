@@ -79,8 +79,8 @@ in the settings.
   the top of the menu, opening the link in a background tab.
 - The menu respects the same visibility rules as the hover buttons (for example,
   image Preview follows its setting and PiP only shows when supported).
-- The custom media menu and Chrome's native context menu intentionally open
-  together, so native browser actions remain available.
+- The custom media menu suppresses Chrome's native context menu only for the
+  tracked media that was right-clicked.
 - The menu closes on outside click, `Escape`, scroll, resize, or when the window
   loses focus.
 - Download and trim buttons reflect live recording status (spinner/disabled state)
