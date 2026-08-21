@@ -166,13 +166,16 @@ export function downloadBlobFile(blob, filename, folder, saveAs) {
   }
 
   if (typeof chrome !== "undefined" && chrome.downloads) {
+    const downloadOptions = {
+      url: blobUrl,
+      saveAs: useSaveAs === true,
+      conflictAction: "overwrite",
+    };
+    if (!downloadOptions.saveAs) {
+      downloadOptions.filename = downloadFilename;
+    }
     chrome.downloads.download(
-      {
-        url: blobUrl,
-        filename: downloadFilename,
-        saveAs: useSaveAs,
-        conflictAction: "overwrite",
-      },
+      downloadOptions,
       () => {
         if (chrome.runtime.lastError) {
           console.warn(

@@ -1,3 +1,5 @@
+import { buildBrowserDownloadOptions } from "./src/background/download-options.js";
+
 const FETCH_PORT = "imd-fetch-media";
 const BLOB_STORE_PORT = "imd-blob-store";
 
@@ -371,12 +373,11 @@ async function downloadJob(jobId) {
   try {
     downloadId = await new Promise((resolve, reject) => {
       chrome.downloads.download(
-        {
+        buildBrowserDownloadOptions({
           url,
           filename,
           saveAs: !filename.includes("/") && meta.saveAs === true,
-          conflictAction: "overwrite",
-        },
+        }),
         (id) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -670,12 +671,7 @@ function downloadMedia({ url, folder, saveAs, mediaType, videoId }, tabId) {
     }
 
     chrome.downloads.download(
-      {
-        url,
-        filename,
-        saveAs: saveAs === true,
-        conflictAction: "overwrite",
-      },
+      buildBrowserDownloadOptions({ url, filename, saveAs }),
       (downloadId) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
@@ -854,12 +850,7 @@ function downloadPreparedUrl(
       }
     }
     chrome.downloads.download(
-      {
-        url,
-        filename,
-        saveAs: saveAs === true,
-        conflictAction: "overwrite",
-      },
+      buildBrowserDownloadOptions({ url, filename, saveAs }),
       (downloadId) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
