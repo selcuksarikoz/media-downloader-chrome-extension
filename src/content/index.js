@@ -20,6 +20,10 @@ import {
 } from './media-tracking.js';
 import { updateAllButtonPositions, updatePreviewButtonVisibility } from './action-ui.js';
 import { closeContextMenu } from './context-menu.js';
+import {
+  applyAutoPictureInPictureSetting,
+  initAutoPictureInPicture,
+} from './auto-pip.js';
 import './blob-store.js';
 import './blob-mux.js';
 import './blob-status.js';
@@ -36,6 +40,7 @@ function init() {
       chrome.storage.sync.set({ downloadFolder: "" });
     }
     applyDomainAccess();
+    initAutoPictureInPicture();
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -50,6 +55,9 @@ function init() {
     if (changes.useContextMenu) {
       closeContextMenu();
       rebuildAllMedia();
+    }
+    if (changes.autoPictureInPicture) {
+      applyAutoPictureInPictureSetting();
     }
   });
 }
@@ -74,7 +82,7 @@ function isCurrentDomainBlacklisted() {
   });
 }
 
-/** Enable or disable the extension based on domain blacklist. */
+/** Enable or disable in-page media controls based on the domain blacklist. */
 function applyDomainAccess() {
   const shouldBeActive = !isCurrentDomainBlacklisted();
   if (shouldBeActive === extensionActive) return;
@@ -82,11 +90,13 @@ function applyDomainAccess() {
   if (extensionActive) {
     processAllMedia();
     startObserver();
+    applyAutoPictureInPictureSetting();
     return;
   }
 
   mediaMutationObserver?.disconnect();
   setMediaMutationObserver(null);
+  applyAutoPictureInPictureSetting();
   document.querySelectorAll("img, video").forEach((media) => {
     cleanupMedia(media);
   });

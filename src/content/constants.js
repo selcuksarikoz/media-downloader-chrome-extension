@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS = {
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   minWidth: 150,
   useContextMenu: false,
+  autoPictureInPicture: true,
 };
 
 export const ACTIVE_DOWNLOAD_STATES = new Set(["recording", "progress"]);
@@ -45,6 +46,7 @@ export const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
 export const CAPTURE_FROM_MSE_RESULT_EVENT = "imd:capture-from-mse-result";
 export const BLOB_STORE_PORT_NAME = "imd-blob-store";
 export const FETCH_MEDIA_PORT_NAME = "imd-fetch-media";
+export const AUTO_PIP_CONFIG_EVENT = "imd:auto-pip-config";
 
 export const DOWNLOAD_NAVIGATION_WARNING =
   "You cannot leave or reload this page while a download is in progress. " +

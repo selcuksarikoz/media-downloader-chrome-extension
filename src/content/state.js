@@ -14,6 +14,16 @@ export const activeBlobJobIds = new Set();
 export const activeDirectDownloadIds = new Set();
 export const pendingVideoActionIds = new Set();
 export const pipState = new WeakMap();
+export let autoPipVideo = null;
+export let autoPipRequest = null;
+export let autoPipConfiguredVideo = null;
+export let autoPipInitialized = false;
+export let autoPipRefreshFrame = null;
+export let autoPipMarkedVideo = null;
+export let autoPipMarkedVideoWasNative = false;
+export let autoPipMarkedVideoWasDisabled = false;
+export let autoPipMutationObserver = null;
+export let autoPipResizeObserver = null;
 export const mediaHoverListeners = new WeakMap();
 export const instagramNativeControlState = new WeakMap();
 export const videoTrimRecordings = new Map();
@@ -77,3 +87,23 @@ export function setCachedModals(modals) { cachedModals = modals; }
 export function setContextMenuEl(el) { contextMenuEl = el; }
 export function setContextMenuMedia(media) { contextMenuMedia = media; }
 export function setBlobDownloadStack(stack) { blobDownloadStack = stack; }
+export function setAutoPipVideo(video) { autoPipVideo = video; }
+export function setAutoPipRequest(promise) { autoPipRequest = promise; }
+export function setAutoPipConfiguredVideo(video) { autoPipConfiguredVideo = video; }
+export function setAutoPipInitialized(value) { autoPipInitialized = value; }
+export function setAutoPipRefreshFrame(frame) { autoPipRefreshFrame = frame; }
+export function setAutoPipMarkedVideo(
+  video,
+  wasNative = false,
+  wasDisabled = false,
+) {
+  autoPipMarkedVideo = video;
+  autoPipMarkedVideoWasNative = wasNative;
+  autoPipMarkedVideoWasDisabled = wasDisabled;
+}
+export function setAutoPipMutationObserver(observer) {
+  autoPipMutationObserver = observer;
+}
+export function setAutoPipResizeObserver(observer) {
+  autoPipResizeObserver = observer;
+}

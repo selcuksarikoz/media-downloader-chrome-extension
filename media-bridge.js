@@ -1,3 +1,7 @@
+import { initAutoPipBridge } from "./src/bridge/auto-pip.js";
+
+initAutoPipBridge();
+
 const DOWNLOAD_EVENT = "imd:download-blob-video";
 const TRIM_EVENT = "imd:trim-blob-video";
 const CONTROL_EVENT = "imd:control-blob-video";

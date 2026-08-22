@@ -23,6 +23,15 @@ Use the extension only for media that you own or have permission to save.
 - Controls are shown only for the visible media currently under the pointer.
 - Action buttons are circular with no transition delay for instant feedback.
 - Video controls include a Picture-in-Picture button (when supported).
+- Auto-PiP is enabled by default. Leaving a tab opens the first actively playing
+  video wider than 470 px in Picture-in-Picture when Chrome permits it; returning
+  closes only the PiP window opened automatically by the extension.
+- Auto-PiP uses a fixed 470 px width threshold; the configurable minimum media
+  size continues to apply only to in-page controls.
+- While Auto-PiP is enabled, a selected player's `disablePictureInPicture` hint
+  is temporarily cleared and restored when that player is released.
+- The domain blacklist hides the extension's in-page media controls without
+  disabling Auto-PiP.
 - Click the bolt icon on images to open them in a full-size lightbox overlay with
   actions fixed at the bottom center.
 - The lightbox opens with an active **crop** overlay covering the whole image.
@@ -95,6 +104,8 @@ in the settings.
 - Always ask where to save (show "Save As" dialog)
 - Preview button visibility
 - Native video controls
+- Automatic Picture-in-Picture for the active playing video wider than 470 px
+  (enabled by default)
 - Frame capture type: JPG (default), PNG, or WebP — also used for lightbox crops
 - Use right-click menu instead of hover buttons
 - Domain blacklist with subdomain matching
