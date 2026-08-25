@@ -39,18 +39,16 @@ async function copyBlobToClipboard(blob) {
     );
   }
 
-  let type = blob.type || "";
-  if (
-    !type ||
-    (typeof ClipboardItem.supports === "function" &&
-      !ClipboardItem.supports(type))
-  ) {
-    blob = await convertImageBlobToPng(blob);
-    type = "image/png";
-  }
-
-  await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
-  return type.split("/")[1].replace("jpeg", "jpg");
+  // Cross-origin or opaque-response blobs are rejected by Chromium's clipboard
+  // sanitizer unless they are first rasterized through a canvas. Always
+  // re-encode to PNG so the same code path works for direct, CORS, and
+  // non-CORS images (and captured video frames) without relying on the
+  // server-supplied Content-Type or `ClipboardItem.supports` heuristics.
+  const png = await convertImageBlobToPng(blob);
+  await navigator.clipboard.write([
+    new ClipboardItem({ "image/png": png }),
+  ]);
+  return "png";
 }
 
 /** Re-encode any image blob into a PNG blob. */

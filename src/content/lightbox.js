@@ -1,10 +1,11 @@
 import { lightboxOpen, setLightboxOpen } from './state.js';
-import { DOWNLOAD_ICON, PREVIEW_ICON, CROP_ICON } from './constants.js';
+import { DOWNLOAD_ICON, PREVIEW_ICON, CROP_ICON, COPY_ICON } from './constants.js';
 import { showToast } from './toast.js';
 import { downloadMedia, previewMedia } from './media-download.js';
 import { resolveHighestResolutionImageUrl } from './image-resolution.js';
 import { createLightboxCropController } from './crop-overlay.js';
 import { repositionOpenControls } from './action-ui.js';
+import { copyImageToClipboard } from './clipboard.js';
 
 /**
  * Open a full-size lightbox overlay for an image (or a captured video frame).
@@ -89,6 +90,7 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
       <div class="imd-lightbox-actions-row">
         <button type="button" class="imd-action-btn imd-down-btn" title="Download Image" aria-label="Download Image">${DOWNLOAD_ICON}</button>
         <button type="button" class="imd-action-btn imd-preview-btn" title="Preview image" aria-label="Preview image">${PREVIEW_ICON}</button>
+        <button type="button" class="imd-action-btn imd-copy-btn" title="Copy image to clipboard" aria-label="Copy image to clipboard">${COPY_ICON}</button>
         <button type="button" class="imd-action-btn imd-crop-btn" title="Toggle crop" aria-label="Toggle crop">${CROP_ICON}</button>
       </div>
       <span class="imd-lightbox-info"></span>
@@ -174,6 +176,30 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
             showToast(error?.message || "Preview failed.");
           }
         });
+      const copyBtn = actions.querySelector(".imd-copy-btn");
+      copyBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const restoreLabel = copyBtn.title;
+        copyBtn.disabled = true;
+        try {
+          await copyImageToClipboard(img);
+          copyBtn.title = "Copied!";
+          copyBtn.setAttribute("aria-label", copyBtn.title);
+          showToast("Copied to clipboard (png).");
+        } catch (error) {
+          console.warn("[Media Downloader] Lightbox copy failed:", error);
+          copyBtn.title = "Copy failed";
+          copyBtn.setAttribute("aria-label", copyBtn.title);
+          showToast("Copy to clipboard failed.");
+        } finally {
+          setTimeout(() => {
+            copyBtn.title = restoreLabel;
+            copyBtn.setAttribute("aria-label", restoreLabel);
+            copyBtn.disabled = false;
+          }, 1500);
+        }
+      });
       const anchor =
         document.getElementById("MediaViewer")?.open
           ? document.getElementById("MediaViewer")
