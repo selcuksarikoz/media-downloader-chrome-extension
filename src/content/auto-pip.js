@@ -215,6 +215,9 @@ async function exitOwnedAutoPictureInPicture() {
   if (!video || document.pictureInPictureElement !== video) return;
   try {
     await document.exitPictureInPicture();
+    if (video.paused && !video.ended) {
+      video.play().catch(() => {});
+    }
   } catch (error) {
     if (error?.name !== "InvalidStateError") {
       console.debug("[Media Downloader] Automatic PiP could not be closed:", error);
