@@ -1,18 +1,20 @@
 // ---------------------------------------------------------------------------
 // Design tokens (shared by the extension overlay UI)
 // ---------------------------------------------------------------------------
-$imd-accent: #3498db;
-$imd-accent-hover: #2980b9;
-$imd-accent-error: #be2323;
-$imd-accent-error-hover: #c0392b;
 
-$imd-panel-bg: rgba(24, 24, 27, 0.97);
-$imd-btn-bg: rgba(30, 30, 30, 0.85);
-$imd-btn-bg-hover: rgba(50, 50, 50, 0.95);
-$imd-border: rgba(255, 255, 255, 0.12);
-$imd-text: #fff;
-$imd-text-muted: #d4d4d8;
-$imd-text-subtle: rgba(255, 255, 255, 0.7);
+// Light theme tokens (default)
+$imd-accent: #2563eb;
+$imd-accent-hover: #1d4ed8;
+$imd-accent-error: #dc2626;
+$imd-accent-error-hover: #b91c1c;
+
+$imd-panel-bg: rgba(255, 255, 255, 0.97);
+$imd-btn-bg: rgba(240, 240, 240, 0.92);
+$imd-btn-bg-hover: rgba(220, 220, 220, 0.95);
+$imd-border: rgba(0, 0, 0, 0.12);
+$imd-text: #1f2328;
+$imd-text-muted: #656d76;
+$imd-text-subtle: rgba(0, 0, 0, 0.6);
 
 $imd-radius-full: 100%;
 $imd-radius-panel: 12px;
@@ -21,7 +23,7 @@ $imd-radius-small: 4px;
 // Pill radius for the horizontal context menu (half its rendered height).
 $imd-radius-pill: 26px;
 
-$imd-shadow: none;
+$imd-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
 
 $imd-btn-size: 40px;
 $imd-icon-size: 24px;
@@ -335,7 +337,7 @@ body.options-page {
     height: 7px;
     overflow: hidden;
     border-radius: 7px;
-    background: #3f3f46;
+    background: rgba(0, 0, 0, 0.1);
 
     &-fill {
       height: 100%;
@@ -353,7 +355,7 @@ body.options-page {
     align-items: center;
     gap: 8px;
     margin-top: 9px;
-    color: #a1a1aa;
+    color: $imd-text-muted;
     font-size: 11px;
   }
 
@@ -373,17 +375,29 @@ body.options-page {
 .imd-save-download,
 .imd-cancel-download {
   padding: 4px 8px;
-  border: 1px solid #52525b;
+  border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: $imd-radius-control;
-  background: #27272a;
+  background: rgba(0, 0, 0, 0.05);
   color: $imd-text;
   cursor: pointer;
   font: inherit;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.imd-save-download:hover {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .imd-cancel-download {
-  border-color: #7f1d1d;
-  background: #450a0a;
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.08);
+  color: $imd-accent-error;
+}
+
+.imd-cancel-download:hover {
+  background: rgba(220, 38, 38, 0.15);
 }
 
 @keyframes imd-progress-pulse {
@@ -406,7 +420,7 @@ body.options-page {
     display: flex;
 
     &.imd-lightbox-open {
-      background: rgba(0, 0, 0, 0.85);
+      background: rgba(0, 0, 0, 0.88);
     }
   }
 
@@ -579,7 +593,7 @@ body.options-page {
 }
 
 .imd-lightbox-info {
-  color: $imd-text-subtle;
+  color: rgba(255, 255, 255, 0.7);
   font-size: 12px;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -614,9 +628,124 @@ body.options-page {
     opacity 0.15s ease,
     transform 0.15s ease;
   z-index: $imd-z-menu;
+  box-shadow: $imd-shadow;
 }
 
 .imd-toast.imd-toast-show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Dark theme overrides
+// ---------------------------------------------------------------------------
+@media (prefers-color-scheme: dark) {
+  $imd-accent: #58a6ff;
+  $imd-accent-hover: #79c0ff;
+  $imd-accent-error: #f85149;
+  $imd-accent-error-hover: #ff6961;
+
+  $imd-panel-bg: rgba(22, 27, 34, 0.97);
+  $imd-btn-bg: rgba(33, 38, 45, 0.92);
+  $imd-btn-bg-hover: rgba(48, 54, 61, 0.95);
+  $imd-border: rgba(240, 246, 252, 0.1);
+  $imd-text: #e6edf3;
+  $imd-text-muted: #8b949e;
+  $imd-text-subtle: rgba(230, 237, 243, 0.7);
+
+  $imd-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+
+  .imd-context-menu {
+    background: $imd-panel-bg;
+    border-color: $imd-border;
+    color: $imd-text;
+  }
+
+  .imd-action-btn {
+    background-color: $imd-btn-bg !important;
+
+    &:hover {
+      background-color: $imd-btn-bg-hover !important;
+    }
+
+    &.imd-recording {
+      background-color: $imd-accent-error !important;
+    }
+
+    svg {
+      fill: $imd-text !important;
+    }
+  }
+
+  .imd-download-panel {
+    background: $imd-panel-bg;
+    border-color: $imd-border;
+    color: $imd-text;
+
+    .imd-download-title {
+      color: $imd-text;
+    }
+
+    .imd-download-message {
+      color: $imd-text-muted;
+    }
+
+    .imd-download-progress {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .imd-download-footer {
+      color: $imd-text-muted;
+    }
+
+    .imd-download-percent {
+      color: $imd-text;
+    }
+  }
+
+  .imd-save-download,
+  .imd-cancel-download {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    color: $imd-text;
+  }
+
+  .imd-save-download:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .imd-cancel-download {
+    border-color: rgba(248, 81, 73, 0.4);
+    background: rgba(248, 81, 73, 0.1);
+    color: $imd-accent-error;
+  }
+
+  .imd-cancel-download:hover {
+    background: rgba(248, 81, 73, 0.2);
+  }
+
+  .imd-toast {
+    background: $imd-panel-bg;
+    border-color: $imd-border;
+    color: $imd-text;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reduced motion
+// ---------------------------------------------------------------------------
+@media (prefers-reduced-motion: reduce) {
+  .imd-download-progress-fill.imd-indeterminate {
+    animation: none;
+    width: 50%;
+    opacity: 0.5;
+  }
+
+  .imd-toast {
+    transition: none;
+  }
+
+  .imd-context-menu {
+    transition: none;
+  }
 }

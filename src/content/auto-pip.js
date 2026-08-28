@@ -1,6 +1,7 @@
 import {
   autoPipRequest,
   autoPipVideo,
+  autoPipOwned,
   autoPipConfiguredVideo,
   autoPipInitialized,
   autoPipRefreshFrame,
@@ -12,6 +13,7 @@ import {
   settings,
   setAutoPipRequest,
   setAutoPipVideo,
+  setAutoPipOwned,
   setAutoPipConfiguredVideo,
   setAutoPipInitialized,
   setAutoPipRefreshFrame,
@@ -197,6 +199,7 @@ async function enterAutoPictureInPicture() {
       settings.autoPictureInPicture
     ) {
       setAutoPipVideo(video);
+      setAutoPipOwned(true);
     } else if (document.pictureInPictureElement === video) {
       await document.exitPictureInPicture();
     }
@@ -210,27 +213,40 @@ async function enterAutoPictureInPicture() {
 }
 
 async function exitOwnedAutoPictureInPicture() {
+  if (!autoPipOwned) {
+    setAutoPipVideo(null);
+    return;
+  }
+
   const video = autoPipVideo;
   setAutoPipVideo(null);
-  if (!video || document.pictureInPictureElement !== video) return;
+  setAutoPipOwned(false);
+
+  const pipElement = document.pictureInPictureElement;
+  if (!pipElement) return;
+
   try {
     await document.exitPictureInPicture();
-    if (video.paused && !video.ended) {
-      video.play().catch(() => {});
-    }
   } catch (error) {
     if (error?.name !== "InvalidStateError") {
       console.debug("[Media Downloader] Automatic PiP could not be closed:", error);
     }
   }
+
+  const target = video || pipElement;
+  if (target?.tagName === "VIDEO" && target.paused && !target.ended) {
+    try {
+      await target.play();
+    } catch {}
+  }
 }
 
-function onVisibilityChange() {
+async function onVisibilityChange() {
   if (document.visibilityState === "hidden") {
     enterAutoPictureInPicture();
     return;
   }
-  exitOwnedAutoPictureInPicture();
+  await exitOwnedAutoPictureInPicture();
   refreshAutoPictureInPictureCandidate();
 }
 
@@ -241,6 +257,7 @@ function onEnterPictureInPicture(event) {
     event.target === autoPipConfiguredVideo
   ) {
     setAutoPipVideo(event.target);
+    setAutoPipOwned(true);
   }
 }
 
@@ -266,7 +283,10 @@ export function initAutoPictureInPicture() {
   document.addEventListener("loadeddata", refreshAutoPictureInPictureCandidate, true);
   document.addEventListener("enterpictureinpicture", onEnterPictureInPicture, true);
   document.addEventListener("leavepictureinpicture", (event) => {
-    if (event.target === autoPipVideo) setAutoPipVideo(null);
+    if (event.target === autoPipVideo) {
+      setAutoPipVideo(null);
+      setAutoPipOwned(false);
+    }
   }, true);
   window.addEventListener("resize", refreshAutoPictureInPictureCandidate, { passive: true });
   document.addEventListener("scroll", scheduleCandidateRefresh, {
