@@ -289,6 +289,32 @@ body.options-page {
   }
 }
 
+.imd-size-label {
+  position: fixed;
+  z-index: $imd-z-action;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: $imd-radius-small;
+  background-color: rgba(0, 0, 0, 0.72);
+  color: rgba(255, 255, 255, 0.9);
+  font:
+    11px/1 system-ui,
+    -apple-system,
+    sans-serif;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &.imd-show {
+    opacity: 1;
+  }
+}
+
 .imd-preview-btn[hidden],
 .imd-lightbox-btn[hidden],
 .imd-pip-btn[hidden] {
@@ -675,6 +701,11 @@ body.options-page {
     svg {
       fill: $imd-text !important;
     }
+  }
+
+  .imd-size-label {
+    background-color: $imd-btn-bg;
+    color: $imd-text-muted;
   }
 
   .imd-download-panel {

@@ -102,6 +102,49 @@ export function processMedia(media) {
 
   trackedMedia.set(media, isImage ? "image" : "video");
 
+  if (isImage) {
+    const w = media.naturalWidth || 0;
+    const h = media.naturalHeight || 0;
+    if (w && h) {
+      const sizeLabel = document.createElement("div");
+      sizeLabel.className = "imd-size-label";
+      sizeLabel.textContent = `${w}×${h}`;
+      document.body.appendChild(sizeLabel);
+      media._imdSizeLabel = sizeLabel;
+
+      const positionSizeLabel = () => {
+        const rect = media.getBoundingClientRect();
+        sizeLabel.style.top = `${rect.top + rect.height - sizeLabel.offsetHeight - 6}px`;
+        sizeLabel.style.left = `${rect.left + 6}px`;
+      };
+
+      const showSizeLabel = () => {
+        if (!visibleMedia.has(media)) return;
+        sizeLabel.classList.add("imd-show");
+        positionSizeLabel();
+      };
+      const hideSizeLabel = () => sizeLabel.classList.remove("imd-show");
+
+      const sizeHoverTargets = getMediaHoverTargets(media);
+      const onEnter = showSizeLabel;
+      const onLeave = hideSizeLabel;
+      const onScroll = () => { sizeLabel.classList.remove("imd-show"); };
+      sizeHoverTargets.forEach((target) => {
+        target.addEventListener("mouseenter", onEnter);
+        target.addEventListener("mouseleave", onLeave);
+      });
+      window.addEventListener("scroll", onScroll, true);
+      media._imdSizeLabelCleanup = () => {
+        sizeHoverTargets.forEach((target) => {
+          target.removeEventListener("mouseenter", onEnter);
+          target.removeEventListener("mouseleave", onLeave);
+        });
+        window.removeEventListener("scroll", onScroll, true);
+        sizeLabel.remove();
+      };
+    }
+  }
+
   if (settings.useContextMenu) return;
 
   const actionGroup = document.createElement("div");
@@ -216,6 +259,11 @@ export function attachMediaActionHandlers(media, btns) {
 }
 
 export function cleanupMedia(media) {
+  if (media._imdSizeLabelCleanup) {
+    media._imdSizeLabelCleanup();
+    delete media._imdSizeLabel;
+    delete media._imdSizeLabelCleanup;
+  }
   const group = mediaControls.get(media);
   if (group) group.remove();
   if (media.dataset.imdCaptureId) {
