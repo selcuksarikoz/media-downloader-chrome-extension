@@ -123,6 +123,10 @@ function handleContextMenuEvent(event) {
 
   if (!media) return;
 
+  const mw = media.clientWidth || media.width || 0;
+  const mh = media.clientHeight || media.height || 0;
+  if (mw < settings.minWidth || mh < settings.minWidth) return;
+
   // Intentionally do not call preventDefault(): our media action menu and the
   // browser's native context menu are both meant to open on the same click.
   event.stopPropagation();

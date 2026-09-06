@@ -56,6 +56,9 @@ function init() {
       closeContextMenu();
       rebuildAllMedia();
     }
+    if (changes.minWidth) {
+      rebuildAllMedia();
+    }
     if (changes.autoPictureInPicture) {
       applyAutoPictureInPictureSetting();
     }
