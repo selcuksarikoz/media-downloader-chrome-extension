@@ -97,3 +97,43 @@ test("probes an original URL that has no size descriptor", async () => {
     "https://cdn.example/original.jpg",
   );
 });
+
+test("probes the untransformed Instagram image behind a profile thumbnail", async () => {
+  const thumbnail = "https://scontent-fra3-1.cdninstagram.com/v/t51.82787-15/photo.jpg?stp=dst-jpg_e35_c0.0.1080.1080a_s320x320_sh0.08_tt6&oh=signed";
+  const original = "https://scontent-fra3-1.cdninstagram.com/v/t51.82787-15/photo.jpg?stp=dst-jpg_e35_tt6&oh=signed";
+  const widths = new Map([
+    [thumbnail, 320],
+    [original, 1440],
+  ]);
+  globalThis.Image = class {
+    removeAttribute() {}
+
+    set src(url) {
+      this.naturalWidth = widths.get(url) || 0;
+      queueMicrotask(() => this.onload?.());
+    }
+  };
+  const image = createImage(
+    { srcset: `${thumbnail} 320w` },
+    { naturalWidth: 320, src: thumbnail, currentSrc: thumbnail },
+  );
+
+  assert.equal(await resolveHighestResolutionImageUrl(image), original);
+});
+
+test("keeps the declared Instagram image when the original probe fails", async () => {
+  const thumbnail = "https://scontent-fra3-1.cdninstagram.com/photo.jpg?stp=dst-jpg_s320x320_tt6&oh=signed";
+  globalThis.Image = class {
+    removeAttribute() {}
+
+    set src(url) {
+      queueMicrotask(() => this.onerror?.(new Error(`Failed: ${url}`)));
+    }
+  };
+  const image = createImage(
+    { srcset: `${thumbnail} 320w` },
+    { naturalWidth: 320, src: thumbnail, currentSrc: thumbnail },
+  );
+
+  assert.equal(await resolveHighestResolutionImageUrl(image), thumbnail);
+});

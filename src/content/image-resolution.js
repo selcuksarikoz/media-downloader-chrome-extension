@@ -16,6 +16,11 @@ const URL_ATTRIBUTES = [
   ["data-src", false],
 ];
 const IMAGE_PROBE_TIMEOUT_MS = 5000;
+const INSTAGRAM_TRANSFORM_SEGMENTS = [
+  /^(?:p|s)\d+x\d+$/i,
+  /^c\d+(?:\.\d+){3}[a-z]?$/i,
+  /^sh\d+(?:\.\d+)?$/i,
+];
 
 export function getHighestResolutionImageUrl(img) {
   return rankImageCandidates(collectImageCandidates(img))[0]?.url || "";
@@ -51,6 +56,16 @@ export function collectImageCandidates(img) {
       return;
     }
     candidates.set(url, { url, estimatedWidth, originalHint, order: order++ });
+
+    const originalInstagramUrl = getOriginalInstagramImageUrl(url);
+    if (originalInstagramUrl && !candidates.has(originalInstagramUrl)) {
+      candidates.set(originalInstagramUrl, {
+        url: originalInstagramUrl,
+        estimatedWidth: 0,
+        originalHint: true,
+        order: order++,
+      });
+    }
   };
 
   const picture = img.parentElement?.tagName === "PICTURE"
@@ -75,6 +90,30 @@ export function collectImageCandidates(img) {
   add(img.src, img.naturalWidth || 0);
   add(img.currentSrc, img.naturalWidth || 0);
   return [...candidates.values()];
+}
+
+/** Remove Instagram CDN thumbnail transforms while preserving signed params. */
+function getOriginalInstagramImageUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return "";
+  }
+  if (!url.hostname.endsWith(".cdninstagram.com")) return "";
+
+  const transform = url.searchParams.get("stp");
+  if (!transform) return "";
+  const originalTransform = transform
+    .split("_")
+    .filter((segment) =>
+      !INSTAGRAM_TRANSFORM_SEGMENTS.some((pattern) => pattern.test(segment)),
+    )
+    .join("_");
+  if (!originalTransform || originalTransform === transform) return "";
+
+  url.searchParams.set("stp", originalTransform);
+  return url.href;
 }
 
 function rankImageCandidates(candidates) {
