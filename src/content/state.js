@@ -27,7 +27,6 @@ export let autoPipMutationObserver = null;
 export let autoPipResizeObserver = null;
 export const mediaHoverListeners = new WeakMap();
 export const instagramNativeControlState = new WeakMap();
-export const instagramImageUpgradeState = new WeakMap();
 export const videoTrimRecordings = new Map();
 export const blobJobIntent = new Map();
 export const finalizingBlobJobIds = new Set();

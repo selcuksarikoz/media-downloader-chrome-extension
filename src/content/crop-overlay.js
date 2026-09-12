@@ -14,7 +14,7 @@ export function createLightboxCropController(options) {
   const {
     stage, img, cropBtn, infoEl,
     getBaseInfo, exitZoom, toggleZoom,
-    getResolvedUrl, getMediaUrl, isCorsClean, close,
+    resolvedUrl, mediaUrl, corsClean, close,
   } = options;
 
   const cropRect = { x: 0, y: 0, w: 1, h: 1 };
@@ -191,10 +191,10 @@ export function createLightboxCropController(options) {
     try {
       const { blob, filename, width, height } = await buildCroppedImage(
         img,
-        getMediaUrl() || getResolvedUrl(),
+        mediaUrl || resolvedUrl,
         cropRect,
         getFrameCaptureFormat(settings.captureType),
-        isCorsClean(),
+        corsClean,
       );
       downloadBlobFile(
         blob,

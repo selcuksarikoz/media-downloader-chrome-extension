@@ -4,8 +4,8 @@ import { captureVideoFrameBlobWithFallbacks } from './capture-core.js';
 import { resolveHighestResolutionImageUrl } from './image-resolution.js';
 import { fetchImageBlob, fetchImageBlobViaBackground } from './media-fetch.js';
 
-export async function copyImageToClipboard(image, preferredUrl) {
-  const url = preferredUrl || await resolveHighestResolutionImageUrl(image);
+export async function copyImageToClipboard(image) {
+  const url = await resolveHighestResolutionImageUrl(image);
   let blob;
   try {
     blob = await fetchImageBlob(url);

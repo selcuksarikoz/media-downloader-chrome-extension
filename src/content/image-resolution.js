@@ -1,10 +1,4 @@
 import { parseSrcset } from './utils.js';
-import { instagramImageUpgradeState } from './state.js';
-import {
-  isInstagramImageUrl,
-  isResizedInstagramImageUrl,
-  resolveInstagramImageCandidate,
-} from './instagram-image.js';
 
 const SRCSET_ATTRIBUTES = ["srcset", "data-srcset", "data-lazy-srcset"];
 const URL_ATTRIBUTES = [
@@ -134,21 +128,6 @@ function rankImageCandidates(candidates) {
 /** Resolve the widest declared URL, probing candidates without size descriptors. */
 export async function resolveHighestResolutionImageUrl(img) {
   const candidates = collectImageCandidates(img);
-  const instagramCandidate = await resolveInstagramImageCandidate(
-    candidates,
-    img,
-  );
-  if (
-    instagramCandidate &&
-    !candidates.some(({ url }) => url === instagramCandidate.url)
-  ) {
-    candidates.push({
-      ...instagramCandidate,
-      estimatedWidth: 0,
-      originalHint: true,
-      order: candidates.length,
-    });
-  }
   const unresolved = candidates.filter(({ estimatedWidth }) => !estimatedWidth);
   if (unresolved.length > 0 && typeof Image === "function") {
     await Promise.all(unresolved.map(async (candidate) => {
@@ -156,75 +135,6 @@ export async function resolveHighestResolutionImageUrl(img) {
     }));
   }
   return rankImageCandidates(candidates)[0]?.url || "";
-}
-
-/** Quickly test a URL with Instagram's explicit resize transforms removed. */
-export async function resolveDirectInstagramImageUrl(img) {
-  const source = img.currentSrc || img.src;
-  const directUrl = getOriginalInstagramImageUrl(source);
-  if (!directUrl) return "";
-  const width = await probeImageWidth(directUrl);
-  return width > (img.naturalWidth || 0) ? directUrl : "";
-}
-
-/** Replace a visible Instagram thumbnail with its signed original source. */
-export function upgradeInstagramImageSource(img) {
-  const source = img.currentSrc || img.src;
-  if (!isInstagramImageUrl(source)) return Promise.resolve(false);
-
-  const active = instagramImageUpgradeState.get(img);
-  if (active?.source === source || active?.source === img.src) {
-    return active.promise;
-  }
-
-  const sourceFilename = getUrlFilename(source);
-  let promise;
-  const applyResolvedUrl = (resolvedUrl) => {
-    const currentSource = img.currentSrc || img.src;
-    if (instagramImageUpgradeState.get(img)?.promise !== promise) {
-      return false;
-    }
-    if (!img.isConnected) return false;
-    if (getUrlFilename(currentSource) !== sourceFilename) return false;
-    if (!resolvedUrl || resolvedUrl === currentSource) return false;
-    if (getUrlFilename(resolvedUrl) !== sourceFilename) return false;
-    if (isResizedInstagramImageUrl(resolvedUrl)) return false;
-
-    img.decoding = "async";
-    img.srcset = resolvedUrl;
-    img.src = resolvedUrl;
-    instagramImageUpgradeState.set(img, {
-      source: resolvedUrl,
-      promise,
-      resolved: true,
-    });
-    return true;
-  };
-  promise = Promise.all([
-    resolveDirectInstagramImageUrl(img)
-      .then(applyResolvedUrl)
-      .catch(() => false),
-    resolveHighestResolutionImageUrl(img)
-      .then(applyResolvedUrl)
-      .catch(() => false),
-  ])
-    .then((results) => results.some(Boolean))
-    .finally(() => {
-      const state = instagramImageUpgradeState.get(img);
-      if (state?.promise === promise && !state.resolved) {
-        instagramImageUpgradeState.delete(img);
-      }
-    });
-  instagramImageUpgradeState.set(img, { source, promise });
-  return promise;
-}
-
-function getUrlFilename(value) {
-  try {
-    return new URL(value, document.baseURI).pathname.split("/").pop() || "";
-  } catch {
-    return "";
-  }
 }
 
 function probeImageWidth(url) {
