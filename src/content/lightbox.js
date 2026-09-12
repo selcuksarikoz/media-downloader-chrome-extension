@@ -2,7 +2,11 @@ import { lightboxOpen, setLightboxOpen } from './state.js';
 import { DOWNLOAD_ICON, PREVIEW_ICON, CROP_ICON, COPY_ICON } from './constants.js';
 import { showToast } from './toast.js';
 import { downloadMedia, previewMedia } from './media-download.js';
-import { resolveHighestResolutionImageUrl } from './image-resolution.js';
+import {
+  getHighestResolutionImageUrl,
+  resolveDirectInstagramImageUrl,
+  resolveHighestResolutionImageUrl,
+} from './image-resolution.js';
 import { createLightboxCropController } from './crop-overlay.js';
 import { repositionOpenControls } from './action-ui.js';
 import { copyImageToClipboard } from './clipboard.js';
@@ -35,13 +39,20 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
   let actions = null;
   let cleanup = null;
   try {
-      const resolvedUrl = url || await resolveHighestResolutionImageUrl(media);
+      let resolvedUrl = url || getHighestResolutionImageUrl(media);
       if (!resolvedUrl) {
         setLightboxOpen(false);
         revokeUnusedDownloadUrl();
         return false;
       }
-      const mediaUrl = downloadUrl || resolvedUrl;
+      let mediaUrl = downloadUrl || resolvedUrl;
+      const highResolutionPromise = url
+        ? Promise.resolve(url)
+        : resolveHighestResolutionImageUrl(media).catch(() => resolvedUrl);
+      const directResolutionPromise = url
+        ? Promise.resolve("")
+        : resolveDirectInstagramImageUrl(media).catch(() => "");
+      let closed = false;
 
       document.querySelectorAll(".imd-lightbox-btn").forEach((btn) => {
         btn.hidden = true;
@@ -79,6 +90,19 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
       });
       img.crossOrigin = "anonymous";
       img.src = resolvedUrl;
+      const updateLightboxSource = (highResolutionUrl) => {
+        if (closed || !highResolutionUrl || highResolutionUrl === resolvedUrl) {
+          return;
+        }
+        resolvedUrl = highResolutionUrl;
+        if (!downloadUrl) mediaUrl = highResolutionUrl;
+        retriedWithoutCors = false;
+        corsClean = true;
+        img.crossOrigin = "anonymous";
+        img.src = highResolutionUrl;
+      };
+      directResolutionPromise.then(updateLightboxSource);
+      highResolutionPromise.then(updateLightboxSource);
 
       stage.appendChild(img);
       container.appendChild(stage);
@@ -102,19 +126,23 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
         crop?.refreshInfo();
       };
       const infoAbort = new AbortController();
+      let infoLoadId = 0;
       img.addEventListener(
         "load",
         () => {
+          const loadId = ++infoLoadId;
           const w = img.naturalWidth;
           const h = img.naturalHeight;
+          const loadedUrl = img.currentSrc || img.src || resolvedUrl;
           const ext = (
-            resolvedUrl.match(/\.(\w+)(?:\?|$)/)?.[1] || ""
+            loadedUrl.match(/\.(\w+)(?:\?|$)/)?.[1] || ""
           ).toLowerCase();
           const format =
             ext === "png" ? "PNG" : ext === "webp" ? "WebP" : "JPG";
           setInfo(`${w} × ${h} · ${format}`);
-          fetch(resolvedUrl, { method: "HEAD", signal: infoAbort.signal })
+          fetch(loadedUrl, { method: "HEAD", signal: infoAbort.signal })
             .then((res) => {
+              if (loadId !== infoLoadId) return;
               const ct = res.headers.get("Content-Type");
               if (ct) {
                 const m = ct.match(/image\/(\w+)/);
@@ -140,7 +168,6 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
             .catch(() => {});
           startCrop?.();
         },
-        { once: true },
       );
       actions.querySelector(".imd-down-btn").addEventListener("click", async (e) => {
         e.preventDefault();
@@ -150,7 +177,8 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
           return;
         }
         e.currentTarget.disabled = true;
-        const downloadPromise = downloadMedia(img, mediaUrl);
+        const actionUrl = downloadUrl || await highResolutionPromise;
+        const downloadPromise = downloadMedia(img, actionUrl || mediaUrl);
         // Do not keep a full-page overlay mounted while Chrome accepts the
         // download. Owned blob URLs remain valid for the cleanup grace period.
         close();
@@ -167,7 +195,8 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
           e.preventDefault();
           e.stopPropagation();
           e.currentTarget.disabled = true;
-          const previewPromise = previewMedia(img, mediaUrl);
+          const actionUrl = downloadUrl || await highResolutionPromise;
+          const previewPromise = previewMedia(img, actionUrl || mediaUrl);
           close();
           try {
             await previewPromise;
@@ -183,7 +212,8 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
         const restoreLabel = copyBtn.title;
         copyBtn.disabled = true;
         try {
-          await copyImageToClipboard(img);
+          const actionUrl = downloadUrl || await highResolutionPromise;
+          await copyImageToClipboard(img, actionUrl || mediaUrl);
           copyBtn.title = "Copied!";
           copyBtn.setAttribute("aria-label", copyBtn.title);
           showToast("Copied to clipboard (png).");
@@ -243,14 +273,13 @@ export async function openLightbox(media, url, downloadUrl, options = {}) {
           }
         },
         toggleZoom,
-        resolvedUrl,
-        mediaUrl,
-        corsClean,
+        getResolvedUrl: () => resolvedUrl,
+        getMediaUrl: () => mediaUrl,
+        isCorsClean: () => corsClean,
         close,
       });
       startCrop = crop.start;
 
-      let closed = false;
       cleanup = () => {
         if (closed) return;
         closed = true;
