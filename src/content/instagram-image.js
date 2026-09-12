@@ -3,10 +3,8 @@ import {
   INSTAGRAM_IMAGE_RESULT_EVENT,
 } from './constants.js';
 import { createCaptureId } from './utils.js';
-import { instagramImageCandidateCache } from './state.js';
 
 const REQUEST_TIMEOUT_MS = 8000;
-const CACHE_TTL_MS = 5 * 60 * 1000;
 const RESIZE_TRANSFORM = /_(?:[ps]\d+x\d+|c\d+(?:\.\d+){3}[a-z]?)(?:_|$)/i;
 
 export function isResizedInstagramImageUrl(value) {
@@ -41,14 +39,8 @@ export async function resolveInstagramImageCandidate(candidates, image) {
     return null;
   }
 
-  const cacheKey = `${reference.mediaId}:${reference.filename}`;
-  const cached = instagramImageCandidateCache.get(cacheKey);
-  if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
-    return cached.promise;
-  }
-
   const requestId = createCaptureId();
-  const promise = new Promise((resolve) => {
+  return new Promise((resolve) => {
     let settled = false;
     const finish = (candidate = null) => {
       if (settled) return;
@@ -71,15 +63,7 @@ export async function resolveInstagramImageCandidate(candidates, image) {
     window.dispatchEvent(new CustomEvent(INSTAGRAM_IMAGE_REQUEST_EVENT, {
       detail: { requestId, ...reference },
     }));
-  }).then((candidate) => {
-    if (!candidate) instagramImageCandidateCache.delete(cacheKey);
-    return candidate;
   });
-  instagramImageCandidateCache.set(cacheKey, {
-    createdAt: Date.now(),
-    promise,
-  });
-  return promise;
 }
 
 export function getInstagramMediaReference(candidates, image) {

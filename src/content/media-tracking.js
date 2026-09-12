@@ -1,7 +1,7 @@
 import {
   settings, extensionActive, mediaMutationObserver, mediaControls,
   trackedMedia, capturedVideos, pipState, mediaHoverListeners,
-  visibleMedia, popupVideoStatuses,
+  visibleMedia, popupVideoStatuses, instagramImageUpgradeState,
   setExtensionActive, setMediaMutationObserver,
 } from './state.js';
 import { createCaptureId } from './utils.js';
@@ -20,6 +20,7 @@ import { captureVideoFrame } from './capture-core.js';
 import { copyImageToClipboard, copyVideoFrameToClipboard } from './clipboard.js';
 import { openLightbox } from './lightbox.js';
 import { showToast } from './toast.js';
+import { upgradeInstagramImageSource } from './image-resolution.js';
 
 export const mediaIntersectionObserver = new IntersectionObserver(
   (entries) => {
@@ -103,6 +104,7 @@ export function processMedia(media) {
   trackedMedia.set(media, isImage ? "image" : "video");
 
   if (isImage) {
+    if (media.clientWidth >= 500) upgradeInstagramImageSource(media);
     const w = media.naturalWidth || 0;
     const h = media.naturalHeight || 0;
     if (w && h) {
@@ -126,6 +128,7 @@ export function processMedia(media) {
 
       const showSizeLabel = () => {
         if (!visibleMedia.has(media)) return;
+        upgradeInstagramImageSource(media);
         sizeLabel.classList.add("imd-show");
         positionSizeLabel();
       };
@@ -266,6 +269,7 @@ export function attachMediaActionHandlers(media, btns) {
 }
 
 export function cleanupMedia(media) {
+  instagramImageUpgradeState.delete(media);
   if (media._imdSizeLabelCleanup) {
     media._imdSizeLabelCleanup();
     delete media._imdSizeLabel;
@@ -334,6 +338,12 @@ export function startObserver() {
   const observer = new MutationObserver((mutations) => {
     const removedMedia = new Set();
     mutations.forEach((mutation) => {
+      if (mutation.type === "attributes") {
+        if (mutation.target.tagName === "IMG") {
+          upgradeInstagramImageSource(mutation.target);
+        }
+        return;
+      }
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === 1) {
           if (node.matches("img, video")) trackMedia(node);
@@ -352,7 +362,12 @@ export function startObserver() {
       });
     });
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["src", "srcset"],
+    childList: true,
+    subtree: true,
+  });
   setMediaMutationObserver(observer);
 }
 

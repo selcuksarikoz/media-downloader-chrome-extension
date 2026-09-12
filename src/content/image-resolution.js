@@ -1,5 +1,10 @@
 import { parseSrcset } from './utils.js';
-import { resolveInstagramImageCandidate } from './instagram-image.js';
+import { instagramImageUpgradeState } from './state.js';
+import {
+  isInstagramImageUrl,
+  isResizedInstagramImageUrl,
+  resolveInstagramImageCandidate,
+} from './instagram-image.js';
 
 const SRCSET_ATTRIBUTES = ["srcset", "data-srcset", "data-lazy-srcset"];
 const URL_ATTRIBUTES = [
@@ -160,6 +165,66 @@ export async function resolveDirectInstagramImageUrl(img) {
   if (!directUrl) return "";
   const width = await probeImageWidth(directUrl);
   return width > (img.naturalWidth || 0) ? directUrl : "";
+}
+
+/** Replace a visible Instagram thumbnail with its signed original source. */
+export function upgradeInstagramImageSource(img) {
+  const source = img.currentSrc || img.src;
+  if (!isInstagramImageUrl(source)) return Promise.resolve(false);
+
+  const active = instagramImageUpgradeState.get(img);
+  if (active?.source === source || active?.source === img.src) {
+    return active.promise;
+  }
+
+  const sourceFilename = getUrlFilename(source);
+  let promise;
+  const applyResolvedUrl = (resolvedUrl) => {
+    const currentSource = img.currentSrc || img.src;
+    if (instagramImageUpgradeState.get(img)?.promise !== promise) {
+      return false;
+    }
+    if (!img.isConnected) return false;
+    if (getUrlFilename(currentSource) !== sourceFilename) return false;
+    if (!resolvedUrl || resolvedUrl === currentSource) return false;
+    if (getUrlFilename(resolvedUrl) !== sourceFilename) return false;
+    if (isResizedInstagramImageUrl(resolvedUrl)) return false;
+
+    img.decoding = "async";
+    img.srcset = resolvedUrl;
+    img.src = resolvedUrl;
+    instagramImageUpgradeState.set(img, {
+      source: resolvedUrl,
+      promise,
+      resolved: true,
+    });
+    return true;
+  };
+  promise = Promise.all([
+    resolveDirectInstagramImageUrl(img)
+      .then(applyResolvedUrl)
+      .catch(() => false),
+    resolveHighestResolutionImageUrl(img)
+      .then(applyResolvedUrl)
+      .catch(() => false),
+  ])
+    .then((results) => results.some(Boolean))
+    .finally(() => {
+      const state = instagramImageUpgradeState.get(img);
+      if (state?.promise === promise && !state.resolved) {
+        instagramImageUpgradeState.delete(img);
+      }
+    });
+  instagramImageUpgradeState.set(img, { source, promise });
+  return promise;
+}
+
+function getUrlFilename(value) {
+  try {
+    return new URL(value, document.baseURI).pathname.split("/").pop() || "";
+  } catch {
+    return "";
+  }
 }
 
 function probeImageWidth(url) {

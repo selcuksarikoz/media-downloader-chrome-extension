@@ -3,8 +3,6 @@ const INSTAGRAM_IMAGE_REQUEST_EVENT = "imd:instagram-image-request";
 const INSTAGRAM_IMAGE_RESULT_EVENT = "imd:instagram-image-result";
 const INSTAGRAM_APP_ID = "936619743392459";
 const REQUEST_TIMEOUT_MS = 7000;
-const RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
-let requestBlockedUntil = 0;
 
 export function initInstagramImageBridge() {
   if (!/(^|\.)instagram\.com$/.test(location.hostname)) return;
@@ -19,10 +17,6 @@ export function initInstagramImageBridge() {
     ) {
       return;
     }
-    if (Date.now() < requestBlockedUntil) {
-      emitResult(requestId, null);
-      return;
-    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -33,9 +27,6 @@ export function initInstagramImageBridge() {
           credentials: "include",
           signal: controller.signal,
         });
-        if (response.status === 429) {
-          requestBlockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
-        }
         if (isInstagramPostResponse(response)) {
           candidate = findInstagramImageUrlInHtml(
             await response.text(),
@@ -45,7 +36,7 @@ export function initInstagramImageBridge() {
       } catch {}
     }
 
-    if (!candidate && Date.now() >= requestBlockedUntil) {
+    if (!candidate) {
       try {
         const requestedMediaId = /^\d+$/.test(postMediaId || "")
           ? postMediaId
@@ -58,9 +49,6 @@ export function initInstagramImageBridge() {
           },
           signal: controller.signal,
         });
-        if (response.status === 429) {
-          requestBlockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
-        }
         if (response.ok && !response.redirected) {
           candidate = findInstagramImageCandidate(
             await response.json(),

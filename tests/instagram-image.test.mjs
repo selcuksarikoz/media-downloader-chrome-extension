@@ -11,11 +11,10 @@ import {
   getInstagramMediaReference,
   getInstagramMediaPermalink,
   getInstagramPostMediaId,
-  resolveInstagramImageCandidate,
 } from
   "../src/content/instagram-image.js";
-import { instagramImageCandidateCache } from
-  "../src/content/state.js";
+import { upgradeInstagramImageSource } from
+  "../src/content/image-resolution.js";
 
 globalThis.document = { baseURI: "https://www.instagram.com/" };
 
@@ -142,8 +141,7 @@ test("extracts an untransformed signed URL from permalink HTML", () => {
   });
 });
 
-test("deduplicates repeated signed-image requests", async () => {
-  instagramImageCandidateCache.clear();
+test("upgrades the Instagram page image to the signed original", async () => {
   globalThis.CustomEvent = class extends Event {
     constructor(type, options) {
       super(type);
@@ -151,16 +149,36 @@ test("deduplicates repeated signed-image requests", async () => {
     }
   };
   globalThis.window = new EventTarget();
+  globalThis.Image = class {
+    removeAttribute() {}
+
+    set src(url) {
+      this.naturalWidth = url.includes("oh=detail") ? 3072 : 0;
+      queueMicrotask(() => {
+        if (this.naturalWidth) this.onload?.();
+        else this.onerror?.(new Error(`Failed: ${url}`));
+      });
+    }
+  };
   const thumbnail = "https://scontent.cdninstagram.com/photo.jpg?stp=dst-jpg_e35_tt6&ig_cache_key=Mzk4NDQzNjAzMTcxNjU1MzYzMw%3D%3D.3-ccb7-5&oh=feed";
   const original = "https://scontent.cdninstagram.com/photo.jpg?stp=dst-jpg_e35_tt6&oh=detail";
   const image = {
+    tagName: "IMG",
+    src: thumbnail,
+    currentSrc: thumbnail,
+    srcset: thumbnail,
+    naturalWidth: 1080,
+    width: 1080,
+    clientWidth: 681,
+    isConnected: true,
+    getAttribute(name) {
+      return name === "srcset" ? this.srcset : null;
+    },
     closest() {
       return null;
     },
   };
-  let requestCount = 0;
   window.addEventListener("imd:instagram-image-request", (event) => {
-    requestCount += 1;
     window.dispatchEvent(new CustomEvent("imd:instagram-image-result", {
       detail: {
         requestId: event.detail.requestId,
@@ -171,12 +189,8 @@ test("deduplicates repeated signed-image requests", async () => {
     }));
   });
 
-  const candidates = [{ url: thumbnail }];
-  const [first, second] = await Promise.all([
-    resolveInstagramImageCandidate(candidates, image),
-    resolveInstagramImageCandidate(candidates, image),
-  ]);
-  assert.equal(first.url, original);
-  assert.equal(second.url, original);
-  assert.equal(requestCount, 1);
+  assert.equal(await upgradeInstagramImageSource(image), true);
+  assert.equal(image.src, original);
+  assert.equal(image.srcset, original);
+  assert.equal(image.decoding, "async");
 });
