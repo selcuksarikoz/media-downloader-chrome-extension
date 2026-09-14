@@ -1,4 +1,6 @@
 import { parseSrcset } from './utils.js';
+import { instagramImageCandidatesByAsset } from './state.js';
+import { getInstagramImageAssetKey } from '../shared/instagram-image.js';
 
 const SRCSET_ATTRIBUTES = ["srcset", "data-srcset", "data-lazy-srcset"];
 const URL_ATTRIBUTES = [
@@ -74,6 +76,17 @@ export function collectImageCandidates(img) {
 
   add(img.src, img.naturalWidth || 0);
   add(img.currentSrc, img.naturalWidth || 0);
+  const declaredCandidates = [...candidates.values()];
+  const assetKeys = new Set(
+    declaredCandidates
+      .map(({ url }) => getInstagramImageAssetKey(url, document.baseURI))
+      .filter(Boolean),
+  );
+  assetKeys.forEach((assetKey) => {
+    instagramImageCandidatesByAsset.get(assetKey)?.forEach((candidate) => {
+      add(candidate.url, candidate.width || 0);
+    });
+  });
   return [...candidates.values()];
 }
 

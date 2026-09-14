@@ -47,6 +47,10 @@ export const CAPTURE_FROM_MSE_RESULT_EVENT = "imd:capture-from-mse-result";
 export const BLOB_STORE_PORT_NAME = "imd-blob-store";
 export const FETCH_MEDIA_PORT_NAME = "imd-fetch-media";
 export const AUTO_PIP_CONFIG_EVENT = "imd:auto-pip-config";
+export const INSTAGRAM_IMAGE_CANDIDATES_EVENT =
+  "imd:instagram-image-candidates";
+export const INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT =
+  "imd:request-instagram-image-candidates";
 
 export const DOWNLOAD_NAVIGATION_WARNING =
   "You cannot leave or reload this page while a download is in progress. " +

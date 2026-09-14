@@ -1,6 +1,8 @@
 import { initAutoPipBridge } from "./src/bridge/auto-pip.js";
+import { initInstagramImageCandidateBridge } from "./src/bridge/instagram-image-candidates.js";
 
 initAutoPipBridge();
+initInstagramImageCandidateBridge();
 
 const DOWNLOAD_EVENT = "imd:download-blob-video";
 const TRIM_EVENT = "imd:trim-blob-video";

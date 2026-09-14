@@ -27,6 +27,7 @@ export let autoPipMutationObserver = null;
 export let autoPipResizeObserver = null;
 export const mediaHoverListeners = new WeakMap();
 export const instagramNativeControlState = new WeakMap();
+export const instagramImageCandidatesByAsset = new Map();
 export const videoTrimRecordings = new Map();
 export const blobJobIntent = new Map();
 export const finalizingBlobJobIds = new Set();
@@ -108,4 +109,26 @@ export function setAutoPipMutationObserver(observer) {
 }
 export function setAutoPipResizeObserver(observer) {
   autoPipResizeObserver = observer;
+}
+export function storeInstagramImageCandidate(
+  assetKey,
+  candidate,
+  maxCandidates,
+) {
+  let entries = instagramImageCandidatesByAsset.get(assetKey);
+  if (!entries) {
+    entries = new Map();
+    instagramImageCandidatesByAsset.set(assetKey, entries);
+  }
+  entries.set(candidate.url, candidate);
+  while (entries.size > maxCandidates) {
+    entries.delete(entries.keys().next().value);
+  }
+}
+export function trimInstagramImageCandidates(maxAssets) {
+  while (instagramImageCandidatesByAsset.size > maxAssets) {
+    instagramImageCandidatesByAsset.delete(
+      instagramImageCandidatesByAsset.keys().next().value,
+    );
+  }
 }

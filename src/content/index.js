@@ -20,6 +20,7 @@ import {
 } from './media-tracking.js';
 import { updateAllButtonPositions, updatePreviewButtonVisibility } from './action-ui.js';
 import { closeContextMenu } from './context-menu.js';
+import { initInstagramImageCandidates } from './instagram-image-candidates.js';
 import {
   applyAutoPictureInPictureSetting,
   initAutoPictureInPicture,
@@ -31,6 +32,8 @@ import './nav-guards.js';
 import './messaging.js';
 import './context-menu.js';
 import './media-tracking.js';
+
+initInstagramImageCandidates();
 
 function init() {
   chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {

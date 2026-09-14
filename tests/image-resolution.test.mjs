@@ -7,6 +7,9 @@ const {
   getHighestResolutionImageUrl,
   resolveHighestResolutionImageUrl,
 } = await import("../src/content/image-resolution.js");
+const { instagramImageCandidatesByAsset } = await import(
+  "../src/content/state.js"
+);
 
 function createElement(attributes = {}) {
   return {
@@ -96,4 +99,24 @@ test("probes an original URL that has no size descriptor", async () => {
     await resolveHighestResolutionImageUrl(image),
     "https://cdn.example/original.jpg",
   );
+});
+
+test("selects an early-captured Instagram candidate for the same asset", () => {
+  const feedUrl =
+    "https://scontent.cdninstagram.com/v/image_n.jpg?" +
+    "stp=dst-jpg_p1080x1080&ig_cache_key=shared";
+  const originalUrl =
+    "https://scontent.cdninstagram.com/v/image_n.jpg?" +
+    "stp=dst-jpg&ig_cache_key=shared";
+  instagramImageCandidatesByAsset.set("cache:shared", new Map([
+    [originalUrl, { url: originalUrl, width: 2599, height: 3465 }],
+  ]));
+  const image = createImage({}, {
+    naturalWidth: 1080,
+    src: feedUrl,
+    currentSrc: feedUrl,
+  });
+
+  assert.equal(getHighestResolutionImageUrl(image), originalUrl);
+  instagramImageCandidatesByAsset.clear();
 });
