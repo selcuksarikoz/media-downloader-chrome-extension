@@ -1,4 +1,9 @@
 import { buildBrowserDownloadOptions } from "./src/background/download-options.js";
+import {
+  canFetchWithReferrer,
+  fetchMediaWithReferrer,
+  probeHotlinkProtection,
+} from "./src/background/hotlink-download.js";
 
 const FETCH_PORT = "imd-fetch-media";
 const BLOB_STORE_PORT = "imd-blob-store";
@@ -464,7 +469,7 @@ chrome.downloads.onChanged.addListener((delta) => {
   if (entry.isObjectUrl !== false) {
     URL.revokeObjectURL(entry.url);
   }
-  deleteJob(entry.jobId).catch(() => {});
+  if (entry.jobId) deleteJob(entry.jobId).catch(() => {});
 });
 
 async function buildBlobFromChunks(jobId) {
@@ -654,24 +659,10 @@ setTimeout(() => finalizeInterruptedJobs(null), 5000);
 // Regular (URL) media downloads
 // ---------------------------------------------------------------------------
 
-function downloadMedia({ url, folder, saveAs, mediaType, videoId }, tabId) {
+function startBrowserDownload(download, tabId, videoId) {
   return new Promise((resolve, reject) => {
-    if (typeof url !== "string" || !url) {
-      reject(new TypeError("Download URL must be a non-empty string."));
-      return;
-    }
-    let filename = getFilenameFromUrl(url, mediaType);
-
-    if (typeof folder === "string") {
-      folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
-      if (folder && !hasForbiddenFolder(folder)) {
-        filename = `${folder}/${filename}`;
-        saveAs = false;
-      }
-    }
-
     chrome.downloads.download(
-      buildBrowserDownloadOptions({ url, filename, saveAs }),
+      buildBrowserDownloadOptions(download),
       (downloadId) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
@@ -683,6 +674,70 @@ function downloadMedia({ url, folder, saveAs, mediaType, videoId }, tabId) {
       },
     );
   });
+}
+
+/**
+ * Serve a hotlink-protected URL by fetching it with a `Referer` the CDN
+ * accepts and downloading the resulting blob. The page is never touched, so
+ * full downloads and trims keep their existing behavior.
+ */
+async function downloadBlobMedia(url, filename, saveAs, tabId, videoId) {
+  const probe = await probeHotlinkProtection(url);
+  if (!probe.blocked || !probe.fetchable) return null;
+  const blob = await fetchMediaWithReferrer(url);
+  const { url: blobUrl, isObjectUrl } = await createDownloadableUrl(blob);
+  try {
+    const downloadId = await startBrowserDownload(
+      { url: blobUrl, filename, saveAs },
+      tabId,
+      videoId,
+    );
+    if (isObjectUrl) {
+      activeBlobUrls.set(downloadId, { jobId: null, url: blobUrl, isObjectUrl });
+    }
+    return downloadId;
+  } catch (error) {
+    if (isObjectUrl) URL.revokeObjectURL(blobUrl);
+    throw error;
+  }
+}
+
+async function downloadMedia(
+  { url, folder, saveAs, mediaType, videoId },
+  tabId,
+) {
+  if (typeof url !== "string" || !url) {
+    throw new TypeError("Download URL must be a non-empty string.");
+  }
+  let filename = getFilenameFromUrl(url, mediaType);
+
+  if (typeof folder === "string") {
+    folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    if (folder && !hasForbiddenFolder(folder)) {
+      filename = `${folder}/${filename}`;
+      saveAs = false;
+    }
+  }
+
+  if (canFetchWithReferrer(url)) {
+    try {
+      const downloadId = await downloadBlobMedia(
+        url,
+        filename,
+        saveAs,
+        tabId,
+        videoId,
+      );
+      if (downloadId !== null) return downloadId;
+    } catch (error) {
+      console.warn(
+        "[Media Downloader] Referrer download failed, using a direct download:",
+        error,
+      );
+    }
+  }
+
+  return startBrowserDownload({ url, filename, saveAs }, tabId, videoId);
 }
 
 /**
