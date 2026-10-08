@@ -58,13 +58,21 @@ function parseContentLength(header) {
  */
 export async function probeHotlinkProtection(url) {
   if (!canFetchWithReferrer(url)) return { blocked: false, fetchable: false };
+  // A `chrome.downloads` request carries no Origin, Referer or Sec-Fetch-*
+  // headers, while a worker fetch always does and may be let through. Strip
+  // them so the probe sees what the real download would get.
+  const stripped = [
+    "Origin",
+    "Referer",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+  ].map((header) => ({ header, operation: "remove" }));
   let response;
   try {
-    response = await fetch(url, {
-      method: "HEAD",
-      cache: "no-store",
-      redirect: "follow",
-    });
+    response = await withHeaderRule(url, stripped, () =>
+      fetch(url, { method: "HEAD", cache: "no-store", redirect: "follow" }),
+    );
   } catch {
     return { blocked: false, fetchable: false };
   }
@@ -91,33 +99,42 @@ async function updateRule(id, rule) {
 }
 
 /**
- * Fetch the media with a `Referer` pointing at its own origin, which is what
- * the browser itself sends for a cross-origin image request under
- * `strict-origin-when-cross-origin`.
+ * Run `task` while a header rewrite applies to requests for exactly `url`,
+ * then always remove the rule again.
  */
-export async function fetchMediaWithReferrer(url) {
-  const dnr = getDnr();
-  if (!dnr) throw new Error("Header rewriting is unavailable.");
+async function withHeaderRule(url, requestHeaders, task) {
   const id = nextRuleId++;
-  let referrer;
-  try {
-    referrer = `${new URL(url).origin}/`;
-  } catch {
-    throw new TypeError("Media URL must be an absolute http(s) URL.");
-  }
   await updateRule(id, {
     id,
     priority: 1,
-    action: {
-      type: "modifyHeaders",
-      requestHeaders: [{ header: "Referer", operation: "set", value: referrer }],
-    },
+    action: { type: "modifyHeaders", requestHeaders },
     condition: {
       urlFilter: toUrlFilter(url),
       resourceTypes: ["xmlhttprequest"],
     },
   });
   try {
+    return await task();
+  } finally {
+    await updateRule(id, null).catch(() => {});
+  }
+}
+
+/**
+ * Fetch the media with a `Referer` pointing at its own origin, which is what
+ * the browser itself sends for a cross-origin image request under
+ * `strict-origin-when-cross-origin`.
+ */
+export async function fetchMediaWithReferrer(url) {
+  if (!getDnr()) throw new Error("Header rewriting is unavailable.");
+  let referrer;
+  try {
+    referrer = `${new URL(url).origin}/`;
+  } catch {
+    throw new TypeError("Media URL must be an absolute http(s) URL.");
+  }
+  const referer = [{ header: "Referer", operation: "set", value: referrer }];
+  return withHeaderRule(url, referer, async () => {
     const response = await fetch(url, {
       credentials: "include",
       redirect: "follow",
@@ -134,7 +151,5 @@ export async function fetchMediaWithReferrer(url) {
       throw new Error(`Unexpected media type (${contentType}).`);
     }
     return await response.blob();
-  } finally {
-    await updateRule(id, null).catch(() => {});
-  }
+  });
 }

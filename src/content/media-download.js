@@ -124,11 +124,25 @@ export async function downloadMedia(media, preferredUrl) {
     }
     throw new Error(response?.error || "Download failed.");
   }
+  if (response.anchor) await saveThroughAnchor(response.anchor);
   showToast(
     media.tagName === "VIDEO"
       ? "Video download started."
       : "Image download started.",
   );
+}
+
+/** Save bytes the worker fetched with the browser's own download flow. */
+async function saveThroughAnchor({ href, filename }) {
+  const blobUrl = URL.createObjectURL(await (await fetch(href)).blob());
+  const anchor = document.createElement("a");
+  anchor.href = blobUrl;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 }
 
 /** Open a preview tab for an image or captured video frame. */

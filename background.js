@@ -84,7 +84,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.action === "download") {
     downloadMedia(message, sender.tab?.id)
-      .then((downloadId) => sendResponse({ ok: true, downloadId }))
+      .then((result) =>
+        sendResponse(
+          typeof result === "object"
+            ? { ok: true, anchor: result.anchor }
+            : { ok: true, downloadId: result },
+        ),
+      )
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -413,6 +419,16 @@ async function downloadJob(jobId) {
  * exist; otherwise encode the blob as a data: URL with FileReader so the
  * download can still start from the service worker.
  */
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve({ url: reader.result });
+    reader.onerror = () =>
+      reject(new Error("Blob could not be encoded for download."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function createDownloadableUrl(blob) {
   if (typeof URL.createObjectURL === "function") {
     return Promise.resolve({ url: URL.createObjectURL(blob), isObjectUrl: true });
@@ -681,10 +697,20 @@ function startBrowserDownload(download, tabId, videoId) {
  * accepts and downloading the resulting blob. The page is never touched, so
  * full downloads and trims keep their existing behavior.
  */
+/**
+ * Serve a hotlink-protected URL by fetching it with a `Referer` the CDN
+ * accepts. With Save As the page saves the bytes through `<a download>` so the
+ * browser keeps both the real filename and its last Save As folder; naming a
+ * nameless blob through `chrome.downloads` resets that folder to Downloads.
+ */
 async function downloadBlobMedia(url, filename, saveAs, tabId, videoId) {
   const probe = await probeHotlinkProtection(url);
   if (!probe.blocked || !probe.fetchable) return null;
   const blob = await fetchMediaWithReferrer(url);
+  if (saveAs === true && tabId !== undefined) {
+    const { url: dataUrl } = await blobToDataUrl(blob);
+    return { anchor: { href: dataUrl, filename } };
+  }
   const { url: blobUrl, isObjectUrl } = await createDownloadableUrl(blob);
   try {
     const downloadId = await startBrowserDownload(
