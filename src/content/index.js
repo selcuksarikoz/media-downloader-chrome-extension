@@ -21,6 +21,7 @@ import {
 import { updateAllButtonPositions, updatePreviewButtonVisibility } from './action-ui.js';
 import { closeContextMenu } from './context-menu.js';
 import { initInstagramImageCandidates } from './instagram-image-candidates.js';
+import { initInstagramPostImageUpgrade } from './instagram-post-image.js';
 import {
   applyAutoPictureInPictureSetting,
   initAutoPictureInPicture,
@@ -34,6 +35,7 @@ import './context-menu.js';
 import './media-tracking.js';
 
 initInstagramImageCandidates();
+initInstagramPostImageUpgrade();
 
 function init() {
   chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {

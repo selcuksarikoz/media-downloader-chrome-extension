@@ -51,6 +51,10 @@ export const INSTAGRAM_IMAGE_CANDIDATES_EVENT =
   "imd:instagram-image-candidates";
 export const INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT =
   "imd:request-instagram-image-candidates";
+export const INSTAGRAM_POST_IMAGE_REQUEST_EVENT =
+  "imd:instagram-post-image-request";
+export const INSTAGRAM_POST_IMAGE_RESULT_EVENT =
+  "imd:instagram-post-image-result";
 
 export const DOWNLOAD_NAVIGATION_WARNING =
   "You cannot leave or reload this page while a download is in progress. " +

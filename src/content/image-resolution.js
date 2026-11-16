@@ -1,6 +1,10 @@
 import { parseSrcset } from './utils.js';
 import { instagramImageCandidatesByAsset } from './state.js';
-import { getInstagramImageAssetKey } from '../shared/instagram-image.js';
+import { getInstagramImageAssetKeys } from '../shared/instagram-image.js';
+import {
+  needsInstagramOriginal,
+  upgradeInstagramImageCandidates,
+} from './instagram-post-image.js';
 
 const SRCSET_ATTRIBUTES = ["srcset", "data-srcset", "data-lazy-srcset"];
 const URL_ATTRIBUTES = [
@@ -78,9 +82,9 @@ export function collectImageCandidates(img) {
   add(img.currentSrc, img.naturalWidth || 0);
   const declaredCandidates = [...candidates.values()];
   const assetKeys = new Set(
-    declaredCandidates
-      .map(({ url }) => getInstagramImageAssetKey(url, document.baseURI))
-      .filter(Boolean),
+    declaredCandidates.flatMap(({ url }) =>
+      getInstagramImageAssetKeys(url, document.baseURI)
+    ),
   );
   assetKeys.forEach((assetKey) => {
     instagramImageCandidatesByAsset.get(assetKey)?.forEach((candidate) => {
@@ -101,7 +105,13 @@ function rankImageCandidates(candidates) {
 
 /** Resolve the widest declared URL, probing candidates without size descriptors. */
 export async function resolveHighestResolutionImageUrl(img) {
-  const candidates = collectImageCandidates(img);
+  let candidates = collectImageCandidates(img);
+  const best = rankImageCandidates(candidates)[0];
+  if (needsInstagramOriginal(best)) {
+    if (await upgradeInstagramImageCandidates(img, best)) {
+      candidates = collectImageCandidates(img);
+    }
+  }
   const unresolved = candidates.filter(({ estimatedWidth }) => !estimatedWidth);
   if (unresolved.length > 0 && typeof Image === "function") {
     await Promise.all(unresolved.map(async (candidate) => {

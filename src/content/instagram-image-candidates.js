@@ -2,7 +2,7 @@ import {
   storeInstagramImageCandidate,
   trimInstagramImageCandidates,
 } from "./state.js";
-import { getInstagramImageAssetKey } from "../shared/instagram-image.js";
+import { getInstagramImageAssetKeys } from "../shared/instagram-image.js";
 import {
   INSTAGRAM_IMAGE_CANDIDATES_EVENT,
   INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT,
@@ -22,13 +22,19 @@ function receiveCandidates(event) {
 
   for (const candidate of candidates.slice(0, MAX_ASSETS)) {
     if (typeof candidate?.url !== "string") continue;
-    const assetKey = getInstagramImageAssetKey(candidate.url, document.baseURI);
-    if (!assetKey) continue;
-    storeInstagramImageCandidate(assetKey, {
+    const entry = {
       url: candidate.url,
       width: toDimension(candidate.width),
       height: toDimension(candidate.height),
-    }, MAX_CANDIDATES_PER_ASSET);
+    };
+    getInstagramImageAssetKeys(candidate.url, document.baseURI).forEach(
+      (assetKey) =>
+        storeInstagramImageCandidate(
+          assetKey,
+          entry,
+          MAX_CANDIDATES_PER_ASSET,
+        ),
+    );
   }
 
   trimInstagramImageCandidates(MAX_ASSETS);

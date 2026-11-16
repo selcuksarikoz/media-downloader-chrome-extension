@@ -1,10 +1,14 @@
 const MAX_ASSETS = 500;
 const MAX_CANDIDATES_PER_ASSET = 20;
 const MAX_VISITED_VALUES = 100_000;
+const MAX_SCRIPT_CHARS = 8_000_000;
+const MAX_EXTRACT_MS = 400;
+const SCRIPT_URL_PATTERN = /https?:\/\/[^\s"'<>\\]+/g;
 const INSTAGRAM_IMAGE_CANDIDATES_EVENT = "imd:instagram-image-candidates";
 const INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT =
   "imd:request-instagram-image-candidates";
 const candidatesByAsset = new Map();
+const scannedScripts = new WeakSet();
 
 function isInstagramPage() {
   return (
@@ -61,14 +65,15 @@ function addCandidate(output, rawUrl, owner = {}) {
   });
 }
 
-export function extractInstagramImageCandidates(payload) {
+export function extractInstagramImageCandidates(payload, deadline = Infinity) {
   const output = new Map();
   const pending = [payload];
   let visited = 0;
 
   while (pending.length > 0 && visited < MAX_VISITED_VALUES) {
-    const value = pending.pop();
     visited += 1;
+    if ((visited & 2047) === 0 && Date.now() > deadline) break;
+    const value = pending.pop();
     if (typeof value === "string") {
       addCandidate(output, value);
       continue;
@@ -85,6 +90,46 @@ export function extractInstagramImageCandidates(payload) {
   }
 
   return [...output.values()];
+}
+
+/** Pull CDN image URLs straight out of text that is not valid JSON. */
+export function extractInstagramImageCandidatesFromText(
+  text,
+  deadline = Infinity,
+) {
+  const output = new Map();
+  for (const match of text.matchAll(SCRIPT_URL_PATTERN)) {
+    addCandidate(output, match[0]);
+    if (Date.now() > deadline) break;
+  }
+  return [...output.values()];
+}
+
+function decodeScriptText(text) {
+  return text
+    .replaceAll("\\/", "/")
+    .replace(/\\u0026/gi, "&")
+    .replaceAll("&amp;", "&");
+}
+
+/**
+ * Instagram renders the first feed page (and every permalink) from JSON that is
+ * embedded in the document instead of fetched, so the 2K variants only exist
+ * there. Extract them from an inline script's text.
+ */
+export function extractInstagramImageCandidatesFromScript(
+  text,
+  deadline = Infinity,
+) {
+  if (typeof text !== "string" || !text) return [];
+  if (text.length > MAX_SCRIPT_CHARS) return [];
+  if (!text.includes("cdninstagram") && !text.includes("fbcdn")) return [];
+  const decoded = decodeScriptText(text);
+  try {
+    return extractInstagramImageCandidates(JSON.parse(decoded), deadline);
+  } catch {
+    return extractInstagramImageCandidatesFromText(decoded, deadline);
+  }
 }
 
 function rememberCandidates(candidates) {
@@ -145,7 +190,46 @@ function inspectXhrResponse(xhr) {
   } catch {}
 }
 
+function scanScriptElement(script, deadline) {
+  if (!script || scannedScripts.has(script)) return;
+  scannedScripts.add(script);
+  if (script.src) return;
+  emitCandidates(rememberCandidates(
+    extractInstagramImageCandidatesFromScript(script.textContent, deadline),
+  ));
+}
+
+function scanInlineScripts() {
+  const deadline = Date.now() + MAX_EXTRACT_MS;
+  for (const script of document.scripts) {
+    scanScriptElement(script, deadline);
+    if (Date.now() > deadline) break;
+  }
+}
+
+function observeInlineScripts() {
+  if (typeof MutationObserver !== "function" || !document.documentElement) {
+    return;
+  }
+  new MutationObserver((records) => {
+    const deadline = Date.now() + MAX_EXTRACT_MS;
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node?.nodeType === 1 && node.tagName === "SCRIPT") {
+          scanScriptElement(node, deadline);
+        }
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+
+function initInlineScriptScan() {
+  scanInlineScripts();
+  observeInlineScripts();
+}
+
 function emitSnapshot() {
+  scanInlineScripts();
   emitCandidates(
     [...candidatesByAsset.values()].flatMap((entries) => [...entries.values()]),
   );
@@ -177,4 +261,11 @@ export function initInstagramImageCandidateBridge() {
     INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT,
     emitSnapshot,
   );
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initInlineScriptScan, {
+      once: true,
+    });
+  } else {
+    initInlineScriptScan();
+  }
 }

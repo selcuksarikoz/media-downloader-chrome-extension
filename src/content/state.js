@@ -28,6 +28,7 @@ export let autoPipResizeObserver = null;
 export const mediaHoverListeners = new WeakMap();
 export const instagramNativeControlState = new WeakMap();
 export const instagramImageCandidatesByAsset = new Map();
+export const instagramPostImageRequests = new Map();
 export const videoTrimRecordings = new Map();
 export const blobJobIntent = new Map();
 export const finalizingBlobJobIds = new Set();
@@ -120,6 +121,8 @@ export function storeInstagramImageCandidate(
     entries = new Map();
     instagramImageCandidatesByAsset.set(assetKey, entries);
   }
+  const existing = entries.get(candidate.url);
+  if (existing && existing.width > candidate.width) return;
   entries.set(candidate.url, candidate);
   while (entries.size > maxCandidates) {
     entries.delete(entries.keys().next().value);

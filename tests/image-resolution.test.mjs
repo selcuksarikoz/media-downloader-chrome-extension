@@ -120,3 +120,47 @@ test("selects an early-captured Instagram candidate for the same asset", () => {
   assert.equal(getHighestResolutionImageUrl(image), originalUrl);
   instagramImageCandidatesByAsset.clear();
 });
+
+test("matches a captured candidate by filename when cache keys differ", () => {
+  const feedUrl =
+    "https://scontent.cdninstagram.com/v/image_n.jpg?" +
+    "stp=dst-jpg_p1080x1080&ig_cache_key=feed";
+  const originalUrl =
+    "https://scontent.fra5-1.fna.fbcdn.net/v/image_n.jpg?stp=dst-jpg&oh=signed";
+  instagramImageCandidatesByAsset.set("file:image_n.jpg", new Map([
+    [originalUrl, { url: originalUrl, width: 3072, height: 3840 }],
+  ]));
+  const image = createImage({}, {
+    naturalWidth: 1080,
+    src: feedUrl,
+    currentSrc: feedUrl,
+  });
+
+  assert.equal(getHighestResolutionImageUrl(image), originalUrl);
+  instagramImageCandidatesByAsset.clear();
+});
+
+test("does not downgrade a stored candidate that already has a width", async () => {
+  const { storeInstagramImageCandidate } = await import(
+    "../src/content/state.js"
+  );
+  const originalUrl =
+    "https://scontent.cdninstagram.com/v/image_n.jpg?stp=dst-jpg&oh=signed";
+  storeInstagramImageCandidate("file:image_n.jpg", {
+    url: originalUrl,
+    width: 3072,
+    height: 3840,
+  }, 20);
+  storeInstagramImageCandidate("file:image_n.jpg", {
+    url: originalUrl,
+    width: 0,
+    height: 0,
+  }, 20);
+
+  assert.equal(
+    instagramImageCandidatesByAsset.get("file:image_n.jpg").get(originalUrl)
+      .width,
+    3072,
+  );
+  instagramImageCandidatesByAsset.clear();
+});
