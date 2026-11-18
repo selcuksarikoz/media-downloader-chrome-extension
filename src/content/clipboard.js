@@ -1,15 +1,15 @@
-import { settings } from './state.js';
-import { getFrameCaptureFormat, getClipboardImageFormat } from './utils.js';
-import { captureVideoFrameBlobWithFallbacks } from './capture-core.js';
-import { resolveHighestResolutionImageUrl } from './image-resolution.js';
-import { fetchImageBlob, fetchImageBlobViaBackground } from './media-fetch.js';
+import { settings } from "./state.js";
+import { getFrameCaptureFormat, getClipboardImageFormat } from "./utils.js";
+import { captureVideoFrameBlobWithFallbacks } from "./capture-core.js";
+import { resolveHighestResolutionImageUrl } from "./image-resolution.js";
+import { fetchImageBlob, fetchImageBlobViaBackground } from "./media-fetch.js";
 
 export async function copyImageToClipboard(image) {
   const url = await resolveHighestResolutionImageUrl(image);
   let blob;
   try {
     blob = await fetchImageBlob(url);
-  } catch (error) {
+  } catch {
     blob = await fetchImageBlobViaBackground(url);
   }
   const copiedType = await copyBlobToClipboard(blob);
@@ -19,10 +19,7 @@ export async function copyImageToClipboard(image) {
 export async function copyVideoFrameToClipboard(video) {
   const preferredFormat = getFrameCaptureFormat(settings.captureType);
   const clipboardFormat = getClipboardImageFormat(preferredFormat);
-  const blob = await captureVideoFrameBlobWithFallbacks(
-    video,
-    clipboardFormat.extension,
-  );
+  const blob = await captureVideoFrameBlobWithFallbacks(video, clipboardFormat.extension);
   const copiedType = await copyBlobToClipboard(blob);
   return { copiedType };
 }
@@ -34,9 +31,7 @@ async function copyBlobToClipboard(blob) {
     typeof navigator.clipboard.write !== "function" ||
     typeof ClipboardItem === "undefined"
   ) {
-    throw new Error(
-      "Clipboard is not available on this page (an HTTPS page is required).",
-    );
+    throw new Error("Clipboard is not available on this page (an HTTPS page is required).");
   }
 
   // Cross-origin or opaque-response blobs are rejected by Chromium's clipboard
@@ -45,9 +40,7 @@ async function copyBlobToClipboard(blob) {
   // non-CORS images (and captured video frames) without relying on the
   // server-supplied Content-Type or `ClipboardItem.supports` heuristics.
   const png = await convertImageBlobToPng(blob);
-  await navigator.clipboard.write([
-    new ClipboardItem({ "image/png": png }),
-  ]);
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
   return "png";
 }
 
@@ -61,8 +54,7 @@ async function convertImageBlobToPng(blob) {
   bitmap.close();
   return new Promise((resolve, reject) => {
     canvas.toBlob(
-      (png) =>
-        png ? resolve(png) : reject(new Error("PNG conversion failed.")),
+      (png) => (png ? resolve(png) : reject(new Error("PNG conversion failed."))),
       "image/png",
     );
   });

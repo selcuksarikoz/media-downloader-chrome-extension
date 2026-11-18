@@ -5,35 +5,29 @@ import {
   mediaMutationObserver,
   setMediaMutationObserver,
   setSettings,
-  mediaControls,
-  trackedMedia,
-} from './state.js';
-import { DEFAULT_SETTINGS, BLOB_STATUS_EVENT, CAPTURE_FROM_MSE_RESULT_EVENT } from './constants.js';
-import { hasForbiddenFolder } from './utils.js';
+} from "./state.js";
+import { DEFAULT_SETTINGS } from "./constants.js";
+import { hasForbiddenFolder } from "./utils.js";
 import {
   rebuildAllMedia,
   startObserver,
   updateVideoControls,
   processAllMedia,
   cleanupMedia,
-  trackMedia,
-} from './media-tracking.js';
-import { updateAllButtonPositions, updatePreviewButtonVisibility } from './action-ui.js';
-import { closeContextMenu } from './context-menu.js';
-import './action-visibility.js';
-import { initInstagramImageCandidates } from './instagram-image-candidates.js';
-import { initInstagramPostImageUpgrade } from './instagram-post-image.js';
-import {
-  applyAutoPictureInPictureSetting,
-  initAutoPictureInPicture,
-} from './auto-pip.js';
-import './blob-store.js';
-import './blob-mux.js';
-import './blob-status.js';
-import './nav-guards.js';
-import './messaging.js';
-import './context-menu.js';
-import './media-tracking.js';
+} from "./media-tracking.js";
+import { updateAllButtonPositions, updatePreviewButtonVisibility } from "./action-ui.js";
+import { closeContextMenu } from "./context-menu.js";
+import "./action-visibility.js";
+import { initInstagramImageCandidates } from "./instagram-image-candidates.js";
+import { initInstagramPostImageUpgrade } from "./instagram-post-image.js";
+import { applyAutoPictureInPictureSetting, initAutoPictureInPicture } from "./auto-pip.js";
+import "./blob-store.js";
+import "./blob-mux.js";
+import "./blob-status.js";
+import "./nav-guards.js";
+import "./messaging.js";
+import "./context-menu.js";
+import "./media-tracking.js";
 
 initInstagramImageCandidates();
 initInstagramPostImageUpgrade();
@@ -74,9 +68,7 @@ function init() {
 /** Check if the current domain is in the blacklist. */
 function isCurrentDomainBlacklisted() {
   const hostname = location.hostname.toLowerCase().replace(/\.$/, "");
-  const domains = Array.isArray(settings.blacklistedDomains)
-    ? settings.blacklistedDomains
-    : [];
+  const domains = Array.isArray(settings.blacklistedDomains) ? settings.blacklistedDomains : [];
   return domains.some((domain) => {
     if (typeof domain !== "string") return false;
     const normalized = domain
@@ -84,10 +76,7 @@ function isCurrentDomainBlacklisted() {
       .replace(/^\*\./, "")
       .replace(/^www\./, "")
       .replace(/\.$/, "");
-    return (
-      normalized &&
-      (hostname === normalized || hostname.endsWith(`.${normalized}`))
-    );
+    return normalized && (hostname === normalized || hostname.endsWith(`.${normalized}`));
   });
 }
 

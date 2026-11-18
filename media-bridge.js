@@ -6,30 +6,37 @@ initAutoPipBridge();
 initInstagramImageCandidateBridge();
 initInstagramPostImageBridge();
 
-const DOWNLOAD_EVENT = "imd:download-blob-video";
-const TRIM_EVENT = "imd:trim-blob-video";
-const CONTROL_EVENT = "imd:control-blob-video";
-const STATUS_EVENT = "imd:blob-video-status";
-const BLOB_DATA_EVENT = "imd:blob-data-for-download";
-const PAGE_MEDIA_DOWNLOAD_EVENT = "imd:download-page-media";
-const PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
-const MUX_EVENT = "imd:mux-blob-tracks";
-const MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
-const NAVIGATION_BLOCKED_EVENT = "imd:navigation-blocked";
-const CAPTURE_BLOCK_EVENT = "imd:capture-block";
-const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
+import {
+  BLOB_DOWNLOAD_EVENT as DOWNLOAD_EVENT,
+  BLOB_TRIM_EVENT as TRIM_EVENT,
+  BLOB_CONTROL_EVENT as CONTROL_EVENT,
+  BLOB_STATUS_EVENT as STATUS_EVENT,
+  BLOB_DATA_EVENT,
+  PAGE_MEDIA_DOWNLOAD_EVENT,
+  BLOB_PERSIST_CHUNK_EVENT as PERSIST_CHUNK_EVENT,
+  BLOB_MUX_EVENT as MUX_EVENT,
+  BLOB_MUX_RESULT_EVENT as MUX_RESULT_EVENT,
+  NAVIGATION_BLOCKED_EVENT,
+  CAPTURE_BLOCK_EVENT,
+  CAPTURE_UNBLOCK_EVENT,
+  CAPTURE_FROM_MSE_EVENT,
+  CAPTURE_FROM_MSE_RESULT_EVENT,
+} from "./src/shared/events.js";
+import {
+  isInstagramPage,
+  isInstagramDirectVideoUrl,
+  isTelegramProgressiveUrl,
+  replaceFileExtension as replaceExtension,
+} from "./src/shared/utils.js";
+
 const blobKinds = new Map();
 const BLOB_KINDS_MAX_SIZE = 500;
 
 // Instagram prefers VP9/AV1 when Chrome advertises support, but macOS Finder
 // and Quick Look do not reliably open those codecs inside MP4. Advertise the
 // universally compatible H.264 path before Instagram selects a representation.
-if (
-  location.hostname === "instagram.com" ||
-  location.hostname.endsWith(".instagram.com")
-) {
-  const isPreviewIncompatibleCodec = (value) =>
-    /(?:vp0?9|av0?1)/i.test(String(value || ""));
+if (isInstagramPage()) {
+  const isPreviewIncompatibleCodec = (value) => /(?:vp0?9|av0?1)/i.test(String(value || ""));
 
   if (window.MediaSource?.isTypeSupported) {
     const nativeIsTypeSupported = MediaSource.isTypeSupported.bind(MediaSource);
@@ -41,16 +48,12 @@ if (
 
   const nativeCanPlayType = HTMLMediaElement.prototype.canPlayType;
   HTMLMediaElement.prototype.canPlayType = function (type) {
-    return isPreviewIncompatibleCodec(type)
-      ? ""
-      : nativeCanPlayType.call(this, type);
+    return isPreviewIncompatibleCodec(type) ? "" : nativeCanPlayType.call(this, type);
   };
 
   const mediaCapabilities = navigator.mediaCapabilities;
   if (mediaCapabilities?.decodingInfo) {
-    const nativeDecodingInfo = mediaCapabilities.decodingInfo.bind(
-      mediaCapabilities
-    );
+    const nativeDecodingInfo = mediaCapabilities.decodingInfo.bind(mediaCapabilities);
     try {
       mediaCapabilities.decodingInfo = async (config) => {
         if (isPreviewIncompatibleCodec(config?.video?.contentType)) {
@@ -141,7 +144,7 @@ window.addEventListener(
     nativeHistoryPushState.call(history, history.state, "", lastAllowedPageUrl);
     emitNavigationBlocked();
   },
-  true
+  true,
 );
 
 window.addEventListener(
@@ -152,15 +155,10 @@ window.addEventListener(
       return;
     }
     event.stopImmediatePropagation();
-    nativeHistoryReplaceState.call(
-      history,
-      history.state,
-      "",
-      lastAllowedPageUrl
-    );
+    nativeHistoryReplaceState.call(history, history.state, "", lastAllowedPageUrl);
     emitNavigationBlocked();
   },
-  true
+  true,
 );
 
 window.addEventListener("beforeunload", (event) => {
@@ -171,9 +169,7 @@ window.addEventListener("beforeunload", (event) => {
 
 function normalizeRequestUrl(input) {
   try {
-    const value = typeof input === "string" || input instanceof URL
-      ? String(input)
-      : input?.url;
+    const value = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
     return value ? new URL(value, document.baseURI).href : "";
   } catch {
     return "";
@@ -241,10 +237,7 @@ for (const method of ["arrayBuffer", "blob"]) {
   const nativeMethod = Response.prototype[method];
   Response.prototype[method] = async function (...args) {
     const payload = await nativeMethod.apply(this, args);
-    return tagMediaPayload(
-      payload,
-      responseSources.get(this) || getResponseSource(this)
-    );
+    return tagMediaPayload(payload, responseSources.get(this) || getResponseSource(this));
   };
 }
 
@@ -307,10 +300,7 @@ if (window.XMLHttpRequest) {
     xhrSources.set(this, { url: normalizeRequestUrl(url) });
     return nativeXhrOpen.call(this, method, url, ...args);
   };
-  const responseDescriptor = Object.getOwnPropertyDescriptor(
-    XMLHttpRequest.prototype,
-    "response"
-  );
+  const responseDescriptor = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, "response");
   if (responseDescriptor?.get) {
     Object.defineProperty(XMLHttpRequest.prototype, "response", {
       ...responseDescriptor,
@@ -328,11 +318,8 @@ if (window.XMLHttpRequest) {
             // for it makes Chrome report an extension error on YouTube even
             // when the request itself succeeded. Googlevideo URLs already
             // expose the byte window and full size through range/clen.
-            contentRange: getUrlContentRange(
-              this.responseURL || initial.url,
-            ),
-            contentLength:
-              Number.parseInt(this.getResponseHeader("Content-Length"), 10) || 0,
+            contentRange: getUrlContentRange(this.responseURL || initial.url),
+            contentLength: Number.parseInt(this.getResponseHeader("Content-Length"), 10) || 0,
           };
         } catch {}
         return tagMediaPayload(payload, source);
@@ -364,10 +351,7 @@ HTMLMediaElement.prototype.load = function () {
 };
 
 for (const property of ["src", "srcObject"]) {
-  const descriptor = Object.getOwnPropertyDescriptor(
-    HTMLMediaElement.prototype,
-    property
-  );
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, property);
   if (!descriptor?.set) continue;
   Object.defineProperty(HTMLMediaElement.prototype, property, {
     ...descriptor,
@@ -424,14 +408,10 @@ if (window.MediaSource && window.SourceBuffer) {
     const sourceRecord = sourceBufferRecords.get(this);
     if (sourceRecord && data) {
       sourceRecord.mediaRecord.lastAppendAt = Date.now();
-      const source = payloadSources.get(
-        ArrayBuffer.isView(data) ? data.buffer : data
-      );
+      const source = payloadSources.get(ArrayBuffer.isView(data) ? data.buffer : data);
       if (
         source?.url &&
-        !sourceRecord.bufferRecord.sources.some(
-          (existing) => existing.url === source.url
-        )
+        !sourceRecord.bufferRecord.sources.some((existing) => existing.url === source.url)
       ) {
         sourceRecord.bufferRecord.sources.push(source);
       }
@@ -442,7 +422,6 @@ if (window.MediaSource && window.SourceBuffer) {
     }
     return nativeAppendBuffer.call(this, data);
   };
-
 }
 
 const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
@@ -477,9 +456,7 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
   const { url, filename, videoId } = event.detail || {};
   if (!url || !videoId) return;
 
-  const video = document.querySelector(
-    `video[data-imd-capture-id="${CSS.escape(videoId)}"]`
-  );
+  const video = document.querySelector(`video[data-imd-capture-id="${CSS.escape(videoId)}"]`);
   if (!video) return;
 
   if (activeJobs.has(videoId)) return;
@@ -488,9 +465,7 @@ window.addEventListener(DOWNLOAD_EVENT, (event) => {
   if (!source && url.startsWith("blob:")) {
     const record = [...recentMediaSourceRecords]
       .reverse()
-      .find((candidate) =>
-        candidate.buffers.some((buffer) => buffer.chunks.length),
-      );
+      .find((candidate) => candidate.buffers.some((buffer) => buffer.chunks.length));
     if (record) {
       source = { kind: "media-source", record };
       blobKinds.set(url, source);
@@ -514,34 +489,18 @@ window.addEventListener(PAGE_MEDIA_DOWNLOAD_EVENT, (event) => {
   emitStatus(
     videoId,
     "recording",
-    isTelegram
-      ? "Downloading Telegram video…"
-      : "Downloading and finalizing Instagram video…",
-    0
+    isTelegram ? "Downloading Telegram video…" : "Downloading and finalizing Instagram video…",
+    0,
   );
 
   const operation = isTelegram
-    ? downloadTelegramProgressiveVideo(
-        url,
-        filename,
-        videoId,
-        controller.signal
-      )
-    : downloadInstagramDirectVideo(
-        url,
-        filename,
-        videoId,
-        controller.signal
-      );
+    ? downloadTelegramProgressiveVideo(url, filename, videoId, controller.signal)
+    : downloadInstagramDirectVideo(url, filename, videoId, controller.signal);
   operation
     .catch((error) => {
       if (error?.name === "AbortError") return;
       console.error("[Media Downloader] Page video download failed:", error);
-      emitStatus(
-        videoId,
-        "error",
-        error?.message || "Video download failed."
-      );
+      emitStatus(videoId, "error", error?.message || "Video download failed.");
     })
     .finally(() => {
       activeJobs.delete(videoId);
@@ -553,9 +512,7 @@ window.addEventListener(TRIM_EVENT, (event) => {
   const { url, filename, videoId, startTime } = event.detail || {};
   if (!url || !videoId) return;
 
-  const video = document.querySelector(
-    `video[data-imd-capture-id="${CSS.escape(videoId)}"]`
-  );
+  const video = document.querySelector(`video[data-imd-capture-id="${CSS.escape(videoId)}"]`);
   if (!video) return;
 
   if (activeJobs.has(videoId)) return;
@@ -564,9 +521,7 @@ window.addEventListener(TRIM_EVENT, (event) => {
   if (!source && url.startsWith("blob:")) {
     const record = [...recentMediaSourceRecords]
       .reverse()
-      .find((candidate) =>
-        candidate.buffers.some((buffer) => buffer.chunks.length),
-      );
+      .find((candidate) => candidate.buffers.some((buffer) => buffer.chunks.length));
     if (record) {
       source = { kind: "media-source", record };
       blobKinds.set(url, source);
@@ -581,10 +536,7 @@ window.addEventListener(TRIM_EVENT, (event) => {
     typeof video.captureStream === "function" &&
     Boolean(window.MediaRecorder) &&
     Boolean(getRecorderMimeType(isHdrVideo(video)));
-  if (
-    canRecordLiveTrim &&
-    (source?.kind === "media-source" || isTelegramProgressiveUrl(url))
-  ) {
+  if (canRecordLiveTrim && (source?.kind === "media-source" || isTelegramProgressiveUrl(url))) {
     if (source?.kind === "media-source") source.record.lockCount += 1;
     startJob({
       url,
@@ -608,14 +560,7 @@ window.addEventListener(TRIM_EVENT, (event) => {
   });
 });
 
-function startSourceTrim({
-  url,
-  filename,
-  videoId,
-  video,
-  startTime,
-  source,
-}) {
+function startSourceTrim({ url, filename, videoId, video, startTime, source }) {
   const controller = new AbortController();
   const signal = controller.signal;
   const wasPaused = video.paused;
@@ -635,9 +580,7 @@ function startSourceTrim({
   const save = (requestedEnd) => {
     if (settled) return;
     settled = true;
-    const currentEnd = Number.isFinite(requestedEnd)
-      ? requestedEnd
-      : video.currentTime;
+    const currentEnd = Number.isFinite(requestedEnd) ? requestedEnd : video.currentTime;
     trimEnd = Math.max(trimEnd, Math.max(trimStart, currentEnd || 0));
     video.removeEventListener("timeupdate", reportProgress);
     video.removeEventListener("ended", saveAtEnd);
@@ -660,9 +603,7 @@ function startSourceTrim({
     const currentTime = Number(video.currentTime) || 0;
     if (currentTime >= trimStart) trimEnd = Math.max(trimEnd, currentTime);
     const elapsed = Math.max(0, trimEnd - trimStart);
-    const remaining = Number.isFinite(video.duration)
-      ? Math.max(0, video.duration - trimStart)
-      : 0;
+    const remaining = Number.isFinite(video.duration) ? Math.max(0, video.duration - trimStart) : 0;
     if (remaining > 0) {
       lastProgress = Math.max(lastProgress, Math.min(100, (elapsed / remaining) * 100));
     }
@@ -717,10 +658,7 @@ function startSourceTrim({
 async function getSourceTrimTracks(url, source, videoId, signal) {
   if (source?.kind === "media-source") {
     const capturedTracks = source.record.buffers
-      .filter(
-        (buffer) =>
-          buffer?.chunks?.length && /^(audio|video)\//i.test(buffer.mimeType),
-      )
+      .filter((buffer) => buffer?.chunks?.length && /^(audio|video)\//i.test(buffer.mimeType))
       .map((buffer) => ({
         mimeType: buffer.mimeType,
         blob: new Blob(getOrderedCapturedChunks(buffer.chunks), {
@@ -749,7 +687,7 @@ async function getSourceTrimTracks(url, source, videoId, signal) {
       url,
       videoId,
       signal,
-      "Downloading Telegram trim source in parallel…"
+      "Downloading Telegram trim source in parallel…",
     );
     return [{ mimeType: contentType || blob.type || "video/mp4", blob }];
   }
@@ -770,11 +708,7 @@ window.addEventListener(CONTROL_EVENT, (event) => {
     if (recording) {
       recording.save();
     } else if (activeJobs.has(videoId)) {
-      emitStatus(
-        videoId,
-        "recording",
-        "Waiting for a savable media segment…"
-      );
+      emitStatus(videoId, "recording", "Waiting for a savable media segment…");
     }
     return;
   }
@@ -796,9 +730,6 @@ window.addEventListener(CAPTURE_UNBLOCK_EVENT, (event) => {
   if (video instanceof HTMLMediaElement) captureBlockedVideos.delete(video);
 });
 
-const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
-const CAPTURE_FROM_MSE_RESULT_EVENT = "imd:capture-from-mse-result";
-
 window.addEventListener(CAPTURE_FROM_MSE_EVENT, (event) => {
   const { url, requestId } = event.detail || {};
   if (!url || !requestId) return;
@@ -811,7 +742,7 @@ window.addEventListener(CAPTURE_FROM_MSE_EVENT, (event) => {
     window.dispatchEvent(
       new CustomEvent(CAPTURE_FROM_MSE_RESULT_EVENT, {
         detail: { requestId, blob },
-      })
+      }),
     );
   } catch {}
 });
@@ -825,7 +756,7 @@ function buildBlobFromRecordedBuffers(buffers) {
   const videoBuffer =
     buffers.find((buffer) => /video/i.test(buffer.mimeType)) ||
     buffers.reduce((largest, buffer) =>
-      buffer.chunks.length > largest.chunks.length ? buffer : largest
+      buffer.chunks.length > largest.chunks.length ? buffer : largest,
     );
   if (!videoBuffer?.chunks?.length) return null;
   const mimeType = videoBuffer.mimeType.split(";")[0] || "video/mp4";
@@ -855,9 +786,7 @@ function getOrderedCapturedChunks(chunks) {
   if (!needsOrdering) return chunks;
 
   const headers = inspected.filter((entry) => entry.decodeTime === undefined);
-  timed.sort(
-    (a, b) => a.decodeTime - b.decodeTime || a.index - b.index
-  );
+  timed.sort((a, b) => a.decodeTime - b.decodeTime || a.index - b.index);
 
   // Seeking back to zero can make the page append a fragment that was already
   // captured before the download started. Keep one fragment per decode time.
@@ -882,7 +811,7 @@ function getFragmentDecodeTime(chunk) {
         bytes[offset + 4],
         bytes[offset + 5],
         bytes[offset + 6],
-        bytes[offset + 7]
+        bytes[offset + 7],
       );
       let headerSize = 8;
       if (size === 1) {
@@ -900,10 +829,7 @@ function getFragmentDecodeTime(chunk) {
         const version = bytes[offset + headerSize];
         const valueOffset = offset + headerSize + 4;
         if (version === 1 && valueOffset + 8 <= offset + size) {
-          return (
-            view.getUint32(valueOffset) * 2 ** 32 +
-            view.getUint32(valueOffset + 4)
-          );
+          return view.getUint32(valueOffset) * 2 ** 32 + view.getUint32(valueOffset + 4);
         }
         if (valueOffset + 4 <= offset + size) {
           return view.getUint32(valueOffset);
@@ -911,11 +837,7 @@ function getFragmentDecodeTime(chunk) {
       }
 
       if (depth < 3 && (type === "moof" || type === "traf")) {
-        const nested = readBoxes(
-          offset + headerSize,
-          offset + size,
-          depth + 1
-        );
+        const nested = readBoxes(offset + headerSize, offset + size, depth + 1);
         if (nested !== undefined) return nested;
       }
       offset += size;
@@ -934,18 +856,11 @@ function startJob(job) {
     videoId,
     "recording",
     isTrim ? "Starting trim recording…" : "Preparing video download…",
-    0
+    0,
   );
   let operation;
   if (isTrim) {
-    operation = recordMediaSource(
-      video,
-      videoId,
-      filename,
-      controller.signal,
-      startTime,
-      true
-    );
+    operation = recordMediaSource(video, videoId, filename, controller.signal, startTime, true);
   } else if (source?.kind === "blob") {
     operation = downloadKnownBlob(url, filename, videoId, controller.signal);
   } else if (source?.kind === "media-source") {
@@ -954,13 +869,13 @@ function startJob(job) {
       videoId,
       filename,
       source.record.buffers,
-      controller.signal
+      controller.signal,
     );
   } else {
     operation = Promise.reject(
       new Error(
-        "Independent download is unavailable because no original media segments were captured."
-      )
+        "Independent download is unavailable because no original media segments were captured.",
+      ),
     );
   }
 
@@ -992,7 +907,7 @@ function sendBlobForDownload(blob, filename, videoId) {
     window.dispatchEvent(
       new CustomEvent(BLOB_DATA_EVENT, {
         detail: { blob, filename, videoId },
-      })
+      }),
     );
   } catch (error) {
     emitStatus(videoId, "error", error.message || "Failed to prepare download.");
@@ -1004,7 +919,7 @@ function persistChunk(videoId, blob) {
     window.dispatchEvent(
       new CustomEvent(PERSIST_CHUNK_EVENT, {
         detail: { videoId, blob },
-      })
+      }),
     );
   } catch {}
 }
@@ -1021,7 +936,7 @@ async function downloadKnownBlob(url, filename, videoId, signal) {
       filename,
       [{ mimeType: blob.type || "video/mp4", blob }],
       undefined,
-      signal
+      signal,
     );
     emitStatus(videoId, "complete", "Preview-compatible MP4 saved.", 100);
     return;
@@ -1032,67 +947,17 @@ async function downloadKnownBlob(url, filename, videoId, signal) {
   emitStatus(videoId, "complete", "Blob video downloaded.", 100);
 }
 
-function isTelegramProgressiveUrl(value) {
-  try {
-    const url = new URL(value, document.baseURI);
-    return (
-      url.protocol === "https:" &&
-      url.hostname === "web.telegram.org" &&
-      /\/progressive\//i.test(url.pathname)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isInstagramPage() {
-  return (
-    location.hostname === "instagram.com" ||
-    location.hostname.endsWith(".instagram.com")
-  );
-}
-
-function isInstagramDirectVideoUrl(value) {
-  if (!isInstagramPage()) return false;
-  try {
-    const url = new URL(value, document.baseURI);
-    return (
-      url.protocol === "https:" &&
-      (url.hostname.endsWith(".fbcdn.net") ||
-        url.hostname.endsWith(".cdninstagram.com"))
-    );
-  } catch {
-    return false;
-  }
-}
-
-async function downloadInstagramDirectVideo(
-  url,
-  filename,
-  videoId,
-  signal
-) {
-  await requestFastMux(
-    videoId,
-    filename,
-    [{ mimeType: "video/mp4", url }],
-    undefined,
-    signal
-  );
+async function downloadInstagramDirectVideo(url, filename, videoId, signal) {
+  await requestFastMux(videoId, filename, [{ mimeType: "video/mp4", url }], undefined, signal);
   emitStatus(videoId, "complete", "Preview-compatible MP4 saved.", 100);
 }
 
-async function downloadTelegramProgressiveVideo(
-  url,
-  filename,
-  videoId,
-  signal
-) {
+async function downloadTelegramProgressiveVideo(url, filename, videoId, signal) {
   const { blob, contentType } = await fetchTelegramProgressiveBlob(
     url,
     videoId,
     signal,
-    "Downloading Telegram video in parallel…"
+    "Downloading Telegram video in parallel…",
   );
   await validateVideoBlob(blob, signal);
   signal.throwIfAborted();
@@ -1101,30 +966,20 @@ async function downloadTelegramProgressiveVideo(
   emitStatus(videoId, "complete", "Telegram video downloaded.", 100);
 }
 
-async function fetchTelegramProgressiveBlob(
-  url,
-  videoId,
-  signal,
-  progressMessage
-) {
+async function fetchTelegramProgressiveBlob(url, videoId, signal, progressMessage) {
   // Telegram's progressive URLs are virtual resources resolved by Telegram
   // Web's Service Worker. It requires a byte Range and caps each response at
   // 512 KiB, so download ranges in parallel just like Telegram's own download
   // endpoint does. A plain fetch throws before producing a Response.
   const chunkSize = 512 * 1024;
-  const first = await fetchTelegramProgressiveRange(
-    url,
-    0,
-    chunkSize - 1,
-    signal
-  );
+  const first = await fetchTelegramProgressiveRange(url, 0, chunkSize - 1, signal);
   const { fullSize, contentType } = first;
   if (!Number.isSafeInteger(fullSize) || fullSize <= 0) {
     throw new Error("Telegram did not provide a valid video size.");
   }
 
   const chunkCount = Math.ceil(fullSize / chunkSize);
-  const chunks = new Array(chunkCount);
+  const chunks = Array(chunkCount);
   chunks[0] = first.data;
   let loaded = first.data.byteLength;
   let nextIndex = 1;
@@ -1139,16 +994,11 @@ async function fetchTelegramProgressiveBlob(
         url,
         start,
         Math.min(fullSize - 1, start + chunkSize - 1),
-        signal
+        signal,
       );
       chunks[index] = part.data;
       loaded += part.data.byteLength;
-      emitStatus(
-        videoId,
-        "progress",
-        progressMessage,
-        Math.min(99, (loaded / fullSize) * 100)
-      );
+      emitStatus(videoId, "progress", progressMessage, Math.min(99, (loaded / fullSize) * 100));
     }
   });
   await Promise.all(workers);
@@ -1165,9 +1015,7 @@ async function fetchTelegramProgressiveBlob(
     /(?:text\/html|application\/xhtml\+xml)/i.test(contentType) ||
     /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(prefix)
   ) {
-    throw new Error(
-      "Telegram returned a web page instead of the requested video."
-    );
+    throw new Error("Telegram returned a web page instead of the requested video.");
   }
 
   return { blob, contentType };
@@ -1215,88 +1063,53 @@ async function downloadCapturedMediaSource(
   filename,
   bufferRecords,
   signal,
-  startTime
+  startTime,
 ) {
   let restoreAcceleratedPlayback = () => {};
   try {
     const hadIndependentTracks = getIndependentTracks(bufferRecords).length > 0;
-    if (
-      await downloadIndependentTracks(
-        bufferRecords,
-        videoId,
-        filename,
-        startTime,
-        signal
-      )
-    ) return;
+    if (await downloadIndependentTracks(bufferRecords, videoId, filename, startTime, signal))
+      return;
 
     if (!isMediaFullyBuffered(video)) {
       let collectionMessage =
         "Collecting segments in the background; you can use the video normally…";
       if (!(startTime > 0)) {
         const hasCapturedFragments = bufferRecords.some((buffer) =>
-          buffer.chunks.some(
-            (chunk) => getFragmentDecodeTime(chunk) !== undefined
-          )
+          buffer.chunks.some((chunk) => getFragmentDecodeTime(chunk) !== undefined),
         );
-        const accelerated = await accelerateMediaCollection(
-          video,
-          signal,
-          !hasCapturedFragments
-        );
+        const accelerated = await accelerateMediaCollection(video, signal, !hasCapturedFragments);
         restoreAcceleratedPlayback = accelerated.restore;
         collectionMessage = `Collecting segments at ${accelerated.rate}× playback…`;
       }
-      emitStatus(
-        videoId,
-        "recording",
-        collectionMessage,
-        0
-      );
+      emitStatus(videoId, "recording", collectionMessage, 0);
       const waitResult = await waitForMediaCompletion(
         video,
         videoId,
         signal,
-        () =>
-          !hadIndependentTracks && getIndependentTracks(bufferRecords).length > 0,
-        collectionMessage
+        () => !hadIndependentTracks && getIndependentTracks(bufferRecords).length > 0,
+        collectionMessage,
       );
       if (
         waitResult === "independent" &&
-        await downloadIndependentTracks(
-          bufferRecords,
-          videoId,
-          filename,
-          startTime,
-          signal
-        )
-      ) return;
+        (await downloadIndependentTracks(bufferRecords, videoId, filename, startTime, signal))
+      )
+        return;
       if (waitResult !== "saved" && !isMediaFullyBuffered(video)) {
-        await waitForMediaCompletion(
-          video,
-          videoId,
-          signal,
-          undefined,
-          collectionMessage
-        );
+        await waitForMediaCompletion(video, videoId, signal, undefined, collectionMessage);
       }
     }
 
     signal.throwIfAborted();
 
     const availableBuffers = bufferRecords.filter(
-      (buffer) =>
-        buffer?.chunks?.length && /^(audio|video)\//i.test(buffer.mimeType)
+      (buffer) => buffer?.chunks?.length && /^(audio|video)\//i.test(buffer.mimeType),
     );
     if (!availableBuffers.length) {
       throw new Error("No MediaSource segments were captured.");
     }
 
-    if (
-      availableBuffers.length === 1 &&
-      !(startTime > 0) &&
-      !isInstagramPage()
-    ) {
+    if (availableBuffers.length === 1 && !(startTime > 0) && !isInstagramPage()) {
       const bufferRecord = availableBuffers[0];
       const mimeType = bufferRecord.mimeType.split(";")[0] || "video/mp4";
       const extension = mimeType.includes("webm") ? "webm" : "mp4";
@@ -1309,7 +1122,7 @@ async function downloadCapturedMediaSource(
       sendBlobForDownload(blob, replaceExtension(filename, extension), videoId);
     } else {
       const orderedChunks = availableBuffers.map((buffer) =>
-        getOrderedCapturedChunks(buffer.chunks)
+        getOrderedCapturedChunks(buffer.chunks),
       );
       const tracks = availableBuffers.map((buffer, index) => ({
         mimeType: buffer.mimeType,
@@ -1323,36 +1136,24 @@ async function downloadCapturedMediaSource(
         isInstagramPage()
           ? "Finalizing MP4 for system preview…"
           : "Muxing audio and video with FFmpeg…",
-        98
+        98,
       );
       try {
         await requestFastMux(videoId, filename, tracks, startTime, signal);
       } catch (orderedError) {
         const wasReordered = availableBuffers.some(
-          (buffer, index) => orderedChunks[index] !== buffer.chunks
+          (buffer, index) => orderedChunks[index] !== buffer.chunks,
         );
         if (wasReordered) {
-          emitStatus(
-            videoId,
-            "recording",
-            "Retrying mux with original segment order…",
-            98
-          );
+          emitStatus(videoId, "recording", "Retrying mux with original segment order…", 98);
           const originalTracks = availableBuffers.map((buffer) => ({
             mimeType: buffer.mimeType,
             blob: new Blob(buffer.chunks, {
-              type:
-                buffer.mimeType.split(";")[0] || "application/octet-stream",
+              type: buffer.mimeType.split(";")[0] || "application/octet-stream",
             }),
           }));
           try {
-            await requestFastMux(
-              videoId,
-              filename,
-              originalTracks,
-              startTime,
-              signal
-            );
+            await requestFastMux(videoId, filename, originalTracks, startTime, signal);
           } catch {
             await fallbackToMediaRecorder(orderedError);
             return;
@@ -1366,10 +1167,8 @@ async function downloadCapturedMediaSource(
     emitStatus(
       videoId,
       "complete",
-      startTime > 0
-        ? "Trim muxed without re-encoding."
-        : "Original media tracks muxed.",
-      100
+      startTime > 0 ? "Trim muxed without re-encoding." : "Original media tracks muxed.",
+      100,
     );
   } finally {
     restoreAcceleratedPlayback();
@@ -1380,50 +1179,28 @@ async function downloadCapturedMediaSource(
     if (signal.aborted) throw muxError;
     console.warn(
       "[Media Downloader] Captured segment mux failed; retrying with MediaRecorder:",
-      muxError
+      muxError,
     );
     restoreAcceleratedPlayback();
     restoreAcceleratedPlayback = () => {};
-    emitStatus(
-      videoId,
-      "recording",
-      "Retrying with real-time video capture…",
-      0
-    );
+    emitStatus(videoId, "recording", "Retrying with real-time video capture…", 0);
     await recordMediaSource(video, videoId, filename, signal, startTime, startTime != null);
   }
 }
 
-async function downloadIndependentTracks(
-  bufferRecords,
-  videoId,
-  filename,
-  startTime,
-  signal
-) {
+async function downloadIndependentTracks(bufferRecords, videoId, filename, startTime, signal) {
   const independentTracks = getIndependentTracks(bufferRecords);
   if (!independentTracks.length) return false;
   try {
-    emitStatus(
-      videoId,
-      "recording",
-      "Downloading original tracks independently in parallel…",
-      5
-    );
-    await requestFastMux(
-      videoId,
-      filename,
-      independentTracks,
-      startTime,
-      signal
-    );
+    emitStatus(videoId, "recording", "Downloading original tracks independently in parallel…", 5);
+    await requestFastMux(videoId, filename, independentTracks, startTime, signal);
     emitStatus(
       videoId,
       "complete",
       startTime > 0
         ? "Independent download and trim completed."
         : "Original tracks downloaded and muxed independently.",
-      100
+      100,
     );
     return true;
   } catch (error) {
@@ -1431,7 +1208,7 @@ async function downloadIndependentTracks(
     console.warn(
       "[Media Downloader] Independent track download unavailable; " +
         "falling back to captured segments:",
-      error
+      error,
     );
     return false;
   }
@@ -1439,15 +1216,13 @@ async function downloadIndependentTracks(
 
 function getIndependentTracks(bufferRecords) {
   const mediaBuffers = bufferRecords.filter((buffer) =>
-    /^(audio|video)\//i.test(buffer?.mimeType || "")
+    /^(audio|video)\//i.test(buffer?.mimeType || ""),
   );
   if (!mediaBuffers.length) return [];
 
   const tracks = [];
   for (const buffer of mediaBuffers) {
-    const source = [...(buffer.sources || [])]
-      .reverse()
-      .find(isCompleteTrackSource);
+    const source = [...(buffer.sources || [])].reverse().find(isCompleteTrackSource);
     if (!source) return [];
     tracks.push({
       mimeType: buffer.mimeType,
@@ -1472,10 +1247,7 @@ function isCompleteTrackSource(source) {
       params.has("range");
   } catch {}
   if (hasExplicitByteWindow) {
-    return (
-      isRewritableInstagramRangeUrl(source.url) ||
-      isRewritableGoogleVideoRangeUrl(source.url)
-    );
+    return isRewritableInstagramRangeUrl(source.url) || isRewritableGoogleVideoRangeUrl(source.url);
   }
 
   // Twitter/X commonly serves its canonical .mp4 track URL with status 206
@@ -1505,8 +1277,7 @@ function isRewritableInstagramRangeUrl(value) {
   try {
     const url = new URL(value);
     const isInstagramCdn =
-      url.hostname.endsWith(".fbcdn.net") ||
-      url.hostname.endsWith(".cdninstagram.com");
+      url.hostname.endsWith(".fbcdn.net") || url.hostname.endsWith(".cdninstagram.com");
     const params = url.searchParams;
     const hasRangePair =
       (params.has("bytestart") && params.has("byteend")) ||
@@ -1543,14 +1314,7 @@ function getTrackFullSize(source) {
   return Number.isSafeInteger(size) && size > 0 ? size : undefined;
 }
 
-function requestFastMux(
-  videoId,
-  filename,
-  tracks,
-  startTime,
-  signal,
-  duration,
-) {
+function requestFastMux(videoId, filename, tracks, startTime, signal, duration) {
   return new Promise((resolve, reject) => {
     const requestId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let settled = false;
@@ -1565,8 +1329,7 @@ function requestFastMux(
       if (error) reject(error);
       else resolve();
     };
-    const onAbort = () =>
-      settle(signal.reason || new DOMException("Canceled", "AbortError"));
+    const onAbort = () => settle(signal.reason || new DOMException("Canceled", "AbortError"));
     const onResult = (event) => {
       if (event.detail?.requestId !== requestId) return;
       if (event.detail.ok) {
@@ -1593,7 +1356,7 @@ function requestFastMux(
           startTime,
           duration,
         },
-      })
+      }),
     );
   });
 }
@@ -1615,8 +1378,7 @@ function waitForMediaCompletion(
   videoId,
   signal,
   independentReady,
-  collectionMessage =
-    "Collecting segments in the background; you can use the video normally…"
+  collectionMessage = "Collecting segments in the background; you can use the video normally…",
 ) {
   return new Promise((resolve, reject) => {
     let checkTimer;
@@ -1625,25 +1387,18 @@ function waitForMediaCompletion(
     const reportProgress = () => {
       let furthestBufferedTime = 0;
       for (let index = 0; index < video.buffered.length; index += 1) {
-        furthestBufferedTime = Math.max(
-          furthestBufferedTime,
-          video.buffered.end(index)
-        );
+        furthestBufferedTime = Math.max(furthestBufferedTime, video.buffered.end(index));
       }
       const furthestTime = Math.max(
         furthestBufferedTime,
         Number.isFinite(video.currentTime) ? video.currentTime : 0,
       );
-      const progress = Number.isFinite(video.duration) && video.duration > 0
-        ? Math.max(lastProgress, (furthestTime / video.duration) * 100)
-        : undefined;
+      const progress =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? Math.max(lastProgress, (furthestTime / video.duration) * 100)
+          : undefined;
       if (Number.isFinite(progress)) lastProgress = Math.min(100, progress);
-      emitStatus(
-        videoId,
-        "progress",
-        collectionMessage,
-        progress
-      );
+      emitStatus(videoId, "progress", collectionMessage, progress);
       if (independentReady?.()) {
         settle(null, "independent");
         return;
@@ -1664,17 +1419,11 @@ function waitForMediaCompletion(
     };
     const finish = () => settle(null, "complete");
     const save = () => {
-      emitStatus(
-        videoId,
-        "recording",
-        "Finalizing collected video…",
-        lastProgress
-      );
+      emitStatus(videoId, "recording", "Finalizing collected video…", lastProgress);
       settle(null, "saved");
     };
     const cancel = () => settle(signal.reason || new DOMException("Canceled", "AbortError"));
-    const fail = () =>
-      settle(new Error("Video playback failed while collecting segments."));
+    const fail = () => settle(new Error("Video playback failed while collecting segments."));
 
     activeRecordings.set(videoId, { save, cancel });
     if (signal.aborted) {
@@ -1751,14 +1500,7 @@ async function accelerateMediaCollection(video, signal, restartFromBeginning) {
   }
 }
 
-async function recordMediaSource(
-  video,
-  videoId,
-  filename,
-  signal,
-  startTime,
-  isTrim = false
-) {
+async function recordMediaSource(video, videoId, filename, signal, startTime, isTrim = false) {
   signal.throwIfAborted();
   if (typeof video.captureStream !== "function" || !window.MediaRecorder) {
     throw new Error("This browser cannot record MediaSource video streams.");
@@ -1800,8 +1542,7 @@ async function recordMediaSource(
   try {
     const seeks = video.seekable.length && video.duration !== Infinity;
     seekTarget = hasStartTime ? Math.min(startTime, video.duration) : 0;
-    const needsSeek =
-      seeks && Math.abs(captureVideo.currentTime - seekTarget) > 0.05;
+    const needsSeek = seeks && Math.abs(captureVideo.currentTime - seekTarget) > 0.05;
     if (seeks) {
       captureVideo.currentTime = seekTarget;
       if (needsSeek) await waitForVideoSeek(captureVideo, signal);
@@ -1835,12 +1576,12 @@ async function recordMediaSource(
     lastTimeupdateAt = Date.now();
     recordingElapsed = Math.max(
       recordingElapsed,
-      Math.max(0, captureVideo.currentTime - recordingStartPos)
+      Math.max(0, captureVideo.currentTime - recordingStartPos),
     );
     const label = `Recording ${recordingElapsed.toFixed(1)}s…`;
     recordingProgress = Math.max(
       recordingProgress,
-      getRecordingProgress(captureVideo, recordingStartPos) || 0
+      getRecordingProgress(captureVideo, recordingStartPos) || 0,
     );
     emitStatus(videoId, "progress", label, recordingProgress);
   };
@@ -1859,7 +1600,7 @@ async function recordMediaSource(
     recorder.addEventListener(
       "error",
       () => reject(recorder.error || new DOMException("Recording failed", "MediaRecorderError")),
-      { once: true }
+      { once: true },
     );
   });
 
@@ -1875,7 +1616,6 @@ async function recordMediaSource(
     signal.throwIfAborted();
   }
 
-  let completed = false;
   let stallTimer;
   let lastProgressTime = captureVideo.currentTime;
   try {
@@ -1889,7 +1629,12 @@ async function recordMediaSource(
     recordingStartPos = captureVideo.currentTime;
     recorder.start(1000);
     safetyTimer = setInterval(() => {
-      if (captureVideo.ended || (Number.isFinite(captureVideo.duration) && captureVideo.duration > 0 && captureVideo.currentTime >= captureVideo.duration - 0.15)) {
+      if (
+        captureVideo.ended ||
+        (Number.isFinite(captureVideo.duration) &&
+          captureVideo.duration > 0 &&
+          captureVideo.currentTime >= captureVideo.duration - 0.15)
+      ) {
         stop();
       }
     }, 250);
@@ -1910,7 +1655,12 @@ async function recordMediaSource(
         stop();
       }
     }, 1000);
-    emitStatus(videoId, "recording", hasStartTime ? `Recording from ${startTime}s…` : "Recording video stream…", 0);
+    emitStatus(
+      videoId,
+      "recording",
+      hasStartTime ? `Recording from ${startTime}s…` : "Recording video stream…",
+      0,
+    );
     captureVideo.addEventListener("ended", stop, { once: true });
     captureVideo.addEventListener("timeupdate", reportProgress);
     await completion;
@@ -1926,7 +1676,6 @@ async function recordMediaSource(
     signal.throwIfAborted();
     sendBlobForDownload(recordedBlob, outputName, videoId);
     emitStatus(videoId, "complete", "MediaSource recording saved.", 100);
-    completed = true;
   } finally {
     clearInterval(safetyTimer);
     clearInterval(stallTimer);
@@ -1969,9 +1718,18 @@ function waitForVideoSeek(video, signal) {
       video.removeEventListener("error", onFailed);
       signal?.removeEventListener("abort", onAbort);
     };
-    const onSeeked = () => { cleanup(); resolve(); };
-    const onFailed = () => { cleanup(); resolve(); };
-    const onAbort = () => { cleanup(); resolve(); };
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onFailed = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
+      resolve();
+    };
     timer = setTimeout(onFailed, 3000);
     video.addEventListener("seeked", onSeeked, { once: true });
     video.addEventListener("error", onFailed, { once: true });
@@ -1993,7 +1751,10 @@ function waitForFirstRenderedFrame(video, targetTime, signal) {
       if (frameId !== undefined) video.cancelVideoFrameCallback?.(frameId);
       signal?.removeEventListener("abort", onAbort);
     };
-    const onAbort = () => { cleanup(); resolve(); };
+    const onAbort = () => {
+      cleanup();
+      resolve();
+    };
     const onFrame = (_now, metadata) => {
       frameId = undefined;
       const frameTime = metadata?.mediaTime;
@@ -2006,23 +1767,6 @@ function waitForFirstRenderedFrame(video, targetTime, signal) {
     };
     timer = setTimeout(onAbort, 3000);
     video.requestVideoFrameCallback(onFrame);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-function waitForLoadedMetadata(video, signal) {
-  return new Promise((resolve, reject) => {
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) { resolve(); return; }
-    const onMeta = () => { cleanup(); resolve(); };
-    const onError = () => { cleanup(); reject(new Error("Video metadata load failed")); };
-    const onAbort = () => { cleanup(); reject(new DOMException("Canceled", "AbortError")); };
-    const cleanup = () => {
-      video.removeEventListener("loadedmetadata", onMeta);
-      video.removeEventListener("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-    };
-    video.addEventListener("loadedmetadata", onMeta, { once: true });
-    video.addEventListener("error", onError, { once: true });
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -2169,8 +1913,7 @@ function keepVideoFramesDecoded(video) {
     : setInterval(() => {
         paint();
         const currentTime = video.currentTime;
-        const frameCount =
-          video.getVideoPlaybackQuality?.().totalVideoFrames ?? lastFrameCount;
+        const frameCount = video.getVideoPlaybackQuality?.().totalVideoFrames ?? lastFrameCount;
         if (frameCount > lastFrameCount) {
           renderedFrameTimes.set(video, currentTime);
         }
@@ -2199,15 +1942,12 @@ function getRecorderMimeType(isHdr) {
     "video/mp4;codecs=hev1.2.4.L150.90,mp4a.40.2",
   ];
   if (isHdr) {
-    candidates.push(
-      "video/webm;codecs=vp9,opus",
-      "video/webm;codecs=vp9"
-    );
+    candidates.push("video/webm;codecs=vp9,opus", "video/webm;codecs=vp9");
   }
   candidates.push(
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4;codecs=avc1.64003E,mp4a.40.2",
-    "video/mp4"
+    "video/mp4",
   );
   return candidates.find((type) => MediaRecorder.isTypeSupported(type));
 }
@@ -2219,7 +1959,7 @@ function validateVideoBlob(blob, signal) {
     let settled = false;
     const timeout = setTimeout(
       () => finish(new Error("Generated video could not be validated.")),
-      8000
+      8000,
     );
     const finish = (error) => {
       if (settled) return;
@@ -2232,8 +1972,7 @@ function validateVideoBlob(blob, signal) {
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () =>
-      finish(signal.reason || new DOMException("Canceled", "AbortError"));
+    const cancel = () => finish(signal.reason || new DOMException("Canceled", "AbortError"));
     if (signal?.aborted) {
       cancel();
       return;
@@ -2251,12 +1990,12 @@ function validateVideoBlob(blob, signal) {
         }
         finish(null);
       },
-      { once: true }
+      { once: true },
     );
     probe.addEventListener(
       "error",
       () => finish(new Error("Generated file is not a playable video.")),
-      { once: true }
+      { once: true },
     );
     probe.src = url;
   });
@@ -2270,15 +2009,10 @@ function getRecordingBitrate(video) {
   return 12_000_000;
 }
 
-function replaceExtension(filename, extension) {
-  const base = (filename || `video-${Date.now()}`).replace(/\.[^.]+$/, "");
-  return `${base}.${extension}`;
-}
-
 function emitStatus(videoId, status, message, progress) {
   window.dispatchEvent(
     new CustomEvent(STATUS_EVENT, {
       detail: { videoId, status, message, progress },
-    })
+    }),
   );
 }

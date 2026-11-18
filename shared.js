@@ -1,15 +1,3 @@
-export const DEFAULT_BLACKLISTED_DOMAINS = [
-  "netflix.com",
-  "primevideo.com",
-  "disneyplus.com",
-  "hbo.com",
-  "hbomax.com",
-  "max.com",
-  "paramountplus.com",
-  "hulu.com",
-  "peacocktv.com",
-  "discoveryplus.com",
-  "localhost",
-  "127.0.0.1",
-  "0.0.0.0",
-];
+// Kept as a compatibility entry point; the single source of truth now lives
+// with the other shared settings.
+export { DEFAULT_BLACKLISTED_DOMAINS, DEFAULT_SETTINGS } from "./src/shared/settings.js";

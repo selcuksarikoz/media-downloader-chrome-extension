@@ -1,14 +1,24 @@
 import {
-  BLOB_STORE_PORT_NAME, BLOB_PERSIST_CHUNK_EVENT, CAPTURE_FROM_MSE_EVENT,
-  CAPTURE_FROM_MSE_RESULT_EVENT, BLOB_MUX_EVENT, BLOB_MUX_RESULT_EVENT,
-} from './constants.js';
+  BLOB_STORE_PORT_NAME,
+  BLOB_PERSIST_CHUNK_EVENT,
+  CAPTURE_FROM_MSE_EVENT,
+  CAPTURE_FROM_MSE_RESULT_EVENT,
+  BLOB_MUX_EVENT,
+  BLOB_MUX_RESULT_EVENT,
+} from "./constants.js";
 import {
-  mseCapturePending, blobStorePort,
-  blobStorePending, canceledBlobJobs, settings,
-  allocateMseCaptureSeq, setBlobStorePort, allocateBlobStoreSeq,
-} from './state.js';
-import { abortError } from './utils.js';
-import { muxTracksIndependently, muxTracksLocally, releaseMuxUrl } from './blob-mux.js';
+  mseCapturePending,
+  blobStorePort,
+  blobStorePending,
+  canceledBlobJobs,
+  settings,
+  allocateMseCaptureSeq,
+  setBlobStorePort,
+  allocateBlobStoreSeq,
+} from "./state.js";
+import { abortError } from "./utils.js";
+import { replaceFileExtension } from "../shared/utils.js";
+import { muxTracksIndependently, muxTracksLocally, releaseMuxUrl } from "./blob-mux.js";
 
 export function downloadMuxUrl(url, filename) {
   return new Promise((resolve, reject) => {
@@ -33,11 +43,6 @@ export function downloadMuxUrl(url, filename) {
       },
     );
   });
-}
-
-function replaceFileExtension(filename, extension) {
-  const base = (filename || `video-${Date.now()}`).replace(/\.[^.]+$/, "");
-  return `${base}.${extension}`;
 }
 
 window.addEventListener(CAPTURE_FROM_MSE_RESULT_EVENT, (event) => {
@@ -123,8 +128,7 @@ window.addEventListener(BLOB_PERSIST_CHUNK_EVENT, (event) => {
 });
 
 window.addEventListener(BLOB_MUX_EVENT, async (event) => {
-  const { requestId, videoId, filename, tracks, startTime, duration } =
-    event.detail || {};
+  const { requestId, videoId, filename, tracks, startTime, duration } = event.detail || {};
   if (!requestId || !videoId || !tracks?.length) return;
   let response = { ok: false };
   try {

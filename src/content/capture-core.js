@@ -1,15 +1,19 @@
-import { settings } from './state.js';
-import { requestMediaSourceBlob } from './blob-store.js';
-import { CAPTURE_BLOCK_EVENT, CAPTURE_UNBLOCK_EVENT } from './constants.js';
+import { settings } from "./state.js";
+import { requestMediaSourceBlob } from "./blob-store.js";
+import { CAPTURE_BLOCK_EVENT, CAPTURE_UNBLOCK_EVENT } from "./constants.js";
 import {
-  waitForVideoMetadata, waitForNextPresentedFrame, ensurePresentedFrame,
+  waitForVideoMetadata,
+  waitForNextPresentedFrame,
+  ensurePresentedFrame,
   drawVideoFrameToBlob,
-} from './canvas-draw.js';
+} from "./canvas-draw.js";
 import {
-  captureVideoFrameFromSource, captureFrameFromMediaProbe,
+  captureVideoFrameFromSource,
+  captureFrameFromMediaProbe,
   captureVideoFrameFromTab,
-} from './capture-sources.js';
-import { getVideoUrl } from './video-resolution.js';
+} from "./capture-sources.js";
+import { getVideoUrl } from "./video-resolution.js";
+import { readBlobAsDataUrl as blobToDataUrl } from "../shared/utils.js";
 
 /**
  * Capture the current video frame and return both a blob URL (for downloads,
@@ -20,20 +24,9 @@ export async function captureVideoFrame(video) {
   const blobUrl = URL.createObjectURL(blob);
   try {
     return { blobUrl, dataUrl: await blobToDataUrl(blob) };
-  } catch (error) {
+  } catch {
     return { blobUrl, dataUrl: blobUrl };
   }
-}
-
-/** Convert a Blob into a data: URL string (FileReader-based). */
-export function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () =>
-      reject(reader.error || new Error("Blob read failed."));
-    reader.readAsDataURL(blob);
-  });
 }
 
 /**
@@ -57,10 +50,7 @@ export async function captureVideoFrameBlobWithFallbacks(
       try {
         return await captureVideoFrameFromSource(video, captureType);
       } catch (sourceError) {
-        console.warn(
-          "[Media Downloader] Source frame capture failed:",
-          sourceError,
-        );
+        console.warn("[Media Downloader] Source frame capture failed:", sourceError);
       }
     }
     const mseBlob = await requestMediaSourceBlob(sourceUrl);
@@ -68,10 +58,7 @@ export async function captureVideoFrameBlobWithFallbacks(
       try {
         return await captureFrameFromMediaProbe(video, mseBlob, captureType);
       } catch (probeError) {
-        console.warn(
-          "[Media Downloader] MediaSource rebuild capture failed:",
-          probeError,
-        );
+        console.warn("[Media Downloader] MediaSource rebuild capture failed:", probeError);
       }
     }
     return await captureVideoFrameFromTab(video);
@@ -89,9 +76,7 @@ async function captureVideoFrameBlob(video, captureType = settings.captureType) 
     const ready = await waitForVideoMetadata(video);
     if (!ready) throw new Error("Video frame is not ready.");
   }
-  window.dispatchEvent(
-    new CustomEvent(CAPTURE_BLOCK_EVENT, { detail: { video } }),
-  );
+  window.dispatchEvent(new CustomEvent(CAPTURE_BLOCK_EVENT, { detail: { video } }));
   const wasPlaying = !video.paused;
   try {
     // First pass grabs the live presented frame (never paused, so the decoder
@@ -113,8 +98,6 @@ async function captureVideoFrameBlob(video, captureType = settings.captureType) 
     }
     throw lastError || new Error("Video frame capture failed.");
   } finally {
-    window.dispatchEvent(
-      new CustomEvent(CAPTURE_UNBLOCK_EVENT, { detail: { video } }),
-    );
+    window.dispatchEvent(new CustomEvent(CAPTURE_UNBLOCK_EVENT, { detail: { video } }));
   }
 }

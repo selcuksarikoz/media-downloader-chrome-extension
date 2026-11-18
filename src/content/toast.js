@@ -1,4 +1,4 @@
-import { toastEl, toastTimer, setToastEl, setToastTimer } from './state.js';
+import { toastEl, toastTimer, setToastEl, setToastTimer } from "./state.js";
 
 export function showToast(message) {
   let el = toastEl;

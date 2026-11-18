@@ -1,26 +1,24 @@
 import {
-  settings, canceledBlobJobs, blobDownloadRequests, blobJobIntent,
-  activeBlobJobIds, activeDirectDownloadIds, pendingVideoActionIds,
-  videoTrimRecordings, finalizingBlobJobIds,
-} from './state.js';
-import {
-  isTelegramProgressiveUrl, getTimestampedVideoName,
-} from './utils.js';
-import {
-  BLOB_TRIM_EVENT, BLOB_CONTROL_EVENT, TRIM_ICON, STOP_ICON,
-} from './constants.js';
-import { preloadFfmpeg } from './blob-mux.js';
-import { downloadBlobFile } from './blob-status.js';
-import { showToast } from './toast.js';
-import { refreshMediaActionState, setButtonLabel } from './action-ui.js';
-import { getVideoUrl } from './video-resolution.js';
+  settings,
+  canceledBlobJobs,
+  blobJobIntent,
+  activeBlobJobIds,
+  activeDirectDownloadIds,
+  pendingVideoActionIds,
+  videoTrimRecordings,
+  finalizingBlobJobIds,
+} from "./state.js";
+import { isTelegramProgressiveUrl, getTimestampedVideoName } from "./utils.js";
+import { BLOB_TRIM_EVENT, BLOB_CONTROL_EVENT, TRIM_ICON, STOP_ICON } from "./constants.js";
+import { preloadFfmpeg } from "./blob-mux.js";
+import { downloadBlobFile } from "./blob-status.js";
+import { showToast } from "./toast.js";
+import { refreshMediaActionState, setButtonLabel } from "./action-ui.js";
+import { getVideoUrl } from "./video-resolution.js";
 
 /** Start recording a video segment from the current playback position. */
 export function startTrimRecording(video) {
-  if (
-    typeof video.captureStream !== "function" ||
-    typeof MediaRecorder === "undefined"
-  ) {
+  if (typeof video.captureStream !== "function" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser does not support video recording.");
   }
 
@@ -84,10 +82,7 @@ export function startTrimRecording(video) {
       "error",
       () => {
         restorePlayback();
-        reject(
-          recorder.error ||
-            new DOMException("Recording failed", "MediaRecorderError"),
-        );
+        reject(recorder.error || new DOMException("Recording failed", "MediaRecorderError"));
       },
       { once: true },
     );
@@ -117,7 +112,6 @@ export function startTrimRecording(video) {
     cancel: () => {
       video.removeEventListener("timeupdate", endCheck);
       if (recorder.state !== "inactive") {
-        recorder.removeEventListener("stop", () => {});
         recorder.stop();
         rejectPromise?.(new Error("Recording cancelled."));
       }
@@ -129,13 +123,7 @@ export function startTrimRecording(video) {
 /** Start or stop a trim recording for a video (used by button and context menu). */
 export function triggerTrim(media, trimBtn) {
   const videoId = media.dataset.imdCaptureId;
-  if (
-    videoId &&
-    (
-      pendingVideoActionIds.has(videoId) ||
-      activeDirectDownloadIds.has(videoId)
-    )
-  ) {
+  if (videoId && (pendingVideoActionIds.has(videoId) || activeDirectDownloadIds.has(videoId))) {
     showToast("A video operation is already in progress.");
     return;
   }
@@ -150,8 +138,7 @@ export function triggerTrim(media, trimBtn) {
   }
 
   const mediaUrl = getVideoUrl(media);
-  const usesPageBridge =
-    mediaUrl.startsWith("blob:") || /^https?:/i.test(mediaUrl);
+  const usesPageBridge = mediaUrl.startsWith("blob:") || /^https?:/i.test(mediaUrl);
   if (usesPageBridge) {
     const videoId = media.dataset.imdCaptureId;
     const intent = blobJobIntent.get(videoId);
@@ -176,10 +163,7 @@ export function triggerTrim(media, trimBtn) {
       // Blob/MediaSource and Telegram progressive trims are recorded into
       // chunks during playback and do not need FFmpeg. Preload it only for
       // sources that use the source-trim fallback.
-      if (
-        !mediaUrl.startsWith("blob:") &&
-        !isTelegramProgressiveUrl(mediaUrl)
-      ) {
+      if (!mediaUrl.startsWith("blob:") && !isTelegramProgressiveUrl(mediaUrl)) {
         preloadFfmpeg().catch((error) => {
           console.warn("[Media Downloader] FFmpeg preload failed:", error);
         });
@@ -248,12 +232,7 @@ export function triggerTrim(media, trimBtn) {
       if (!blob || !blob.size) return;
       const ext = blob.type.includes("webm") ? "webm" : "mp4";
       const filename = getTimestampedVideoName(ext);
-      downloadBlobFile(
-        blob,
-        filename,
-        settings.downloadFolder,
-        settings.showSaveAs,
-      );
+      downloadBlobFile(blob, filename, settings.downloadFolder, settings.showSaveAs);
       showToast("Trim saved.");
     })
     .catch((error) => {
@@ -271,5 +250,5 @@ export function triggerTrim(media, trimBtn) {
         trimBtn.dataset.recording = "false";
         trimBtn.disabled = false;
       }
-  });
+    });
 }

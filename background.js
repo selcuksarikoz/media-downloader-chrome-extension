@@ -4,9 +4,15 @@ import {
   fetchMediaWithReferrer,
   probeHotlinkProtection,
 } from "./src/background/hotlink-download.js";
-
-const FETCH_PORT = "imd-fetch-media";
-const BLOB_STORE_PORT = "imd-blob-store";
+import {
+  hasForbiddenFolder,
+  replaceFileExtension as replaceExtension,
+  readBlobAsDataUrl,
+} from "./src/shared/utils.js";
+import {
+  FETCH_MEDIA_PORT_NAME as FETCH_PORT,
+  BLOB_STORE_PORT_NAME as BLOB_STORE_PORT,
+} from "./src/shared/events.js";
 
 const DB_NAME = "imd-blob-store";
 const DB_VERSION = 1;
@@ -24,17 +30,16 @@ const OFFSCREEN_DOCUMENT_PATH = "ffmpeg/ffmpeg-offscreen.html";
 let creatingOffscreenDocument = null;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (
-    message?.target === "background" &&
-    message.action === "independentMuxProgress"
-  ) {
+  if (message?.target === "background" && message.action === "independentMuxProgress") {
     if (message.tabId) {
-      chrome.tabs.sendMessage(message.tabId, {
-        action: "independentMuxProgress",
-        videoId: message.videoId,
-        message: message.message,
-        progress: message.progress,
-      }).catch(() => {});
+      chrome.tabs
+        .sendMessage(message.tabId, {
+          action: "independentMuxProgress",
+          videoId: message.videoId,
+          message: message.message,
+          progress: message.progress,
+        })
+        .catch(() => {});
     }
     return;
   }
@@ -50,30 +55,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.action === "cancelIndependentMux") {
     ensureOffscreenDocument()
-      .then(() => chrome.runtime.sendMessage({
-        target: "ffmpeg-offscreen",
-        action: "cancelIndependentMux",
-        muxId: message.muxId,
-      }))
+      .then(() =>
+        chrome.runtime.sendMessage({
+          target: "ffmpeg-offscreen",
+          action: "cancelIndependentMux",
+          muxId: message.muxId,
+        }),
+      )
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
   if (message?.action === "captureTab") {
-    chrome.tabs.captureVisibleTab(
-      sender.tab?.windowId,
-      { format: "png" },
-      (dataUrl) => {
-        if (chrome.runtime.lastError || !dataUrl) {
-          sendResponse({
-            ok: false,
-            error: chrome.runtime.lastError?.message || "Tab capture failed.",
-          });
-          return;
-        }
-        sendResponse({ ok: true, dataUrl });
-      },
-    );
+    chrome.tabs.captureVisibleTab(sender.tab?.windowId, { format: "png" }, (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        sendResponse({
+          ok: false,
+          error: chrome.runtime.lastError?.message || "Tab capture failed.",
+        });
+        return;
+      }
+      sendResponse({ ok: true, dataUrl });
+    });
     return true;
   }
   if (message.action === "downloadMuxUrl") {
@@ -105,7 +108,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, error: "Tab URL must be a non-empty string." });
       return;
     }
-    chrome.tabs.create({ url: message.url, active: false })
+    chrome.tabs
+      .create({ url: message.url, active: false })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -120,14 +124,15 @@ async function ensureOffscreenDocument() {
   });
   if (contexts.length) return;
   if (!creatingOffscreenDocument) {
-    creatingOffscreenDocument = chrome.offscreen.createDocument({
-      url: OFFSCREEN_DOCUMENT_PATH,
-      reasons: ["BLOBS", "WORKERS"],
-      justification:
-        "Download and mux independent media tracks after the source tab navigates.",
-    }).finally(() => {
-      creatingOffscreenDocument = null;
-    });
+    creatingOffscreenDocument = chrome.offscreen
+      .createDocument({
+        url: OFFSCREEN_DOCUMENT_PATH,
+        reasons: ["BLOBS", "WORKERS"],
+        justification: "Download and mux independent media tracks after the source tab navigates.",
+      })
+      .finally(() => {
+        creatingOffscreenDocument = null;
+      });
   }
   await creatingOffscreenDocument;
 }
@@ -148,11 +153,13 @@ async function startIndependentMux(message, tabId) {
 async function handleIndependentMuxResult(message) {
   const notifyTab = (result) => {
     if (!message.tabId) return;
-    chrome.tabs.sendMessage(message.tabId, {
-      action: "independentMuxResult",
-      muxId: message.muxId,
-      ...result,
-    }).catch(() => {});
+    chrome.tabs
+      .sendMessage(message.tabId, {
+        action: "independentMuxResult",
+        muxId: message.muxId,
+        ...result,
+      })
+      .catch(() => {});
   };
 
   if (!message.ok) {
@@ -178,12 +185,14 @@ async function handleIndependentMuxResult(message) {
     );
     notifyTab({ ok: true });
   } catch (error) {
-    chrome.runtime.sendMessage({
-      target: "ffmpeg-offscreen",
-      action: "releaseIndependentMux",
-      muxId: message.muxId,
-      url: message.url,
-    }).catch(() => {});
+    chrome.runtime
+      .sendMessage({
+        target: "ffmpeg-offscreen",
+        action: "releaseIndependentMux",
+        muxId: message.muxId,
+        url: message.url,
+      })
+      .catch(() => {});
     notifyTab({ ok: false, error: error.message });
   }
 }
@@ -319,12 +328,8 @@ async function handleStoreMessageNow(message, tabId) {
 
 function finalizeInterruptedJobs(jobIds) {
   (async () => {
-    const metas = jobIds
-      ? []
-      : await getAllJobMetas();
-    const targets = jobIds
-      ? jobIds
-      : new Set(metas.map((meta) => meta.jobId));
+    const metas = jobIds ? [] : await getAllJobMetas();
+    const targets = jobIds ? jobIds : new Set(metas.map((meta) => meta.jobId));
     for (const jobId of targets) {
       const meta = await getJobMeta(jobId);
       if (!meta) continue;
@@ -361,10 +366,7 @@ async function downloadJob(jobId) {
 
   let filename = buildFilename(meta);
   if (fromChunks) {
-    filename = replaceExtension(
-      filename,
-      blob.type.includes("webm") ? "webm" : "mp4",
-    );
+    filename = replaceExtension(filename, blob.type.includes("webm") ? "webm" : "mp4");
   }
 
   let url;
@@ -420,13 +422,11 @@ async function downloadJob(jobId) {
  * download can still start from the service worker.
  */
 function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve({ url: reader.result });
-    reader.onerror = () =>
-      reject(new Error("Blob could not be encoded for download."));
-    reader.readAsDataURL(blob);
-  });
+  return readBlobAsDataUrl(blob)
+    .then((url) => ({ url }))
+    .catch(() => {
+      throw new Error("Blob could not be encoded for download.");
+    });
 }
 
 function createDownloadableUrl(blob) {
@@ -457,12 +457,14 @@ chrome.downloads.onChanged.addListener((delta) => {
   if (prepared) {
     activePreparedDownloads.delete(delta.id);
     if (prepared.offscreenMuxId) {
-      chrome.runtime.sendMessage({
-        target: "ffmpeg-offscreen",
-        action: "releaseIndependentMux",
-        muxId: prepared.offscreenMuxId,
-        url: prepared.url,
-      }).catch(() => {});
+      chrome.runtime
+        .sendMessage({
+          target: "ffmpeg-offscreen",
+          action: "releaseIndependentMux",
+          muxId: prepared.offscreenMuxId,
+          url: prepared.url,
+        })
+        .catch(() => {});
     } else if (prepared.tabId) {
       chrome.tabs
         .sendMessage(prepared.tabId, {
@@ -484,25 +486,21 @@ chrome.downloads.onChanged.addListener((delta) => {
 async function buildBlobFromChunks(jobId) {
   const chunks = await getAllChunks(jobId);
   if (!chunks.length) return null;
-  return new Blob(chunks.map((chunk) => chunk.blob), {
-    type: chunks[0].mimeType || "video/mp4",
-  });
+  return new Blob(
+    chunks.map((chunk) => chunk.blob),
+    {
+      type: chunks[0].mimeType || "video/mp4",
+    },
+  );
 }
 
 function buildFilename(meta) {
-  let filename =
-    meta.filename ||
-    `video-${Date.now()}.mp4`;
-  const folder = (meta.folder || "").trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+  let filename = meta.filename || `video-${Date.now()}.mp4`;
+  const folder = (meta.folder || "").trim().replace(/^[/\\]+|[/\\]+$/g, "");
   if (folder && !hasForbiddenFolder(folder)) {
     filename = `${folder}/${filename}`;
   }
   return filename;
-}
-
-function replaceExtension(filename, extension) {
-  const base = (filename || `video-${Date.now()}`).replace(/\.[^.]+$/, "");
-  return `${base}.${extension}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -670,26 +668,18 @@ setTimeout(() => finalizeInterruptedJobs(null), 5000);
 
 function startBrowserDownload(download, tabId, videoId) {
   return new Promise((resolve, reject) => {
-    chrome.downloads.download(
-      buildBrowserDownloadOptions(download),
-      (downloadId) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        trackSourceFocus(downloadId, tabId);
-        if (videoId) startDownloadProgress(downloadId, videoId, tabId);
-        resolve(downloadId);
-      },
-    );
+    chrome.downloads.download(buildBrowserDownloadOptions(download), (downloadId) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      trackSourceFocus(downloadId, tabId);
+      if (videoId) startDownloadProgress(downloadId, videoId, tabId);
+      resolve(downloadId);
+    });
   });
 }
 
-/**
- * Serve a hotlink-protected URL by fetching it with a `Referer` the CDN
- * accepts and downloading the resulting blob. The page is never touched, so
- * full downloads and trims keep their existing behavior.
- */
 /**
  * Serve a hotlink-protected URL by fetching it with a `Referer` the CDN
  * accepts. With Save As the page saves the bytes through `<a download>` so the
@@ -721,17 +711,14 @@ async function downloadBlobMedia(url, filename, saveAs, tabId, videoId) {
   }
 }
 
-async function downloadMedia(
-  { url, folder, saveAs, mediaType, videoId },
-  tabId,
-) {
+async function downloadMedia({ url, folder, saveAs, mediaType, videoId }, tabId) {
   if (typeof url !== "string" || !url) {
     throw new TypeError("Download URL must be a non-empty string.");
   }
   let filename = getFilenameFromUrl(url, mediaType);
 
   if (typeof folder === "string") {
-    folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    folder = folder.trim().replace(/^[/\\]+|[/\\]+$/g, "");
     if (folder && !hasForbiddenFolder(folder)) {
       filename = `${folder}/${filename}`;
       saveAs = false;
@@ -740,19 +727,10 @@ async function downloadMedia(
 
   if (canFetchWithReferrer(url)) {
     try {
-      const downloadId = await downloadBlobMedia(
-        url,
-        filename,
-        saveAs,
-        tabId,
-        videoId,
-      );
+      const downloadId = await downloadBlobMedia(url, filename, saveAs, tabId, videoId);
       if (downloadId !== null) return downloadId;
     } catch (error) {
-      console.warn(
-        "[Media Downloader] Referrer download failed, using a direct download:",
-        error,
-      );
+      console.warn("[Media Downloader] Referrer download failed, using a direct download:", error);
     }
   }
 
@@ -799,28 +777,30 @@ function startDownloadProgress(downloadId, videoId, tabId) {
       const [item] = await chrome.downloads.search({ id: downloadId });
       if (!item) return;
       const progress =
-        item.totalBytes > 0
-          ? Math.min(100, (item.bytesReceived / item.totalBytes) * 100)
-          : null;
+        item.totalBytes > 0 ? Math.min(100, (item.bytesReceived / item.totalBytes) * 100) : null;
       if (item.state === "complete" || item.state === "interrupted") {
         stopDownloadProgress(downloadId, item.state);
         return;
       }
-      chrome.runtime.sendMessage({
-        action: "popupMediaStatus",
-        videoId,
-        status: "progress",
-        message: "Downloading video…",
-        progress,
-      }).catch(() => {});
-      if (tabId) {
-        chrome.tabs.sendMessage(tabId, {
-          action: "directDownloadStatus",
+      chrome.runtime
+        .sendMessage({
+          action: "popupMediaStatus",
           videoId,
           status: "progress",
           message: "Downloading video…",
           progress,
-        }).catch(() => {});
+        })
+        .catch(() => {});
+      if (tabId) {
+        chrome.tabs
+          .sendMessage(tabId, {
+            action: "directDownloadStatus",
+            videoId,
+            status: "progress",
+            message: "Downloading video…",
+            progress,
+          })
+          .catch(() => {});
       }
     } catch {}
   };
@@ -839,35 +819,41 @@ function stopDownloadProgress(downloadId, state) {
   clearInterval(tracked.timer);
   downloadProgressTimers.delete(downloadId);
   persistDirectDownloadProgress();
-  chrome.runtime.sendMessage({
-    action: "popupMediaStatus",
-    videoId: tracked.videoId,
-    status: state === "complete" ? "complete" : "error",
-    message:
-      state === "complete" ? "Video downloaded." : "Video download interrupted.",
-    progress: state === "complete" ? 100 : null,
-  }).catch(() => {});
-  if (tracked.tabId) {
-    chrome.tabs.sendMessage(tracked.tabId, {
-      action: "directDownloadStatus",
+  chrome.runtime
+    .sendMessage({
+      action: "popupMediaStatus",
       videoId: tracked.videoId,
       status: state === "complete" ? "complete" : "error",
-      message:
-        state === "complete" ? "Video downloaded." : "Video download interrupted.",
+      message: state === "complete" ? "Video downloaded." : "Video download interrupted.",
       progress: state === "complete" ? 100 : null,
-    }).catch(() => {});
+    })
+    .catch(() => {});
+  if (tracked.tabId) {
+    chrome.tabs
+      .sendMessage(tracked.tabId, {
+        action: "directDownloadStatus",
+        videoId: tracked.videoId,
+        status: state === "complete" ? "complete" : "error",
+        message: state === "complete" ? "Video downloaded." : "Video download interrupted.",
+        progress: state === "complete" ? 100 : null,
+      })
+      .catch(() => {});
   }
 }
 
 function persistDirectDownloadProgress() {
-  const entries = [...downloadProgressTimers].map(
-    ([downloadId, { videoId, tabId }]) => ({ downloadId, videoId, tabId }),
-  );
+  const entries = [...downloadProgressTimers].map(([downloadId, { videoId, tabId }]) => ({
+    downloadId,
+    videoId,
+    tabId,
+  }));
   directDownloadPersistQueue = directDownloadPersistQueue
     .catch(() => {})
-    .then(() => chrome.storage.session.set({
-      [DIRECT_DOWNLOAD_STORAGE_KEY]: entries,
-    }))
+    .then(() =>
+      chrome.storage.session.set({
+        [DIRECT_DOWNLOAD_STORAGE_KEY]: entries,
+      }),
+    )
     .catch(() => {});
 }
 
@@ -882,15 +868,15 @@ async function restoreDirectDownloadProgress() {
       if (!item || item.state === "complete" || item.state === "interrupted") {
         if (tabId) {
           const complete = item?.state === "complete";
-          chrome.tabs.sendMessage(tabId, {
-            action: "directDownloadStatus",
-            videoId,
-            status: complete ? "complete" : "error",
-            message: complete
-              ? "Video downloaded."
-              : "Video download was interrupted.",
-            progress: complete ? 100 : null,
-          }).catch(() => {});
+          chrome.tabs
+            .sendMessage(tabId, {
+              action: "directDownloadStatus",
+              videoId,
+              status: complete ? "complete" : "error",
+              message: complete ? "Video downloaded." : "Video download was interrupted.",
+              progress: complete ? 100 : null,
+            })
+            .catch(() => {});
         }
         continue;
       }
@@ -902,22 +888,15 @@ async function restoreDirectDownloadProgress() {
 
 restoreDirectDownloadProgress();
 
-function downloadPreparedUrl(
-  { url, filename, folder, saveAs },
-  tabId,
-  offscreenMuxId,
-) {
+function downloadPreparedUrl({ url, filename, folder, saveAs }, tabId, offscreenMuxId) {
   return new Promise((resolve, reject) => {
     if (typeof url !== "string" || !url) {
       reject(new TypeError("Prepared download URL must be a non-empty string."));
       return;
     }
-    filename = (filename || `video-${Date.now()}.mp4`).replace(
-      /[^a-zA-Z0-9.\-_]/g,
-      "_",
-    );
+    filename = (filename || `video-${Date.now()}.mp4`).replace(/[^a-zA-Z0-9.\-_]/g, "_");
     if (typeof folder === "string") {
-      folder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+      folder = folder.trim().replace(/^[/\\]+|[/\\]+$/g, "");
       if (folder && !hasForbiddenFolder(folder)) {
         filename = `${folder}/${filename}`;
         saveAs = false;
@@ -938,16 +917,9 @@ function downloadPreparedUrl(
   });
 }
 
-function hasForbiddenFolder(folder) {
-  return folder
-    .split(/[\/\\]+/)
-    .some((part) => part.toLowerCase() === "imgdownloader_files");
-}
-
 function getFilenameFromUrl(url, mediaType = "image") {
   const fallbackExtension = mediaType === "video" ? "mp4" : "jpg";
-  const fallbackName = () =>
-    `${mediaType}-${Date.now()}.${fallbackExtension}`;
+  const fallbackName = () => `${mediaType}-${Date.now()}.${fallbackExtension}`;
 
   if (url.startsWith("data:")) {
     const mime = url.match(/data:([^;]*);/);
@@ -1012,10 +984,7 @@ async function keepPreviewNextToSource(previewTabId, sourceTabId) {
         chrome.tabs.get(previewTabId),
       ]);
       const targetIndex = sourceTab.index + 1;
-      if (
-        previewTab.windowId !== sourceTab.windowId ||
-        previewTab.index !== targetIndex
-      ) {
+      if (previewTab.windowId !== sourceTab.windowId || previewTab.index !== targetIndex) {
         await chrome.tabs.move(previewTabId, {
           windowId: sourceTab.windowId,
           index: targetIndex,

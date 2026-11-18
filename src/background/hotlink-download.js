@@ -16,8 +16,7 @@
  */
 
 const MAX_BLOB_DOWNLOAD_BYTES = 64 * 1024 * 1024;
-const BLOCKED_CONTENT_TYPE =
-  /^(?:application\/(?:json|xml|xhtml\+xml)|text\/)/i;
+const BLOCKED_CONTENT_TYPE = /^(?:application\/(?:json|xml|xhtml\+xml)|text\/)/i;
 const MEDIA_CONTENT_TYPE = /^(?:image|video|audio)\//i;
 
 let nextRuleId = 100000;
@@ -61,13 +60,9 @@ async function probeNetwork(url) {
   // A `chrome.downloads` request carries no Origin, Referer or Sec-Fetch-*
   // headers, while a worker fetch always does and may be let through. Strip
   // them so the probe sees what the real download would get.
-  const stripped = [
-    "Origin",
-    "Referer",
-    "Sec-Fetch-Site",
-    "Sec-Fetch-Mode",
-    "Sec-Fetch-Dest",
-  ].map((header) => ({ header, operation: "remove" }));
+  const stripped = ["Origin", "Referer", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"].map(
+    (header) => ({ header, operation: "remove" }),
+  );
   let response;
   try {
     response = await withHeaderRule(url, stripped, () =>

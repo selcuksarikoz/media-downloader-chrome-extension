@@ -62,7 +62,9 @@ test("bridge opens the configured video and preserves the page handler", async (
   assert.equal(video.disablePictureInPicture, false);
 
   let pageHandlerCount = 0;
-  const pageHandler = () => { pageHandlerCount += 1; };
+  const pageHandler = () => {
+    pageHandlerCount += 1;
+  };
   mediaSession.setActionHandler("enterpictureinpicture", pageHandler);
   handlers.get("enterpictureinpicture")({ reason: "contentoccluded" });
   await Promise.resolve();

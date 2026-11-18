@@ -2,15 +2,21 @@
   "name": "imgdownloader",
   "private": true,
   "scripts": {
-    "build": "bunx vite build"
-  },
-  "devDependencies": {
-    "@types/chrome": "^0.1.32",
-    "sass": "^1.97.1",
-    "vite": "^7.3.0",
-    "vite-plugin-static-copy": "^3.1.4"
+    "build": "bun run build.mjs",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check ."
   },
   "dependencies": {
     "@ffmpeg/core": "^0.12.10"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.32",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "sass": "^1.97.1",
+    "vite": "^7.3.0",
+    "vite-plugin-static-copy": "^3.1.4"
   }
 }

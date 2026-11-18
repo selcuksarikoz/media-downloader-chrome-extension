@@ -1,37 +1,34 @@
 import {
-  settings, canceledBlobJobs, blobDownloadRequests, activeBlobJobIds,
-  activeDirectDownloadIds, blobJobIntent, pendingVideoActionIds,
-} from './state.js';
+  settings,
+  canceledBlobJobs,
+  blobDownloadRequests,
+  activeBlobJobIds,
+  activeDirectDownloadIds,
+  blobJobIntent,
+  pendingVideoActionIds,
+} from "./state.js";
 import {
-  getSuggestedVideoName, isTelegramProgressiveUrl, isInstagramDirectVideoUrl,
+  getSuggestedVideoName,
+  isTelegramProgressiveUrl,
+  isInstagramDirectVideoUrl,
   isInstagramPage,
-} from './utils.js';
-import {
-  BLOB_DOWNLOAD_EVENT, PAGE_MEDIA_DOWNLOAD_EVENT,
-} from './constants.js';
-import { sendBlobStoreMessage } from './blob-store.js';
-import { showToast } from './toast.js';
-import { refreshMediaActionState } from './action-ui.js';
-import {
-  resolveHighestResolutionImageUrl,
-} from './image-resolution.js';
-import {
-  resolveHighestResolutionVideoUrl,
-} from './video-resolution.js';
-import { captureVideoFrame } from './capture-core.js';
+} from "./utils.js";
+import { BLOB_DOWNLOAD_EVENT, PAGE_MEDIA_DOWNLOAD_EVENT } from "./constants.js";
+import { sendBlobStoreMessage } from "./blob-store.js";
+import { showToast } from "./toast.js";
+import { refreshMediaActionState } from "./action-ui.js";
+import { resolveHighestResolutionImageUrl } from "./image-resolution.js";
+import { resolveHighestResolutionVideoUrl } from "./video-resolution.js";
+import { captureVideoFrame } from "./capture-core.js";
 
 /** Download the highest resolution version of an image or video. */
 export async function downloadMedia(media, preferredUrl) {
-  const requestedVideoId = media.tagName === "VIDEO"
-    ? media.dataset.imdCaptureId
-    : null;
+  const requestedVideoId = media.tagName === "VIDEO" ? media.dataset.imdCaptureId : null;
   if (
     requestedVideoId &&
-    (
-      pendingVideoActionIds.has(requestedVideoId) ||
+    (pendingVideoActionIds.has(requestedVideoId) ||
       activeBlobJobIds.has(requestedVideoId) ||
-      activeDirectDownloadIds.has(requestedVideoId)
-    )
+      activeDirectDownloadIds.has(requestedVideoId))
   ) {
     showToast("A video operation is already in progress.");
     return;
@@ -48,9 +45,11 @@ export async function downloadMedia(media, preferredUrl) {
 
   let src;
   try {
-    src = preferredUrl || (media.tagName === "IMG"
-      ? await resolveHighestResolutionImageUrl(media)
-      : await resolveHighestResolutionVideoUrl(media));
+    src =
+      preferredUrl ||
+      (media.tagName === "IMG"
+        ? await resolveHighestResolutionImageUrl(media)
+        : await resolveHighestResolutionVideoUrl(media));
   } catch (error) {
     releasePendingAction();
     throw error;
@@ -73,10 +72,7 @@ export async function downloadMedia(media, preferredUrl) {
     return;
   }
 
-  if (
-    media.tagName === "VIDEO" &&
-    isInstagramDirectVideoUrl(src)
-  ) {
+  if (media.tagName === "VIDEO" && isInstagramDirectVideoUrl(src)) {
     streamPageVideo(media, src);
     releasePendingAction();
     return;
@@ -91,20 +87,23 @@ export async function downloadMedia(media, preferredUrl) {
   let response;
   try {
     response = await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: "download",
-        url: src,
-        mediaType: media.tagName === "VIDEO" ? "video" : "image",
-        videoId: directVideoId,
-        folder: settings.downloadFolder,
-        saveAs: settings.showSaveAs,
-      }, (result) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(result);
-      });
+      chrome.runtime.sendMessage(
+        {
+          action: "download",
+          url: src,
+          mediaType: media.tagName === "VIDEO" ? "video" : "image",
+          videoId: directVideoId,
+          folder: settings.downloadFolder,
+          saveAs: settings.showSaveAs,
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(result);
+        },
+      );
     });
   } catch (error) {
     if (directVideoId) {
@@ -121,11 +120,7 @@ export async function downloadMedia(media, preferredUrl) {
     throw new Error(response?.error || "Download failed.");
   }
   if (response.anchor) await saveThroughAnchor(response.anchor);
-  showToast(
-    media.tagName === "VIDEO"
-      ? "Video download started."
-      : "Image download started.",
-  );
+  showToast(media.tagName === "VIDEO" ? "Video download started." : "Image download started.");
 }
 
 /** Save bytes the worker fetched with the browser's own download flow. */
@@ -173,9 +168,7 @@ function openPreviewInBackground(url) {
   }
   const runtime = globalThis.chrome?.runtime;
   if (typeof runtime?.sendMessage !== "function") {
-    throw new Error(
-      "Extension context is unavailable. Reload the page.",
-    );
+    throw new Error("Extension context is unavailable. Reload the page.");
   }
 
   return new Promise((resolve, reject) => {
@@ -217,20 +210,13 @@ function startStreamedDownload(video, url, filename, eventName) {
 
 /** Download a page-owned media URL through the page's Service Worker. */
 function streamPageVideo(video, url) {
-  const filename = isInstagramPage()
-    ? `video-${Date.now()}.mp4`
-    : getSuggestedVideoName(video);
+  const filename = isInstagramPage() ? `video-${Date.now()}.mp4` : getSuggestedVideoName(video);
   startStreamedDownload(video, url, filename, PAGE_MEDIA_DOWNLOAD_EVENT);
 }
 
 /** Start streaming a blob video for download via the media bridge. */
 function streamBlobVideo(video, url) {
-  startStreamedDownload(
-    video,
-    url,
-    getSuggestedVideoName(video),
-    BLOB_DOWNLOAD_EVENT,
-  );
+  startStreamedDownload(video, url, getSuggestedVideoName(video), BLOB_DOWNLOAD_EVENT);
 }
 
 /** Toggle Picture-in-Picture mode for a video element. */

@@ -1,7 +1,7 @@
-import { settings } from './state.js';
-import { getFrameCaptureFormat } from './utils.js';
-import { isCanvasBlank } from './canvas-draw.js';
-import { getVideoUrl } from './video-resolution.js';
+import { settings } from "./state.js";
+import { getFrameCaptureFormat } from "./utils.js";
+import { isCanvasBlank } from "./canvas-draw.js";
+import { getVideoUrl } from "./video-resolution.js";
 
 /**
  * Load a rebuilt media blob (recorded MediaSource segments) into an offscreen
@@ -30,13 +30,8 @@ export async function captureFrameFromMediaProbe(
         else resolve(result);
       };
       probe.onloadedmetadata = () => {
-        const duration = Number.isFinite(probe.duration)
-          ? probe.duration
-          : Infinity;
-        const target = Math.min(
-          Math.max(video.currentTime || 0, 0),
-          Math.max(duration - 0.01, 0),
-        );
+        const duration = Number.isFinite(probe.duration) ? probe.duration : Infinity;
+        const target = Math.min(Math.max(video.currentTime || 0, 0), Math.max(duration - 0.01, 0));
         try {
           probe.currentTime = target;
         } catch (error) {
@@ -65,9 +60,7 @@ export async function captureFrameFromMediaProbe(
             const format = getFrameCaptureFormat(captureType);
             canvas.toBlob(
               (result) =>
-                result
-                  ? finish(null, result)
-                  : finish(new Error("Frame encoding failed.")),
+                result ? finish(null, result) : finish(new Error("Frame encoding failed.")),
               format.mimeType,
               format.quality,
             );
@@ -77,8 +70,7 @@ export async function captureFrameFromMediaProbe(
         };
         tryCapture(0);
       };
-      probe.onerror = () =>
-        finish(new Error("Rebuilt media could not be loaded."));
+      probe.onerror = () => finish(new Error("Rebuilt media could not be loaded."));
       probe.src = blobUrl;
       probe.load();
     });
@@ -98,12 +90,8 @@ export function captureVideoFrameFromTab(video) {
       reject(new Error("Tab screenshot is unavailable."));
       return;
     }
-    const actionGroups = Array.from(
-      document.querySelectorAll(".imd-action-group"),
-    );
-    const previousDisplays = actionGroups.map(
-      (group) => group.style.display,
-    );
+    const actionGroups = Array.from(document.querySelectorAll(".imd-action-group"));
+    const previousDisplays = actionGroups.map((group) => group.style.display);
     actionGroups.forEach((group) => {
       group.style.display = "none";
     });
@@ -115,11 +103,7 @@ export function captureVideoFrameFromTab(video) {
     chrome.runtime.sendMessage({ action: "captureTab" }, (response) => {
       if (chrome.runtime.lastError || !response?.ok) {
         restore();
-        reject(
-          new Error(
-            chrome.runtime.lastError?.message || "Tab screenshot failed.",
-          ),
-        );
+        reject(new Error(chrome.runtime.lastError?.message || "Tab screenshot failed."));
         return;
       }
       const rect = video.getBoundingClientRect();
@@ -135,10 +119,7 @@ export function captureVideoFrameFromTab(video) {
         const dpr = Math.max(window.devicePixelRatio || 1, 1);
         const sx = Math.max(0, Math.round(rect.left * dpr));
         const sy = Math.max(0, Math.round(rect.top * dpr));
-        const width = Math.max(
-          1,
-          Math.min(Math.round(rect.width * dpr), image.naturalWidth - sx),
-        );
+        const width = Math.max(1, Math.min(Math.round(rect.width * dpr), image.naturalWidth - sx));
         const height = Math.max(
           1,
           Math.min(Math.round(rect.height * dpr), image.naturalHeight - sy),
@@ -162,10 +143,7 @@ export function captureVideoFrameFromTab(video) {
           return;
         }
         canvas.toBlob(
-          (blob) =>
-            blob
-              ? resolve(blob)
-              : reject(new Error("Frame encoding failed.")),
+          (blob) => (blob ? resolve(blob) : reject(new Error("Frame encoding failed."))),
           "image/png",
         );
       };
@@ -183,10 +161,7 @@ export function captureVideoFrameFromTab(video) {
 }
 
 /** Re-capture a video frame by loading the source with CORS enabled. */
-export function captureVideoFrameFromSource(
-  video,
-  captureType = settings.captureType,
-) {
+export function captureVideoFrameFromSource(video, captureType = settings.captureType) {
   return new Promise((resolve, reject) => {
     const url = getVideoUrl(video);
     if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
@@ -212,13 +187,8 @@ export function captureVideoFrameFromSource(
     };
 
     probe.onloadedmetadata = () => {
-      const duration = Number.isFinite(probe.duration)
-        ? probe.duration
-        : Infinity;
-      const target = Math.min(
-        Math.max(video.currentTime || 0, 0),
-        Math.max(duration - 0.01, 0),
-      );
+      const duration = Number.isFinite(probe.duration) ? probe.duration : Infinity;
+      const target = Math.min(Math.max(video.currentTime || 0, 0), Math.max(duration - 0.01, 0));
       try {
         probe.currentTime = target;
       } catch (error) {
@@ -236,10 +206,7 @@ export function captureVideoFrameFromSource(
         context.drawImage(probe, 0, 0);
         const format = getFrameCaptureFormat(captureType);
         canvas.toBlob(
-          (result) =>
-            result
-              ? finish(null, result)
-              : finish(new Error("Frame encoding failed.")),
+          (result) => (result ? finish(null, result) : finish(new Error("Frame encoding failed."))),
           format.mimeType,
           format.quality,
         );
@@ -247,8 +214,7 @@ export function captureVideoFrameFromSource(
         finish(error);
       }
     };
-    probe.onerror = () =>
-      finish(new Error("Video source could not be loaded for capture."));
+    probe.onerror = () => finish(new Error("Video source could not be loaded for capture."));
 
     probe.src = url;
     probe.load();

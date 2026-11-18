@@ -6,14 +6,15 @@ import {
   setAutoPipBridgeVideoId,
   setAutoPipPageHandler,
 } from "./auto-pip-state.js";
-
-const AUTO_PIP_CONFIG_EVENT = "imd:auto-pip-config";
+import { AUTO_PIP_CONFIG_EVENT } from "../shared/events.js";
 
 function findConfiguredVideo(videoId) {
   if (!videoId) return null;
-  return Array.from(document.querySelectorAll("video")).find(
-    (video) => video.dataset.imdCaptureId === videoId,
-  ) || null;
+  return (
+    Array.from(document.querySelectorAll("video")).find(
+      (video) => video.dataset.imdCaptureId === videoId,
+    ) || null
+  );
 }
 
 function canEnterPictureInPicture(video) {
@@ -29,7 +30,7 @@ function canEnterPictureInPicture(video) {
     !video.ended &&
     video.readyState >= 2 &&
     renderedWidth > 470 &&
-    typeof video.requestPictureInPicture === "function"
+    typeof video.requestPictureInPicture === "function",
   );
 }
 
@@ -82,9 +83,7 @@ export function initAutoPipBridge() {
   window.addEventListener(AUTO_PIP_CONFIG_EVENT, (event) => {
     const detail = event.detail;
     setAutoPipBridgeEnabled(detail?.enabled === true);
-    setAutoPipBridgeVideoId(
-      typeof detail?.videoId === "string" ? detail.videoId : "",
-    );
+    setAutoPipBridgeVideoId(typeof detail?.videoId === "string" ? detail.videoId : "");
     applyHandler();
   });
 }

@@ -65,43 +65,25 @@ self.onmessage = async (event) => {
       mountedBlobs.push({ name, data: tracks[i].blob });
     }
     ffmpeg.FS.mkdir(inputDirectory);
-    ffmpeg.FS.mount(
-      ffmpeg.FS.filesystems.WORKERFS,
-      { blobs: mountedBlobs },
-      inputDirectory,
-    );
+    ffmpeg.FS.mount(ffmpeg.FS.filesystems.WORKERFS, { blobs: mountedBlobs }, inputDirectory);
 
-    const videoIndex = tracks.findIndex((track) =>
-      /video/i.test(track.mimeType),
-    );
-    const audioIndex = tracks.findIndex((track) =>
-      /audio/i.test(track.mimeType),
-    );
+    const videoIndex = tracks.findIndex((track) => /video/i.test(track.mimeType));
+    const audioIndex = tracks.findIndex((track) => /audio/i.test(track.mimeType));
     if (videoIndex < 0) throw new Error("No video track was captured.");
 
     const videoNeedsH264 =
       /(?:vp0?[89]|av0?1)/i.test(tracks[videoIndex].mimeType || "") ||
-      await blobContainsCodecTag(
-        tracks[videoIndex].blob,
-        ["vp08", "vp09", "av01"],
-      );
+      (await blobContainsCodecTag(tracks[videoIndex].blob, ["vp08", "vp09", "av01"]));
 
     const videoMimeType = tracks[videoIndex].mimeType || "";
-    const audioMimeType =
-      audioIndex >= 0 ? tracks[audioIndex].mimeType || "" : videoMimeType;
+    const audioMimeType = audioIndex >= 0 ? tracks[audioIndex].mimeType || "" : videoMimeType;
     const isTrim =
-      Number.isFinite(startTime) &&
-      startTime >= 0 &&
-      Number.isFinite(duration) &&
-      duration > 0;
+      Number.isFinite(startTime) && startTime >= 0 && Number.isFinite(duration) && duration > 0;
     const videoRequiresMp4 =
-      isTrim || videoNeedsH264 ||
-      /mp4|avc1|avc3|h26[45]|hevc/i.test(videoMimeType);
-    const useWebm =
-      !videoRequiresMp4 && /webm|vp8|vp9/i.test(videoMimeType);
+      isTrim || videoNeedsH264 || /mp4|avc1|avc3|h26[45]|hevc/i.test(videoMimeType);
+    const useWebm = !videoRequiresMp4 && /webm|vp8|vp9/i.test(videoMimeType);
     const audioNeedsAac =
-      isTrim ||
-      (!useWebm && audioIndex >= 0 && /webm|opus|vorbis/i.test(audioMimeType));
+      isTrim || (!useWebm && audioIndex >= 0 && /webm|opus|vorbis/i.test(audioMimeType));
     outputName = useWebm ? "output.webm" : "output.mp4";
     const args = [];
     // Input-side seeking lets FFmpeg jump to the nearest keyframe before it
@@ -171,9 +153,7 @@ self.onmessage = async (event) => {
     ffmpeg.reset();
     if (exitCode !== 0) {
       const detail = ffmpegLogs.slice(-4).join(" | ");
-      throw new Error(
-        `FFmpeg mux failed (${exitCode})${detail ? `: ${detail}` : "."}`
-      );
+      throw new Error(`FFmpeg mux failed (${exitCode})${detail ? `: ${detail}` : "."}`);
     }
 
     const output = ffmpeg.FS.readFile(outputName);

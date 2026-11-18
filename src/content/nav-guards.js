@@ -1,11 +1,11 @@
+import { NAVIGATION_BLOCKED_EVENT, DOWNLOAD_NAVIGATION_WARNING } from "./constants.js";
 import {
-  NAVIGATION_BLOCKED_EVENT, DOWNLOAD_NAVIGATION_WARNING,
-} from './constants.js';
-import {
-  blobDownloadRequests, activeBlobJobIds, activeIndependentMuxes,
+  blobDownloadRequests,
+  activeBlobJobIds,
+  activeIndependentMuxes,
   activeMuxWorkers,
-} from './state.js';
-import { showToast } from './toast.js';
+} from "./state.js";
+import { showToast } from "./toast.js";
 
 function hasActivePageDownload() {
   return (
@@ -65,8 +65,7 @@ document.addEventListener(
   (event) => {
     if (!hasActivePageDownload()) return;
     const reloadShortcut =
-      event.key === "F5" ||
-      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r");
+      event.key === "F5" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r");
     if (!reloadShortcut) return;
     event.preventDefault();
     event.stopImmediatePropagation();

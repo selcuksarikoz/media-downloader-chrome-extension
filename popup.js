@@ -156,10 +156,7 @@ function createMediaCard(item) {
   body.append(title, page, facts);
 
   const progress = itemProgress.get(item.id);
-  if (
-    progress !== undefined &&
-    ["downloading", "started", "complete"].includes(state)
-  ) {
+  if (progress !== undefined && ["downloading", "started", "complete"].includes(state)) {
     const progressTrack = document.createElement("div");
     progressTrack.className = "progress-track";
     progressTrack.setAttribute("role", "progressbar");
@@ -183,12 +180,12 @@ function createMediaCard(item) {
   download.textContent =
     state === "downloading" && Number.isFinite(progress)
       ? `${Math.round(progress)}%`
-      : ({
+      : {
           downloading: "Downloading",
           complete: "Saved",
           started: "Started",
           error: "Retry",
-        }[state] || "Download");
+        }[state] || "Download";
   download.disabled = ["downloading", "started", "complete"].includes(state);
   download.addEventListener("click", () => downloadItem(item.id));
 
@@ -212,10 +209,7 @@ async function downloadItem(videoId) {
   itemStates.set(videoId, "downloading");
   render();
   try {
-    const response = await sendToTab(
-      { action: "downloadPopupMedia", videoId },
-      item?.frameId ?? 0,
-    );
+    const response = await sendToTab({ action: "downloadPopupMedia", videoId }, item?.frameId ?? 0);
     if (!response?.ok) throw new Error(response?.error || "Download failed.");
     if (!reportedVideoIds.has(videoId)) {
       itemStates.set(videoId, "started");
@@ -232,10 +226,7 @@ async function downloadItem(videoId) {
 async function removeItem(videoId) {
   try {
     const item = mediaItems.find((candidate) => candidate.id === videoId);
-    const response = await sendToTab(
-      { action: "removePopupMedia", videoId },
-      item?.frameId ?? 0,
-    );
+    const response = await sendToTab({ action: "removePopupMedia", videoId }, item?.frameId ?? 0);
     if (!response?.ok) throw new Error(response?.error || "Remove failed.");
     itemStates.delete(videoId);
     itemProgress.delete(videoId);
@@ -248,10 +239,7 @@ async function removeItem(videoId) {
 
 async function downloadAll() {
   const pending = mediaItems.filter(
-    (item) =>
-      !["downloading", "started", "complete"].includes(
-        itemStates.get(item.id),
-      ),
+    (item) => !["downloading", "started", "complete"].includes(itemStates.get(item.id)),
   );
   await Promise.all(pending.map((item) => downloadItem(item.id)));
 }
@@ -321,8 +309,7 @@ function applyStatus(videoId, update, shouldRender = true) {
     const next = Math.max(0, Math.min(100, update.progress));
     itemProgress.set(
       videoId,
-      Number.isFinite(previous) &&
-        (update.status === "progress" || update.status === "recording")
+      Number.isFinite(previous) && (update.status === "progress" || update.status === "recording")
         ? Math.max(previous, next)
         : next,
     );

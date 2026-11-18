@@ -1,4 +1,5 @@
 import { DEFAULT_BLACKLISTED_DOMAINS } from "./shared.js";
+import { hasForbiddenFolder } from "./src/shared/utils.js";
 
 const DEFAULTS = {
   buttonPosition: "top-right",
@@ -35,16 +36,14 @@ function saveOptions() {
     () => {
       get("status").textContent = "Options saved.";
       setTimeout(() => (get("status").textContent = ""), 2000);
-    }
+    },
   );
 }
 
 function restoreOptions() {
   chrome.storage.sync.remove("maxConcurrentDownloads");
   chrome.storage.sync.get(DEFAULTS, (items) => {
-    const folder = hasForbiddenFolder(items.downloadFolder)
-      ? ""
-      : items.downloadFolder;
+    const folder = hasForbiddenFolder(items.downloadFolder) ? "" : items.downloadFolder;
     get("position").value = items.buttonPosition;
     get("folder").value = folder;
     get("saveAs").checked = items.showSaveAs;
@@ -52,9 +51,7 @@ function restoreOptions() {
     get("showVideoControls").checked = items.showVideoControls;
     get("useContextMenu").checked = items.useContextMenu;
     get("autoPictureInPicture").checked = items.autoPictureInPicture;
-    get("captureType").value = ["jpg", "png", "webp"].includes(
-      items.captureType
-    )
+    get("captureType").value = ["jpg", "png", "webp"].includes(items.captureType)
       ? items.captureType
       : DEFAULTS.captureType;
     get("minWidth").value = items.minWidth;
@@ -71,18 +68,12 @@ function normalizeDomain(value) {
   const input = value.trim().toLowerCase().replace(/^\*\./, "");
   if (!input) return null;
   try {
-    const hostname = new URL(
-      input.includes("://") ? input : `https://${input}`
-    ).hostname
+    const hostname = new URL(input.includes("://") ? input : `https://${input}`).hostname
       .replace(/^www\./, "")
       .replace(/\.$/, "");
     if (
       !/^[a-z0-9.-]+$/.test(hostname) ||
-      hostname
-        .split(".")
-        .some(
-          (part) => !part || part.startsWith("-") || part.endsWith("-")
-        ) ||
+      hostname.split(".").some((part) => !part || part.startsWith("-") || part.endsWith("-")) ||
       (!hostname.includes(".") && hostname !== "localhost")
     ) {
       return null;
@@ -152,13 +143,6 @@ function persistBlacklist(message) {
       if (get("status").textContent === message) get("status").textContent = "";
     }, 2000);
   });
-}
-
-function hasForbiddenFolder(folder) {
-  return folder
-    .trim()
-    .split(/[\/\\]+/)
-    .some((part) => part.toLowerCase() === "imgdownloader_files");
 }
 
 document.addEventListener("DOMContentLoaded", restoreOptions);

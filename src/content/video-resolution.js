@@ -1,4 +1,4 @@
-import { videoResolutionCache } from './state.js';
+import { videoResolutionCache } from "./state.js";
 
 const MAX_CACHED_VIDEO_RESOLUTIONS = 200;
 
@@ -67,9 +67,7 @@ export function getVideoUrl(video) {
   if (video.currentSrc) return video.currentSrc;
   if (video.src) return video.src;
 
-  const source = Array.from(video.querySelectorAll("source[src]")).find(
-    (item) => item.src,
-  );
+  const source = Array.from(video.querySelectorAll("source[src]")).find((item) => item.src);
   return source ? source.src : "";
 }
 
@@ -86,9 +84,7 @@ export async function resolveHighestResolutionVideoUrl(video) {
     })),
   );
   const best = measured.reduce((a, b) => (a.pixels >= b.pixels ? a : b));
-  return best.pixels > 0
-    ? best.url
-    : candidates.sort((a, b) => b.score - a.score)[0].url;
+  return best.pixels > 0 ? best.url : candidates.sort((a, b) => b.score - a.score)[0].url;
 }
 
 /** Collect all non-blob source URLs from a video and its source elements. */

@@ -1,10 +1,7 @@
-import { parseSrcset } from './utils.js';
-import { instagramImageCandidatesByAsset } from './state.js';
-import { getInstagramImageAssetKeys } from '../shared/instagram-image.js';
-import {
-  needsInstagramOriginal,
-  upgradeInstagramImageCandidates,
-} from './instagram-post-image.js';
+import { parseSrcset } from "./utils.js";
+import { instagramImageCandidatesByAsset } from "./state.js";
+import { getInstagramImageAssetKeys } from "../shared/instagram-image.js";
+import { needsInstagramOriginal, upgradeInstagramImageCandidates } from "./instagram-post-image.js";
 
 const SRCSET_ATTRIBUTES = ["srcset", "data-srcset", "data-lazy-srcset"];
 const URL_ATTRIBUTES = [
@@ -48,10 +45,7 @@ export function collectImageCandidates(img) {
     }
     const existing = candidates.get(url);
     if (existing) {
-      existing.estimatedWidth = Math.max(
-        existing.estimatedWidth,
-        estimatedWidth,
-      );
+      existing.estimatedWidth = Math.max(existing.estimatedWidth, estimatedWidth);
       existing.originalHint ||= originalHint;
       existing.order = order++;
       return;
@@ -59,13 +53,9 @@ export function collectImageCandidates(img) {
     candidates.set(url, { url, estimatedWidth, originalHint, order: order++ });
   };
 
-  const picture = img.parentElement?.tagName === "PICTURE"
-    ? img.parentElement
-    : img.closest?.("picture");
-  const declaredElements = [
-    img,
-    ...(picture ? picture.querySelectorAll("source") : []),
-  ];
+  const picture =
+    img.parentElement?.tagName === "PICTURE" ? img.parentElement : img.closest?.("picture");
+  const declaredElements = [img, ...(picture ? picture.querySelectorAll("source") : [])];
 
   declaredElements.forEach((element) => {
     SRCSET_ATTRIBUTES.forEach((attribute) => {
@@ -82,9 +72,7 @@ export function collectImageCandidates(img) {
   add(img.currentSrc, img.naturalWidth || 0);
   const declaredCandidates = [...candidates.values()];
   const assetKeys = new Set(
-    declaredCandidates.flatMap(({ url }) =>
-      getInstagramImageAssetKeys(url, document.baseURI)
-    ),
+    declaredCandidates.flatMap(({ url }) => getInstagramImageAssetKeys(url, document.baseURI)),
   );
   assetKeys.forEach((assetKey) => {
     instagramImageCandidatesByAsset.get(assetKey)?.forEach((candidate) => {
@@ -114,9 +102,11 @@ export async function resolveHighestResolutionImageUrl(img) {
   }
   const unresolved = candidates.filter(({ estimatedWidth }) => !estimatedWidth);
   if (unresolved.length > 0 && typeof Image === "function") {
-    await Promise.all(unresolved.map(async (candidate) => {
-      candidate.estimatedWidth = await probeImageWidth(candidate.url);
-    }));
+    await Promise.all(
+      unresolved.map(async (candidate) => {
+        candidate.estimatedWidth = await probeImageWidth(candidate.url);
+      }),
+    );
   }
   return rankImageCandidates(candidates)[0]?.url || "";
 }
@@ -135,10 +125,7 @@ function probeImageWidth(url) {
       if (cancel) probe.removeAttribute("src");
       resolve(width);
     };
-    const timer = setTimeout(
-      () => finish(0, true),
-      IMAGE_PROBE_TIMEOUT_MS,
-    );
+    const timer = setTimeout(() => finish(0, true), IMAGE_PROBE_TIMEOUT_MS);
     probe.onload = () => finish(probe.naturalWidth || 0);
     probe.onerror = () => finish();
     probe.src = url;

@@ -99,12 +99,10 @@ function setConfiguredVideo(video) {
   }
   if (video) {
     const wasNative = Boolean(
-      video.hasAttribute?.("autopictureinpicture") ||
-      video.autoPictureInPicture === true
+      video.hasAttribute?.("autopictureinpicture") || video.autoPictureInPicture === true,
     );
     const wasDisabled = Boolean(
-      video.hasAttribute?.("disablepictureinpicture") ||
-      video.disablePictureInPicture === true
+      video.hasAttribute?.("disablepictureinpicture") || video.disablePictureInPicture === true,
     );
     try {
       video.removeAttribute("disablepictureinpicture");
@@ -145,9 +143,11 @@ function observeAutoPipVideo(video) {
 
 function startAutoPipMediaObservers() {
   if (!autoPipResizeObserver) {
-    setAutoPipResizeObserver(new ResizeObserver(() => {
-      refreshAutoPictureInPictureCandidate();
-    }));
+    setAutoPipResizeObserver(
+      new ResizeObserver(() => {
+        refreshAutoPictureInPictureCandidate();
+      }),
+    );
   }
   document.querySelectorAll("video").forEach(observeAutoPipVideo);
 
@@ -194,10 +194,7 @@ async function enterAutoPictureInPicture() {
     request = video.requestPictureInPicture();
     setAutoPipRequest(request);
     await request;
-    if (
-      document.visibilityState === "hidden" &&
-      settings.autoPictureInPicture
-    ) {
+    if (document.visibilityState === "hidden" && settings.autoPictureInPicture) {
       setAutoPipVideo(video);
       setAutoPipOwned(true);
     } else if (document.pictureInPictureElement === video) {
@@ -282,12 +279,16 @@ export function initAutoPictureInPicture() {
   document.addEventListener("volumechange", refreshAutoPictureInPictureCandidate, true);
   document.addEventListener("loadeddata", refreshAutoPictureInPictureCandidate, true);
   document.addEventListener("enterpictureinpicture", onEnterPictureInPicture, true);
-  document.addEventListener("leavepictureinpicture", (event) => {
-    if (event.target === autoPipVideo) {
-      setAutoPipVideo(null);
-      setAutoPipOwned(false);
-    }
-  }, true);
+  document.addEventListener(
+    "leavepictureinpicture",
+    (event) => {
+      if (event.target === autoPipVideo) {
+        setAutoPipVideo(null);
+        setAutoPipOwned(false);
+      }
+    },
+    true,
+  );
   window.addEventListener("resize", refreshAutoPictureInPictureCandidate, { passive: true });
   document.addEventListener("scroll", scheduleCandidateRefresh, {
     capture: true,
@@ -299,8 +300,10 @@ export function initAutoPictureInPicture() {
 
 function scheduleCandidateRefresh() {
   if (autoPipRefreshFrame !== null) return;
-  setAutoPipRefreshFrame(requestAnimationFrame(() => {
-    setAutoPipRefreshFrame(null);
-    refreshAutoPictureInPictureCandidate();
-  }));
+  setAutoPipRefreshFrame(
+    requestAnimationFrame(() => {
+      setAutoPipRefreshFrame(null);
+      refreshAutoPictureInPictureCandidate();
+    }),
+  );
 }

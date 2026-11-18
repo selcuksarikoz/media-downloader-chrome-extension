@@ -34,9 +34,7 @@ globalThis.document = {
   },
 };
 
-const { resolveHighestResolutionVideoUrl } = await import(
-  "../src/content/video-resolution.js"
-);
+const { resolveHighestResolutionVideoUrl } = await import("../src/content/video-resolution.js");
 const { videoResolutionCache } = await import("../src/content/state.js");
 
 function makeVideo(urls) {
@@ -74,10 +72,7 @@ test("retries a failed resolution probe instead of caching the failure", async (
   videoResolutionCache.clear();
   probeCount = 0;
   dimensions = new Map([["https://x.test/480p.mp4", [854, 480]]]);
-  const video = makeVideo([
-    "https://x.test/broken.mp4",
-    "https://x.test/480p.mp4",
-  ]);
+  const video = makeVideo(["https://x.test/broken.mp4", "https://x.test/480p.mp4"]);
 
   await resolveHighestResolutionVideoUrl(video);
   assert.equal(probeCount, 2);

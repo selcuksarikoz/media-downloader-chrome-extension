@@ -1,5 +1,5 @@
-import { settings } from './state.js';
-import { getFrameCaptureFormat } from './utils.js';
+import { settings } from "./state.js";
+import { getFrameCaptureFormat } from "./utils.js";
 
 /** Wait until the element presents its next rendered frame (if it is playing). */
 export function waitForNextPresentedFrame(video, timeout = 1500) {
@@ -27,12 +27,10 @@ export async function drawVideoFrameToBlob(video, captureType = settings.capture
   canvas.height = video.videoHeight;
   const isHdr =
     video.videoColorSpace &&
-    (video.videoColorSpace.transfer === "pq" ||
-      video.videoColorSpace.transfer === "hlg");
+    (video.videoColorSpace.transfer === "pq" || video.videoColorSpace.transfer === "hlg");
   const contextOptions = {
     willReadFrequently: true,
-    ...(isHdr &&
-    "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
+    ...(isHdr && "display-p3" in (window.CanvasRenderingContext2D?.prototype || {})
       ? { colorSpace: "display-p3" }
       : {}),
   };
@@ -53,10 +51,7 @@ export async function drawVideoFrameToBlob(video, captureType = settings.capture
   return await new Promise((resolve, reject) => {
     try {
       canvas.toBlob(
-        (result) =>
-          result
-            ? resolve(result)
-            : reject(new Error("Frame encoding failed.")),
+        (result) => (result ? resolve(result) : reject(new Error("Frame encoding failed."))),
         format.mimeType,
         format.quality,
       );
@@ -107,10 +102,7 @@ export function ensurePresentedFrame(video, force = false, timeout = 2000) {
     const onError = () => cleanup();
     const timer = setTimeout(cleanup, timeout);
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    const target = Math.min(
-      Math.max(video.currentTime || 0, 0),
-      Math.max(duration - 0.01, 0),
-    );
+    const target = Math.min(Math.max(video.currentTime || 0, 0), Math.max(duration - 0.01, 0));
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onError);
     try {

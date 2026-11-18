@@ -1,60 +1,33 @@
-export const DEFAULT_BLACKLISTED_DOMAINS = [
-  "netflix.com",
-  "primevideo.com",
-  "disneyplus.com",
-  "hbo.com",
-  "hbomax.com",
-  "max.com",
-  "paramountplus.com",
-  "hulu.com",
-  "peacocktv.com",
-  "discoveryplus.com",
-  "localhost",
-  "127.0.0.1",
-  "0.0.0.0",
-];
-
-export const DEFAULT_SETTINGS = {
-  buttonPosition: "top-right",
-  downloadFolder: "",
-  showSaveAs: false,
-  showPreviewButton: true,
-  showVideoControls: true,
-  captureType: "jpg",
-  blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
-  minWidth: 150,
-  useContextMenu: false,
-  autoPictureInPicture: true,
-};
+export { DEFAULT_BLACKLISTED_DOMAINS, DEFAULT_SETTINGS } from "../shared/settings.js";
 
 export const ACTIVE_DOWNLOAD_STATES = new Set(["recording", "progress"]);
 
-export const FFMPEG_HOST_CHANNEL = "imd:ffmpeg-host";
-export const BLOB_DOWNLOAD_EVENT = "imd:download-blob-video";
-export const BLOB_TRIM_EVENT = "imd:trim-blob-video";
-export const BLOB_CONTROL_EVENT = "imd:control-blob-video";
-export const BLOB_STATUS_EVENT = "imd:blob-video-status";
-export const BLOB_DATA_EVENT = "imd:blob-data-for-download";
-export const PAGE_MEDIA_DOWNLOAD_EVENT = "imd:download-page-media";
-export const BLOB_PERSIST_CHUNK_EVENT = "imd:persist-blob-chunk";
-export const BLOB_MUX_EVENT = "imd:mux-blob-tracks";
-export const BLOB_MUX_RESULT_EVENT = "imd:mux-blob-tracks-result";
-export const NAVIGATION_BLOCKED_EVENT = "imd:navigation-blocked";
-export const CAPTURE_BLOCK_EVENT = "imd:capture-block";
-export const CAPTURE_UNBLOCK_EVENT = "imd:capture-unblock";
-export const CAPTURE_FROM_MSE_EVENT = "imd:capture-from-mse";
-export const CAPTURE_FROM_MSE_RESULT_EVENT = "imd:capture-from-mse-result";
-export const BLOB_STORE_PORT_NAME = "imd-blob-store";
-export const FETCH_MEDIA_PORT_NAME = "imd-fetch-media";
-export const AUTO_PIP_CONFIG_EVENT = "imd:auto-pip-config";
-export const INSTAGRAM_IMAGE_CANDIDATES_EVENT =
-  "imd:instagram-image-candidates";
-export const INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT =
-  "imd:request-instagram-image-candidates";
-export const INSTAGRAM_POST_IMAGE_REQUEST_EVENT =
-  "imd:instagram-post-image-request";
-export const INSTAGRAM_POST_IMAGE_RESULT_EVENT =
-  "imd:instagram-post-image-result";
+// Cross-world event and port names are owned by the shared module. Re-export
+// them so existing content-script imports keep working.
+export {
+  FFMPEG_HOST_CHANNEL,
+  BLOB_DOWNLOAD_EVENT,
+  BLOB_TRIM_EVENT,
+  BLOB_CONTROL_EVENT,
+  BLOB_STATUS_EVENT,
+  BLOB_DATA_EVENT,
+  PAGE_MEDIA_DOWNLOAD_EVENT,
+  BLOB_PERSIST_CHUNK_EVENT,
+  BLOB_MUX_EVENT,
+  BLOB_MUX_RESULT_EVENT,
+  NAVIGATION_BLOCKED_EVENT,
+  CAPTURE_BLOCK_EVENT,
+  CAPTURE_UNBLOCK_EVENT,
+  CAPTURE_FROM_MSE_EVENT,
+  CAPTURE_FROM_MSE_RESULT_EVENT,
+  BLOB_STORE_PORT_NAME,
+  FETCH_MEDIA_PORT_NAME,
+  AUTO_PIP_CONFIG_EVENT,
+  INSTAGRAM_IMAGE_CANDIDATES_EVENT,
+  INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT,
+  INSTAGRAM_POST_IMAGE_REQUEST_EVENT,
+  INSTAGRAM_POST_IMAGE_RESULT_EVENT,
+} from "../shared/events.js";
 
 export const DOWNLOAD_NAVIGATION_WARNING =
   "You cannot leave or reload this page while a download is in progress. " +

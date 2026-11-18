@@ -1,4 +1,4 @@
-import { FETCH_MEDIA_PORT_NAME } from './constants.js';
+import { FETCH_MEDIA_PORT_NAME } from "./constants.js";
 
 /** Fetch an image URL as a blob from the current page context. */
 export async function fetchImageBlob(url) {
@@ -31,16 +31,10 @@ export function fetchImageBlobViaBackground(url) {
       reject(error);
       return;
     }
-    timeout = setTimeout(
-      () => settle(reject, new Error("Image fetch timed out.")),
-      30000,
-    );
+    timeout = setTimeout(() => settle(reject, new Error("Image fetch timed out.")), 30000);
     port.onMessage.addListener((response) => {
       if (response?.ok && response.data) {
-        settle(
-          resolve,
-          new Blob([response.data], { type: response.mimeType || "" }),
-        );
+        settle(resolve, new Blob([response.data], { type: response.mimeType || "" }));
       } else {
         settle(reject, new Error(response?.error || "Image fetch failed."));
       }
@@ -48,10 +42,7 @@ export function fetchImageBlobViaBackground(url) {
     port.onDisconnect.addListener(() => {
       settle(
         reject,
-        new Error(
-          chrome.runtime.lastError?.message ||
-            "Background fetch connection closed.",
-        ),
+        new Error(chrome.runtime.lastError?.message || "Background fetch connection closed."),
       );
     });
     port.postMessage({ action: "fetchMedia", url });

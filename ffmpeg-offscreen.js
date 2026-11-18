@@ -29,7 +29,7 @@ async function startIndependentMux(message) {
   jobs.set(muxId, job);
   try {
     const downloads = new Map();
-    const trackProgress = new Array(tracks.length).fill(0);
+    const trackProgress = Array(tracks.length).fill(0);
     const preparedTracks = await Promise.all(
       tracks.map(async (track, trackIndex) => {
         if (!/^https?:/i.test(track.url || "")) {
@@ -44,8 +44,7 @@ async function startIndependentMux(message) {
             (progress) => {
               trackProgress[trackIndex] = progress;
               const average =
-                trackProgress.reduce((total, value) => total + value, 0) /
-                trackProgress.length;
+                trackProgress.reduce((total, value) => total + value, 0) / trackProgress.length;
               reportProgress(job, Math.min(90, average * 0.9));
             },
           );
@@ -56,9 +55,7 @@ async function startIndependentMux(message) {
           /video/i.test(track.mimeType || downloaded.contentType) &&
           downloaded.blob.size < 64 * 1024
         ) {
-          throw new Error(
-            "The independent source contains only a video initialization segment.",
-          );
+          throw new Error("The independent source contains only a video initialization segment.");
         }
         return {
           mimeType: track.mimeType || downloaded.contentType,
@@ -69,10 +66,9 @@ async function startIndependentMux(message) {
     if (!jobs.has(muxId)) return;
     reportProgress(job, 92, "Muxing downloaded tracks…");
 
-    const worker = new Worker(
-      chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"),
-      { type: "module" },
-    );
+    const worker = new Worker(chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"), {
+      type: "module",
+    });
     job.worker = worker;
     worker.onerror = (event) => {
       jobs.delete(muxId);
@@ -88,10 +84,7 @@ async function startIndependentMux(message) {
         jobs.delete(muxId);
         worker.terminate();
       } else {
-        job.cleanupTimer = setTimeout(
-          () => releaseJob(muxId, event.data.url),
-          60 * 60 * 1000,
-        );
+        job.cleanupTimer = setTimeout(() => releaseJob(muxId, event.data.url), 60 * 60 * 1000);
       }
       reportResult(job, event.data);
     };
@@ -111,17 +104,9 @@ async function fetchCompleteTrack(url, signal, knownFullSize, onProgress) {
   // even when a normal GET is made. Start with an explicit range, read the
   // complete size from Content-Range, then fetch every remaining byte range.
   const requestedChunkSize = 1024 * 1024;
-  const first = await fetchTrackRange(
-    url,
-    0,
-    requestedChunkSize - 1,
-    signal,
-    knownFullSize,
-  );
+  const first = await fetchTrackRange(url, 0, requestedChunkSize - 1, signal, knownFullSize);
   onProgress?.(
-    first.fullSize > 0
-      ? Math.min(100, (first.data.byteLength / first.fullSize) * 100)
-      : 0,
+    first.fullSize > 0 ? Math.min(100, (first.data.byteLength / first.fullSize) * 100) : 0,
   );
 
   if (!first.isPartial) {
@@ -140,7 +125,7 @@ async function fetchCompleteTrack(url, signal, knownFullSize, onProgress) {
 
   const chunkSize = first.data.byteLength;
   const chunkCount = Math.ceil(first.fullSize / chunkSize);
-  const chunks = new Array(chunkCount);
+  const chunks = Array(chunkCount);
   chunks[0] = first.data;
   let loaded = first.data.byteLength;
   let nextIndex = 1;
@@ -159,10 +144,7 @@ async function fetchCompleteTrack(url, signal, knownFullSize, onProgress) {
           signal,
           first.fullSize,
         );
-        const expectedEnd = Math.min(
-          first.fullSize - 1,
-          start + chunkSize - 1,
-        );
+        const expectedEnd = Math.min(first.fullSize - 1, start + chunkSize - 1);
         if (
           !part.isPartial ||
           part.start !== start ||
@@ -245,10 +227,7 @@ function buildExplicitRangeUrl(value, start, end) {
       params.set("byte_end", String(end));
       return url.href;
     }
-    if (
-      url.hostname.endsWith(".googlevideo.com") &&
-      params.has("range")
-    ) {
+    if (url.hostname.endsWith(".googlevideo.com") && params.has("range")) {
       params.set("range", `${start}-${end}`);
       return url.href;
     }

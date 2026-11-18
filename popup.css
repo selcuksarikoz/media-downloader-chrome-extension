@@ -149,8 +149,12 @@ h1 {
 }
 
 @keyframes progress-slide {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(285%); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(285%);
+  }
 }
 
 .media-body h2 {
@@ -169,7 +173,11 @@ h1 {
 .facts {
   margin: 0;
   color: #8b949e;
-  font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    10px/1.25 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 .card-actions {

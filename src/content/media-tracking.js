@@ -1,26 +1,40 @@
 import {
-  settings, extensionActive, mediaMutationObserver, mediaControls,
-  trackedMedia, capturedVideos, pipState, mediaHoverListeners,
-  visibleMedia, popupVideoStatuses,
-  setExtensionActive, setMediaMutationObserver,
-} from './state.js';
-import { createCaptureId } from './utils.js';
-import { buildMediaActionButtons, attachActionGroup, hideActionGroup,
-  isolateActionGroupEvents, showActionGroup, setButtonLabel,
-} from './action-ui.js';
-import { getMediaHoverTargets } from './action-visibility.js';
-import { isInstagramVideoPlayerMedia, syncInstagramNativeVideoControls,
-  removeInstagramNativeVideoControls, applyStoryVideoFix, removeStoryVideoFix,
-} from './instagram.js';
-import { TRIM_ICON } from './constants.js';
+  settings,
+  extensionActive,
+  mediaMutationObserver,
+  mediaControls,
+  trackedMedia,
+  capturedVideos,
+  pipState,
+  mediaHoverListeners,
+  visibleMedia,
+  popupVideoStatuses,
+  setMediaMutationObserver,
+} from "./state.js";
+import { createCaptureId } from "./utils.js";
 import {
-  downloadMedia, previewMedia, togglePictureInPicture,
-} from './media-download.js';
-import { triggerTrim } from './video-trim.js';
-import { captureVideoFrame } from './capture-core.js';
-import { copyImageToClipboard, copyVideoFrameToClipboard } from './clipboard.js';
-import { openLightbox } from './lightbox.js';
-import { showToast } from './toast.js';
+  buildMediaActionButtons,
+  attachActionGroup,
+  hideActionGroup,
+  isolateActionGroupEvents,
+  showActionGroup,
+  setButtonLabel,
+} from "./action-ui.js";
+import { computeActionGroupPosition } from "./action-position.js";
+import { getMediaHoverTargets } from "./action-visibility.js";
+import {
+  isInstagramVideoPlayerMedia,
+  syncInstagramNativeVideoControls,
+  removeInstagramNativeVideoControls,
+  applyStoryVideoFix,
+  removeStoryVideoFix,
+} from "./instagram.js";
+import { downloadMedia, previewMedia, togglePictureInPicture } from "./media-download.js";
+import { triggerTrim } from "./video-trim.js";
+import { captureVideoFrame } from "./capture-core.js";
+import { copyImageToClipboard, copyVideoFrameToClipboard } from "./clipboard.js";
+import { openLightbox } from "./lightbox.js";
+import { showToast } from "./toast.js";
 
 export const mediaIntersectionObserver = new IntersectionObserver(
   (entries) => {
@@ -51,16 +65,15 @@ export const mediaResizeObserver = new ResizeObserver((entries) => {
       const width = group.offsetWidth || 86;
       const height = group.offsetHeight || 40;
       const gap = 10;
-      let top, left;
-      switch (settings.buttonPosition) {
-        case "top-left": top = rect.top + gap; left = rect.left + gap; break;
-        case "bottom-left": top = rect.bottom - height - gap; left = rect.left + gap; break;
-        case "bottom-right": top = rect.bottom - height - gap; left = rect.right - width - gap; break;
-        case "center": top = rect.top + (rect.height - height) / 2; left = rect.left + (rect.width - width) / 2; break;
-        default: top = rect.top + gap; left = rect.right - width - gap;
-      }
-      group.style.top = `${Math.max(0, top)}px`;
-      group.style.left = `${Math.max(0, left)}px`;
+      const { top, left } = computeActionGroupPosition(
+        rect,
+        width,
+        height,
+        gap,
+        settings.buttonPosition,
+      );
+      group.style.top = `${top}px`;
+      group.style.left = `${left}px`;
     }
   });
 });
@@ -129,7 +142,9 @@ export function processMedia(media) {
       const sizeHoverTargets = getMediaHoverTargets(media);
       const onEnter = showSizeLabel;
       const onLeave = hideSizeLabel;
-      const onScroll = () => { sizeLabel.classList.remove("imd-show"); };
+      const onScroll = () => {
+        sizeLabel.classList.remove("imd-show");
+      };
       sizeHoverTargets.forEach((target) => {
         target.addEventListener("mouseenter", onEnter);
         target.addEventListener("mouseleave", onLeave);
@@ -159,7 +174,9 @@ export function processMedia(media) {
   attachMediaActionHandlers(media, btns);
   actionGroup.append(...btns.buttons);
 
-  const showButtons = () => { showActionGroup(actionGroup, media); };
+  const showButtons = () => {
+    showActionGroup(actionGroup, media);
+  };
   const hideButtons = () => hideActionGroup(actionGroup);
 
   const hoverTargets = getMediaHoverTargets(media);
@@ -174,7 +191,9 @@ export function processMedia(media) {
   };
 
   const hoverEntries = hoverTargets.map((target) => ({
-    target, mouseenter: showButtons, mouseleave: scheduleHide,
+    target,
+    mouseenter: showButtons,
+    mouseleave: scheduleHide,
   }));
   hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
     target.addEventListener("mouseenter", mouseenter);
@@ -186,8 +205,12 @@ export function processMedia(media) {
   actionGroup.addEventListener("mouseleave", scheduleHide);
 
   if (btns.pipBtn) {
-    const onEnterPip = () => { btns.pipBtn.hidden = true; };
-    const onLeavePip = () => { btns.pipBtn.hidden = false; };
+    const onEnterPip = () => {
+      btns.pipBtn.hidden = true;
+    };
+    const onLeavePip = () => {
+      btns.pipBtn.hidden = false;
+    };
     media.addEventListener("enterpictureinpicture", onEnterPip);
     media.addEventListener("leavepictureinpicture", onLeavePip);
     pipState.set(media, { onEnterPip, onLeavePip });
@@ -200,21 +223,24 @@ export function processMedia(media) {
 
 export function attachMediaActionHandlers(media, btns) {
   btns.downloadBtn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     downloadMedia(media).catch((error) => {
       console.warn("[Media Downloader] Download could not be started:", error);
       showToast(error?.message || "Download failed.");
     });
   });
   btns.previewBtn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     previewMedia(media).catch((error) => {
       console.warn("[Media Downloader] Preview failed:", error);
       showToast(error?.message || "Preview failed.");
     });
   });
   btns.captureBtn?.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     captureVideoFrame(media)
       .then(({ blobUrl, dataUrl }) => {
         if (dataUrl) {
@@ -228,19 +254,23 @@ export function attachMediaActionHandlers(media, btns) {
       });
   });
   btns.lightboxBtn?.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     openLightbox(media);
   });
   btns.pipBtn?.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     togglePictureInPicture(media);
   });
   btns.trimBtn?.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     triggerTrim(media, btns.trimBtn);
   });
   btns.copyBtn?.addEventListener("click", async (e) => {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
     try {
       const isVideo = media.tagName === "VIDEO";
       const { copiedType } = isVideo
@@ -249,7 +279,10 @@ export function attachMediaActionHandlers(media, btns) {
       setButtonLabel(btns.copyBtn, "Copied!");
       showToast(copiedType ? `Copied to clipboard (${copiedType})` : "Copied to clipboard.");
       setTimeout(() => {
-        setButtonLabel(btns.copyBtn, isVideo ? "Copy current frame to clipboard" : "Copy image to clipboard");
+        setButtonLabel(
+          btns.copyBtn,
+          isVideo ? "Copy current frame to clipboard" : "Copy image to clipboard",
+        );
       }, 1500);
     } catch (error) {
       console.warn("[Media Downloader] Copy to clipboard failed:", error);

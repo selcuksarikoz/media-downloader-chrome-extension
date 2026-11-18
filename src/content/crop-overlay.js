@@ -1,9 +1,10 @@
-import { settings } from './state.js';
-import { getFrameCaptureFormat } from './utils.js';
-import { downloadBlobFile } from './blob-status.js';
-import { showToast } from './toast.js';
-import { buildCroppedImage } from './crop-export.js';
-import { MIN_CROP_SIZE_PX } from './constants.js';
+import { settings } from "./state.js";
+import { getFrameCaptureFormat } from "./utils.js";
+import { clamp } from "../shared/utils.js";
+import { downloadBlobFile } from "./blob-status.js";
+import { showToast } from "./toast.js";
+import { buildCroppedImage } from "./crop-export.js";
+import { MIN_CROP_SIZE_PX } from "./constants.js";
 
 /**
  * Manage the lightbox crop overlay: DOM creation, drag/resize interaction,
@@ -12,17 +13,23 @@ import { MIN_CROP_SIZE_PX } from './constants.js';
  */
 export function createLightboxCropController(options) {
   const {
-    stage, img, cropBtn, infoEl,
-    getBaseInfo, exitZoom, toggleZoom,
-    resolvedUrl, mediaUrl, corsClean, close,
+    stage,
+    img,
+    cropBtn,
+    infoEl,
+    getBaseInfo,
+    exitZoom,
+    toggleZoom,
+    resolvedUrl,
+    mediaUrl,
+    corsClean,
+    close,
   } = options;
 
   const cropRect = { x: 0, y: 0, w: 1, h: 1 };
   let cropActive = false;
   let cropOverlay = null;
   let cropDrag = null;
-
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
   function infoCropText() {
     const w = Math.max(1, Math.round(cropRect.w * img.naturalWidth));
@@ -84,10 +91,7 @@ export function createLightboxCropController(options) {
       if (!cropDrag) return;
       e.preventDefault();
       el.classList.add("imd-dragging");
-      if (
-        Math.hypot(e.clientX - cropDrag.start.x, e.clientY - cropDrag.start.y) >
-        5
-      ) {
+      if (Math.hypot(e.clientX - cropDrag.start.x, e.clientY - cropDrag.start.y) > 5) {
         cropDrag.moved = true;
       }
       const stageRect = stage.getBoundingClientRect();
@@ -196,12 +200,7 @@ export function createLightboxCropController(options) {
         getFrameCaptureFormat(settings.captureType),
         corsClean,
       );
-      downloadBlobFile(
-        blob,
-        filename,
-        settings.downloadFolder,
-        settings.showSaveAs,
-      );
+      downloadBlobFile(blob, filename, settings.downloadFolder, settings.showSaveAs);
       showToast(`Crop saved · ${width} × ${height} px`);
       close();
     } catch (error) {

@@ -1,12 +1,15 @@
+import { FFMPEG_HOST_CHANNEL } from "./constants.js";
 import {
-  FFMPEG_HOST_CHANNEL, BLOB_MUX_RESULT_EVENT,
-} from './constants.js';
-import {
-  activeMuxWorkers, muxOutputWorkers, activeIndependentMuxes, settings,
-  setFfmpegHostFrame, setFfmpegHostPromise,
-  ffmpegHostFrame, ffmpegHostPromise,
-} from './state.js';
-import { abortError } from './utils.js';
+  activeMuxWorkers,
+  muxOutputWorkers,
+  activeIndependentMuxes,
+  settings,
+  setFfmpegHostFrame,
+  setFfmpegHostPromise,
+  ffmpegHostFrame,
+  ffmpegHostPromise,
+} from "./state.js";
+import { abortError } from "./utils.js";
 
 export function muxTracksIndependently(videoId, filename, tracks, startTime, duration) {
   const muxId = `${videoId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;

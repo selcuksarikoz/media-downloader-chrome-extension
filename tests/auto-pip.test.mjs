@@ -10,12 +10,8 @@ const {
   isAutoPipCandidate,
   refreshAutoPictureInPictureCandidate,
   selectAutoPipVideo,
-} = await import(
-  "../src/content/auto-pip.js"
-);
-const { setExtensionActive, setSettings } = await import(
-  "../src/content/state.js"
-);
+} = await import("../src/content/auto-pip.js");
+const { setExtensionActive, setSettings } = await import("../src/content/state.js");
 
 function createVideo({
   rect = { left: 0, top: 0, right: 640, bottom: 360, width: 640, height: 360 },
@@ -64,9 +60,14 @@ test("rejects paused and 470px-wide videos but accepts site-disabled PiP", () =>
   assert.equal(isAutoPipCandidate(createVideo({ paused: true })), false);
   assert.equal(isAutoPipCandidate(createVideo({ muted: true })), true);
   assert.equal(isAutoPipCandidate(createVideo({ disablePictureInPicture: true })), true);
-  assert.equal(isAutoPipCandidate(createVideo({
-    rect: { left: 0, top: 0, right: 470, bottom: 264, width: 470, height: 264 },
-  })), false);
+  assert.equal(
+    isAutoPipCandidate(
+      createVideo({
+        rect: { left: 0, top: 0, right: 470, bottom: 264, width: 470, height: 264 },
+      }),
+    ),
+    false,
+  );
 });
 
 test("keeps Auto-PiP active when the domain blacklist hides media controls", () => {

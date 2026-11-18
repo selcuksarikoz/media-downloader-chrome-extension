@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -26,13 +26,7 @@
 
       <div class="form-group">
         <label for="minWidth">Minimum Media Size (px)</label>
-        <input
-          type="number"
-          id="minWidth"
-          class="form-control"
-          min="0"
-          value="150"
-        />
+        <input type="number" id="minWidth" class="form-control" min="0" value="150" />
         <small class="field-help">
           Images and videos smaller than this size will be ignored.
         </small>
@@ -49,15 +43,8 @@
 
       <div class="form-group">
         <label for="folder">Download Sub-folder</label>
-        <input
-          type="text"
-          id="folder"
-          class="form-control"
-          placeholder="e.g. Media"
-        />
-        <small class="field-help">
-          Leave empty to save directly in the Downloads folder.
-        </small>
+        <input type="text" id="folder" class="form-control" placeholder="e.g. Media" />
+        <small class="field-help"> Leave empty to save directly in the Downloads folder. </small>
       </div>
 
       <div class="form-group">
@@ -69,18 +56,12 @@
             class="form-control"
             placeholder="e.g. netflix.com"
           />
-          <button type="button" id="addBlacklistDomain" class="btn-secondary">
-            Add
-          </button>
+          <button type="button" id="addBlacklistDomain" class="btn-secondary">Add</button>
         </div>
-        <div
-          id="blacklist"
-          class="domain-list"
-          aria-label="Blacklisted domains"
-        ></div>
+        <div id="blacklist" class="domain-list" aria-label="Blacklisted domains"></div>
         <small class="field-help">
-          In-page media controls stay hidden on these domains and their
-          subdomains. Auto-PiP remains available.
+          In-page media controls stay hidden on these domains and their subdomains. Auto-PiP remains
+          available.
         </small>
       </div>
 
@@ -102,16 +83,13 @@
       <div class="form-group checkbox-group">
         <input type="checkbox" id="autoPictureInPicture" />
         <label for="autoPictureInPicture">
-          Automatically open playing videos wider than 470 px in
-          Picture-in-Picture
+          Automatically open playing videos wider than 470 px in Picture-in-Picture
         </label>
       </div>
 
       <div class="form-group checkbox-group">
         <input type="checkbox" id="useContextMenu" />
-        <label for="useContextMenu">
-          Use right-click menu instead of hover buttons
-        </label>
+        <label for="useContextMenu"> Use right-click menu instead of hover buttons </label>
       </div>
 
       <button id="save" class="btn-save">Save Settings</button>

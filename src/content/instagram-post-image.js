@@ -1,34 +1,20 @@
-import {
-  instagramPostImageRequests,
-  storeInstagramImageCandidate,
-} from './state.js';
+import { instagramPostImageRequests, storeInstagramImageCandidate } from "./state.js";
 import {
   getInstagramMediaIdFromShortcode,
   getInstagramImageAssetKeys,
   isResizedInstagramImageUrl,
-} from '../shared/instagram-image.js';
+} from "../shared/instagram-image.js";
 import {
   INSTAGRAM_POST_IMAGE_REQUEST_EVENT,
   INSTAGRAM_POST_IMAGE_RESULT_EVENT,
-} from './constants.js';
+} from "./constants.js";
+import { isInstagramPage, createRequestId } from "../shared/utils.js";
 
 const MAX_CACHED_POSTS = 40;
 const MAX_CANDIDATES_PER_ASSET = 20;
 const REQUEST_TIMEOUT_MS = 6000;
 const UPGRADE_MIN_WIDTH = 1440;
 const pendingRequests = new Map();
-
-function isInstagramPage() {
-  const hostname = globalThis.location?.hostname || "";
-  return hostname === "instagram.com" || hostname.endsWith(".instagram.com");
-}
-
-function createRequestId() {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `ig-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
 
 function receiveResult(event) {
   const { requestId, candidates } = event.detail || {};
@@ -47,19 +33,18 @@ function requestPostCandidates(mediaId, shortcode) {
       resolve([]);
     }, REQUEST_TIMEOUT_MS);
     pendingRequests.set(requestId, { resolve, timer });
-    window.dispatchEvent(new CustomEvent(INSTAGRAM_POST_IMAGE_REQUEST_EVENT, {
-      detail: { requestId, mediaId, shortcode },
-    }));
+    window.dispatchEvent(
+      new CustomEvent(INSTAGRAM_POST_IMAGE_REQUEST_EVENT, {
+        detail: { requestId, mediaId, shortcode },
+      }),
+    );
   });
 }
 
 function getPostReference(img) {
-  const link = img.closest?.(
-    'a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]',
-  );
+  const link = img.closest?.('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]');
   if (!link) return null;
-  const match = (link.getAttribute('href') || '')
-    .match(/\/(?:p|reel|reels)\/([\w-]+)/);
+  const match = (link.getAttribute("href") || "").match(/\/(?:p|reel|reels)\/([\w-]+)/);
   if (!match) return null;
   const mediaId = getInstagramMediaIdFromShortcode(match[1]);
   return mediaId ? { mediaId, shortcode: match[1] } : null;
@@ -73,9 +58,8 @@ function storeCandidates(candidates) {
       width: Number(candidate.width) || 0,
       height: Number(candidate.height) || 0,
     };
-    getInstagramImageAssetKeys(entry.url, document.baseURI).forEach(
-      (assetKey) =>
-        storeInstagramImageCandidate(assetKey, entry, MAX_CANDIDATES_PER_ASSET),
+    getInstagramImageAssetKeys(entry.url, document.baseURI).forEach((assetKey) =>
+      storeInstagramImageCandidate(assetKey, entry, MAX_CANDIDATES_PER_ASSET),
     );
   }
 }
@@ -83,9 +67,7 @@ function storeCandidates(candidates) {
 function cachePost(mediaId, promise) {
   instagramPostImageRequests.set(mediaId, promise);
   while (instagramPostImageRequests.size > MAX_CACHED_POSTS) {
-    instagramPostImageRequests.delete(
-      instagramPostImageRequests.keys().next().value,
-    );
+    instagramPostImageRequests.delete(instagramPostImageRequests.keys().next().value);
   }
   return promise;
 }

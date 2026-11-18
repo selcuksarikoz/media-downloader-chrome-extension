@@ -1,13 +1,28 @@
 import {
-  DOWNLOAD_ICON, PREVIEW_ICON, CAPTURE_ICON, PIP_ICON, LIGHTBOX_ICON,
-  TRIM_ICON, STOP_ICON, COPY_ICON,
-} from './constants.js';
+  DOWNLOAD_ICON,
+  PREVIEW_ICON,
+  CAPTURE_ICON,
+  PIP_ICON,
+  LIGHTBOX_ICON,
+  TRIM_ICON,
+  STOP_ICON,
+  COPY_ICON,
+} from "./constants.js";
 import {
-  settings, mediaControls, visibleMedia, contextMenuEl, contextMenuMedia,
-  blobJobIntent, activeBlobJobIds, activeDirectDownloadIds,
-  pendingVideoActionIds, videoTrimRecordings, finalizingBlobJobIds,
-} from './state.js';
-import { getActionRect } from './instagram.js';
+  settings,
+  mediaControls,
+  visibleMedia,
+  contextMenuEl,
+  contextMenuMedia,
+  blobJobIntent,
+  activeBlobJobIds,
+  activeDirectDownloadIds,
+  pendingVideoActionIds,
+  videoTrimRecordings,
+  finalizingBlobJobIds,
+} from "./state.js";
+import { getActionRect } from "./instagram.js";
+import { computeActionGroupPosition } from "./action-position.js";
 
 export function createActionButton(className, title, icon) {
   const button = document.createElement("button");
@@ -32,12 +47,9 @@ export function syncActionButtonState(media, btns) {
   const regularTrimActive = videoTrimRecordings.has(media);
   const trimActive = regularTrimActive || blobIntent === "trim";
   const trimFinalizing = Boolean(videoId && finalizingBlobJobIds.has(videoId));
-  const directDownloadBusy = Boolean(
-    videoId && activeDirectDownloadIds.has(videoId)
-  );
+  const directDownloadBusy = Boolean(videoId && activeDirectDownloadIds.has(videoId));
   const actionPending = Boolean(videoId && pendingVideoActionIds.has(videoId));
-  const conflictingJob =
-    regularTrimActive || blobBusy || directDownloadBusy || actionPending;
+  const conflictingJob = regularTrimActive || blobBusy || directDownloadBusy || actionPending;
 
   btns.downloadBtn.disabled = conflictingJob;
   btns.downloadBtn.classList.toggle("imd-recording", conflictingJob);
@@ -48,8 +60,7 @@ export function syncActionButtonState(media, btns) {
 
   if (!btns.trimBtn) return;
   btns.trimBtn.disabled =
-    trimFinalizing || directDownloadBusy || actionPending ||
-    (blobBusy && blobIntent !== "trim");
+    trimFinalizing || directDownloadBusy || actionPending || (blobBusy && blobIntent !== "trim");
   btns.trimBtn.dataset.recording = trimActive ? "true" : "false";
   btns.trimBtn.innerHTML = trimActive ? STOP_ICON : TRIM_ICON;
   setButtonLabel(
@@ -103,7 +114,14 @@ export function buildMediaActionButtons(media) {
   if (copyBtn) buttons.push(copyBtn);
   if (pipBtn) buttons.push(pipBtn);
   const controls = {
-    downloadBtn, previewBtn, captureBtn, lightboxBtn, pipBtn, trimBtn, copyBtn, buttons,
+    downloadBtn,
+    previewBtn,
+    captureBtn,
+    lightboxBtn,
+    pipBtn,
+    trimBtn,
+    copyBtn,
+    buttons,
   };
   syncActionButtonState(media, controls);
   return controls;
@@ -194,33 +212,16 @@ export function positionActionGroup(group, media) {
   const width = group.offsetWidth || 86;
   const height = group.offsetHeight || 40;
   const gap = 10;
-  let top;
-  let left;
+  const { top, left } = computeActionGroupPosition(
+    rect,
+    width,
+    height,
+    gap,
+    settings.buttonPosition,
+  );
 
-  switch (settings.buttonPosition) {
-    case "top-left":
-      top = rect.top + gap;
-      left = rect.left + gap;
-      break;
-    case "bottom-left":
-      top = rect.bottom - height - gap;
-      left = rect.left + gap;
-      break;
-    case "bottom-right":
-      top = rect.bottom - height - gap;
-      left = rect.right - width - gap;
-      break;
-    case "center":
-      top = rect.top + (rect.height - height) / 2;
-      left = rect.left + (rect.width - width) / 2;
-      break;
-    default:
-      top = rect.top + gap;
-      left = rect.right - width - gap;
-  }
-
-  group.style.top = `${Math.max(0, top)}px`;
-  group.style.left = `${Math.max(0, left)}px`;
+  group.style.top = `${top}px`;
+  group.style.left = `${left}px`;
 }
 
 export function updateAllButtonPositions() {

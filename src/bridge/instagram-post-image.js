@@ -5,18 +5,16 @@ import {
   extractInstagramImageCandidates,
   extractInstagramImageCandidatesFromScript,
 } from "./instagram-image-candidates.js";
+import {
+  INSTAGRAM_POST_IMAGE_REQUEST_EVENT,
+  INSTAGRAM_POST_IMAGE_RESULT_EVENT,
+} from "../shared/events.js";
+import { isInstagramPage } from "../shared/utils.js";
 
-const INSTAGRAM_POST_IMAGE_REQUEST_EVENT = "imd:instagram-post-image-request";
-const INSTAGRAM_POST_IMAGE_RESULT_EVENT = "imd:instagram-post-image-result";
 const INSTAGRAM_APP_ID = "936619743392459";
 const REQUEST_TIMEOUT_MS = 8000;
 const MAX_CACHED_POSTS = 40;
 const posts = new Map();
-
-function isInstagramPage() {
-  const hostname = globalThis.location?.hostname || "";
-  return hostname === "instagram.com" || hostname.endsWith(".instagram.com");
-}
 
 function rememberPost(mediaId, promise) {
   posts.set(mediaId, promise);
@@ -58,9 +56,7 @@ async function fetchPostPage(shortcode, signal) {
   const html = await response.text();
   const candidates = extractInstagramImageCandidatesFromScript(html);
   for (const script of html.matchAll(PAGE_SCRIPT_PATTERN)) {
-    candidates.push(
-      ...extractInstagramImageCandidatesFromScript(script[1]),
-    );
+    candidates.push(...extractInstagramImageCandidatesFromScript(script[1]));
   }
   return candidates;
 }
@@ -84,9 +80,11 @@ async function fetchPostCandidates(mediaId, shortcode) {
 }
 
 function emitResult(requestId, candidates) {
-  window.dispatchEvent(new CustomEvent(INSTAGRAM_POST_IMAGE_RESULT_EVENT, {
-    detail: { requestId, candidates },
-  }));
+  window.dispatchEvent(
+    new CustomEvent(INSTAGRAM_POST_IMAGE_RESULT_EVENT, {
+      detail: { requestId, candidates },
+    }),
+  );
 }
 
 function getPostRequest(mediaId, shortcode) {
@@ -107,8 +105,7 @@ function handleRequest(event) {
     emitResult(requestId, []);
     return;
   }
-  getPostRequest(mediaId, shortcode)
-    .then((candidates) => emitResult(requestId, candidates));
+  getPostRequest(mediaId, shortcode).then((candidates) => emitResult(requestId, candidates));
 }
 
 export function initInstagramPostImageBridge() {

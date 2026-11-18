@@ -1,13 +1,22 @@
 import {
-  mediaControls, visibleMedia, lastPointerPosition, repositionFrame, pointerFrame,
-  visibilityStyleCacheFrame, visibilityStyleCache, cachedModalsFrame, cachedModals,
-  setRepositionFrame, setPointerFrame, setLastPointerPosition,
-  setVisibilityStyleCacheFrame, setCachedModalsFrame, setCachedModals,
-} from './state.js';
-import { getInstagramReelLink } from './instagram.js';
-import {
-  showActionGroup, hideActionGroup, positionActionGroup,
-} from './action-ui.js';
+  mediaControls,
+  visibleMedia,
+  lastPointerPosition,
+  repositionFrame,
+  pointerFrame,
+  visibilityStyleCacheFrame,
+  visibilityStyleCache,
+  cachedModalsFrame,
+  cachedModals,
+  setRepositionFrame,
+  setPointerFrame,
+  setLastPointerPosition,
+  setVisibilityStyleCacheFrame,
+  setCachedModalsFrame,
+  setCachedModals,
+} from "./state.js";
+import { getInstagramReelLink } from "./instagram.js";
+import { showActionGroup, hideActionGroup, positionActionGroup } from "./action-ui.js";
 
 export function getMediaHoverTargets(media) {
   const targets = [media];
@@ -43,19 +52,23 @@ export function repositionOpenControls() {
 
 export function scheduleReposition() {
   if (repositionFrame !== null) return;
-  setRepositionFrame(requestAnimationFrame(() => {
-    setRepositionFrame(null);
-    repositionOpenControls();
-  }));
+  setRepositionFrame(
+    requestAnimationFrame(() => {
+      setRepositionFrame(null);
+      repositionOpenControls();
+    }),
+  );
 }
 
 export function schedulePointerReconciliation() {
   if (!lastPointerPosition) return;
   if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
-  setPointerFrame(requestAnimationFrame(() => {
-    setPointerFrame(null);
-    reconcileControlsAtPoint(lastPointerPosition.x, lastPointerPosition.y);
-  }));
+  setPointerFrame(
+    requestAnimationFrame(() => {
+      setPointerFrame(null);
+      reconcileControlsAtPoint(lastPointerPosition.x, lastPointerPosition.y);
+    }),
+  );
 }
 
 export function reconcileControlsAtPoint(x, y) {
@@ -78,11 +91,7 @@ export function findTopMediaAtPoint(x, y) {
   let bestStackIndex = Infinity;
 
   mediaControls.forEach((group, media) => {
-    if (
-      !media.isConnected ||
-      !visibleMedia.has(media) ||
-      !isMediaActuallyVisible(media)
-    ) {
+    if (!media.isConnected || !visibleMedia.has(media) || !isMediaActuallyVisible(media)) {
       return;
     }
     if (modal && !modal.contains(media)) return;
@@ -133,19 +142,14 @@ function isMediaActuallyVisible(media) {
   }
 
   for (let element = media; element; element = element.parentElement) {
-    if (
-      element.hidden ||
-      element.inert ||
-      element.getAttribute("aria-hidden") === "true"
-    ) {
+    if (element.hidden || element.inert || element.getAttribute("aria-hidden") === "true") {
       return false;
     }
     const style = getCachedComputedStyle(element);
     if (
       style.display === "none" ||
       style.visibility === "hidden" ||
-      (Number(style.opacity) === 0 &&
-        !(element === media && hasBackgroundProxy))
+      (Number(style.opacity) === 0 && !(element === media && hasBackgroundProxy))
     ) {
       return false;
     }
@@ -157,9 +161,10 @@ function isMediaActuallyVisible(media) {
 function hasVisibleBackgroundProxy(media) {
   if (!media.parentElement) return false;
   const mediaRect = media.getBoundingClientRect();
-  const parent = media.tagName === "VIDEO"
-    ? (getInstagramReelLink(media) || media.parentElement)
-    : media.parentElement;
+  const parent =
+    media.tagName === "VIDEO"
+      ? getInstagramReelLink(media) || media.parentElement
+      : media.parentElement;
   if (!parent) return false;
 
   if (media.tagName === "VIDEO") {
@@ -167,13 +172,15 @@ function hasVisibleBackgroundProxy(media) {
     for (const element of imgs) {
       if (element === media) continue;
       const style = getCachedComputedStyle(element);
-      const hasVisibleImage = element.tagName === "IMG" && Boolean(element.currentSrc || element.src);
+      const hasVisibleImage =
+        element.tagName === "IMG" && Boolean(element.currentSrc || element.src);
       if (
         (!hasVisibleImage && style.backgroundImage === "none") ||
         style.display === "none" ||
         style.visibility === "hidden" ||
         Number(style.opacity) === 0
-      ) continue;
+      )
+        continue;
       const rect = element.getBoundingClientRect();
       if (
         rect.width > 0 &&
@@ -182,7 +189,8 @@ function hasVisibleBackgroundProxy(media) {
         rect.right > mediaRect.left &&
         rect.top < mediaRect.bottom &&
         rect.bottom > mediaRect.top
-      ) return true;
+      )
+        return true;
     }
     return false;
   }
@@ -196,7 +204,8 @@ function hasVisibleBackgroundProxy(media) {
       style.display === "none" ||
       style.visibility === "hidden" ||
       Number(style.opacity) === 0
-    ) continue;
+    )
+      continue;
     const rect = element.getBoundingClientRect();
     if (
       rect.width > 0 &&
@@ -205,7 +214,8 @@ function hasVisibleBackgroundProxy(media) {
       rect.right > mediaRect.left &&
       rect.top < mediaRect.bottom &&
       rect.bottom > mediaRect.top
-    ) return true;
+    )
+      return true;
   }
   return false;
 }
@@ -214,21 +224,21 @@ function getVisibleModals() {
   const frame = performance.now();
   if (cachedModalsFrame !== Math.floor(frame / 16)) {
     setCachedModalsFrame(Math.floor(frame / 16));
-    setCachedModals(Array.from(
-      document.querySelectorAll(
-        'dialog[open], [role="dialog"], [aria-modal="true"]',
-      ),
-    ).filter((modal) => {
-      const style = getCachedComputedStyle(modal);
-      const rect = modal.getBoundingClientRect();
-      return (
-        style.display !== "none" &&
-        style.visibility !== "hidden" &&
-        Number(style.opacity) > 0 &&
-        rect.width > 0 &&
-        rect.height > 0
-      );
-    }));
+    setCachedModals(
+      Array.from(
+        document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]'),
+      ).filter((modal) => {
+        const style = getCachedComputedStyle(modal);
+        const rect = modal.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      }),
+    );
   }
   return cachedModals;
 }
@@ -245,9 +255,7 @@ function getModalAtPoint(x, y, stack) {
 
   const containsPoint = modals.find((candidate) => {
     const rect = candidate.getBoundingClientRect();
-    return (
-      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-    );
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
   });
   return { hasModal: true, modal: containsPoint || null };
 }

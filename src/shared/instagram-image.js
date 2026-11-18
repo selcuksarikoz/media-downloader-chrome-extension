@@ -1,9 +1,7 @@
 export function isInstagramCdnImageUrl(value, baseUrl) {
   try {
     const url = new URL(value, baseUrl);
-    const isCdn =
-      url.hostname.endsWith(".cdninstagram.com") ||
-      url.hostname.endsWith(".fbcdn.net");
+    const isCdn = url.hostname.endsWith(".cdninstagram.com") || url.hostname.endsWith(".fbcdn.net");
     return isCdn && /\.(?:avif|jpe?g|png|webp)$/i.test(url.pathname);
   } catch {
     return false;
@@ -37,8 +35,7 @@ export function getInstagramImageAssetKey(value, baseUrl) {
   return getInstagramImageAssetKeys(value, baseUrl)[0] || "";
 }
 
-const SHORTCODE_ALPHABET =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const SHORTCODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /** Convert an Instagram post/reel shortcode into its numeric media id. */
 export function getInstagramMediaIdFromShortcode(shortcode) {
@@ -54,7 +51,8 @@ export function getInstagramMediaIdFromShortcode(shortcode) {
   return id > 0n ? id.toString() : "";
 }
 
-const RESIZE_TRANSFORM_SEGMENT = /(?:^|_)(?:[psc]\d+(?:x\d+|(?:\.\d+){3}[a-z]?)|sh\d+(?:\.\d+)?)(?:_|$)/i;
+const RESIZE_TRANSFORM_SEGMENT =
+  /(?:^|_)(?:[psc]\d+(?:x\d+|(?:\.\d+){3}[a-z]?)|sh\d+(?:\.\d+)?)(?:_|$)/i;
 
 /** Whether a URL only carries an Instagram thumbnail/crop transform. */
 export function isResizedInstagramImageUrl(value, baseUrl) {

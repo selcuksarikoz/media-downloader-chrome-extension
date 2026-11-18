@@ -1,11 +1,6 @@
-import { settings, instagramNativeControlState } from './state.js';
+import { settings, instagramNativeControlState } from "./state.js";
 
-export function isInstagramPage() {
-  return (
-    location.hostname === "instagram.com" ||
-    location.hostname.endsWith(".instagram.com")
-  );
-}
+export { isInstagramPage } from "../shared/utils.js";
 
 export function getInstagramReelLink(media) {
   if (!/(^|\.)instagram\.com$/.test(location.hostname)) return null;
@@ -17,8 +12,7 @@ export function getAssociatedVideoPlayer(media) {
   const directPlayer = media.closest(selector);
   if (directPlayer) return directPlayer;
 
-  const reelLink =
-    getInstagramReelLink(media) || media.closest('a[href*="/p/"]');
+  const reelLink = getInstagramReelLink(media) || media.closest('a[href*="/p/"]');
   const linkedPlayer = reelLink?.querySelector(selector);
   if (linkedPlayer) return linkedPlayer;
 
@@ -41,12 +35,10 @@ export function getAssociatedVideoPlayer(media) {
 }
 
 export function isInstagramVideoPlayerMedia(media) {
-  return Boolean(
-    getAssociatedVideoPlayer(media) || getInstagramReelLink(media),
-  );
+  return Boolean(getAssociatedVideoPlayer(media) || getInstagramReelLink(media));
 }
 
-export function isInstagramStoryContext(video) {
+export function isInstagramStoryContext(_video) {
   if (!/(^|\.)instagram\.com$/.test(location.hostname)) return false;
   return /\/stories\//.test(location.pathname);
 }
@@ -61,16 +53,12 @@ export function getStoryReplyBarHeight(video) {
   const viewportBottom = window.innerHeight;
   let maxOverlap = 0;
 
-  const candidates = dialog.querySelectorAll(
-    'form, [role="group"], [data-testid]',
-  );
+  const candidates = dialog.querySelectorAll('form, [role="group"], [data-testid]');
   for (const el of candidates) {
     const rect = el.getBoundingClientRect();
     if (rect.height < 10) continue;
     if (rect.top < viewportBottom * 0.6) continue;
-    const input = el.querySelector(
-      'input, textarea, [contenteditable="true"], [placeholder]',
-    );
+    const input = el.querySelector('input, textarea, [contenteditable="true"], [placeholder]');
     if (!input) continue;
     const overlap = videoRect.bottom - rect.top;
     if (overlap > maxOverlap) maxOverlap = overlap;
@@ -83,16 +71,9 @@ export function getStoryReplyBarHeight(video) {
   const elements = document.elementsFromPoint(centerX, bottomY);
 
   for (const el of elements) {
-    if (
-      el === video ||
-      video.contains(el) ||
-      el.tagName === "HTML" ||
-      el.tagName === "BODY"
-    )
+    if (el === video || video.contains(el) || el.tagName === "HTML" || el.tagName === "BODY")
       continue;
-    const hasInput = el.querySelector(
-      'input, textarea, [contenteditable="true"], [placeholder]',
-    );
+    const hasInput = el.querySelector('input, textarea, [contenteditable="true"], [placeholder]');
     if (hasInput) {
       const rect = el.getBoundingClientRect();
       if (rect.height > 10) {
@@ -182,22 +163,18 @@ export function syncInstagramNativeVideoControls(video) {
     if (state.hideTimer.id) clearTimeout(state.hideTimer.id);
     state.hideTimer.id = setTimeout(() => {
       state.hideTimer.id = null;
-      const stillHovering = state.hoverEntries.some(({ target }) =>
-        target.matches(":hover"),
-      );
+      const stillHovering = state.hoverEntries.some(({ target }) => target.matches(":hover"));
       if (!stillHovering && !video.matches(":hover")) {
         restoreInstagramVideoAfterNativeControls(video, state);
       }
     }, 250);
   };
 
-  state.hoverEntries = getInstagramNativeControlHoverTargets(video).map(
-    (target) => ({
-      target,
-      mouseenter: state.showControls,
-      mouseleave: state.scheduleRestore,
-    }),
-  );
+  state.hoverEntries = getInstagramNativeControlHoverTargets(video).map((target) => ({
+    target,
+    mouseenter: state.showControls,
+    mouseleave: state.scheduleRestore,
+  }));
   state.hoverEntries.forEach(({ target, mouseenter, mouseleave }) => {
     target.addEventListener("mouseenter", mouseenter);
     target.addEventListener("mouseleave", mouseleave);
@@ -222,10 +199,7 @@ export function removeInstagramNativeVideoControls(video) {
 }
 
 function getInstagramNativeControlHoverTargets(video) {
-  const targets = [
-    getAssociatedVideoPlayer(video),
-    getInstagramReelLink(video),
-  ].filter(Boolean);
+  const targets = [getAssociatedVideoPlayer(video), getInstagramReelLink(video)].filter(Boolean);
   return [...new Set(targets)];
 }
 

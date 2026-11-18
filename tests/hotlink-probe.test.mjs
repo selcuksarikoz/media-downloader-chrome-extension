@@ -25,9 +25,7 @@ globalThis.fetch = async (url) => {
   return headHandler(url);
 };
 
-const { probeHotlinkProtection } = await import(
-  "../src/background/hotlink-download.js"
-);
+const { probeHotlinkProtection } = await import("../src/background/hotlink-download.js");
 
 test("caches a blocked probe so repeated downloads skip the HEAD request", async () => {
   const url = "https://cdn.test/video.mp4";

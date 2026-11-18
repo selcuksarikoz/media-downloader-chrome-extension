@@ -23,7 +23,9 @@ $imd-radius-small: 4px;
 // Pill radius for the horizontal context menu (half its rendered height).
 $imd-radius-pill: 26px;
 
-$imd-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+$imd-shadow:
+  0 2px 8px rgba(0, 0, 0, 0.12),
+  0 1px 3px rgba(0, 0, 0, 0.08);
 
 $imd-btn-size: 40px;
 $imd-icon-size: 24px;
@@ -621,8 +623,7 @@ body.options-page {
 .imd-lightbox-info {
   color: rgba(255, 255, 255, 0.7);
   font-size: 12px;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   white-space: nowrap;
   user-select: none;
 }
@@ -645,8 +646,7 @@ body.options-page {
   border: 1px solid $imd-border;
   color: $imd-text;
   font-size: 13px;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   text-align: center;
   opacity: 0;
   pointer-events: none;
@@ -679,7 +679,9 @@ body.options-page {
   $imd-text-muted: #8b949e;
   $imd-text-subtle: rgba(230, 237, 243, 0.7);
 
-  $imd-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  $imd-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    0 1px 3px rgba(0, 0, 0, 0.2);
 
   .imd-context-menu {
     background: $imd-panel-bg;

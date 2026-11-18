@@ -1,18 +1,30 @@
 import {
-  BLOB_STATUS_EVENT, BLOB_DATA_EVENT, ACTIVE_DOWNLOAD_STATES,
-} from './constants.js';
+  BLOB_STATUS_EVENT,
+  BLOB_DATA_EVENT,
+  BLOB_CONTROL_EVENT,
+  ACTIVE_DOWNLOAD_STATES,
+} from "./constants.js";
+import { hasForbiddenFolder } from "../shared/utils.js";
 import {
-  settings, popupVideoStatuses, activeBlobJobIds, capturedVideos,
-  mediaControls, blobJobIntent, canceledBlobJobs,
+  settings,
+  popupVideoStatuses,
+  activeBlobJobIds,
+  capturedVideos,
+  mediaControls,
+  blobJobIntent,
+  canceledBlobJobs,
   finalizingBlobJobIds,
-  blobDownloadStack, blobDownloadPanels, blobDownloadRequests,
+  blobDownloadStack,
+  blobDownloadPanels,
+  blobDownloadRequests,
   setBlobDownloadStack,
-} from './state.js';
-import { sendBlobStoreMessage } from './blob-store.js';
-import { cancelLocalMux } from './blob-mux.js';
-import { showToast } from './toast.js';
-import { TRIM_ICON, STOP_ICON } from './constants.js';
-import { refreshMediaActionState } from './action-ui.js';
+} from "./state.js";
+import { sendBlobStoreMessage } from "./blob-store.js";
+import { cancelLocalMux } from "./blob-mux.js";
+import { showToast } from "./toast.js";
+import { TRIM_ICON, STOP_ICON } from "./constants.js";
+import { refreshMediaActionState } from "./action-ui.js";
+import { setDownloadButtonsBusy } from "./blob-button-state.js";
 
 window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   const { videoId, status, message, progress } = event.detail || {};
@@ -24,9 +36,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   if (videoId) {
     if (
       blobJobIntent.get(videoId) === "trim" &&
-      /(?:downloading and trimming|finalizing .*trim|saving collected trim)/i.test(
-        message || "",
-      )
+      /(?:downloading and trimming|finalizing .*trim|saving collected trim)/i.test(message || "")
     ) {
       finalizingBlobJobIds.add(videoId);
     }
@@ -49,25 +59,10 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     } catch {}
   }
   const video = capturedVideos.get(videoId);
-  const allBtns = video
-    ? mediaControls.get(video)?.querySelectorAll(".imd-action-btn")
-    : [];
-  const downBtns = video
-    ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn")
-    : [];
-  const trimBtns = video
-    ? mediaControls.get(video)?.querySelectorAll(".imd-trim-btn")
-    : [];
+  const downBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-down-btn") : [];
+  const trimBtns = video ? mediaControls.get(video)?.querySelectorAll(".imd-trim-btn") : [];
 
-  if (downBtns?.length) {
-    const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
-    downBtns.forEach((button) => {
-      button.title = isActive ? "Video download in progress" : "Download Video";
-      button.setAttribute("aria-label", button.title);
-      button.classList.toggle("imd-recording", isActive);
-      button.disabled = isActive;
-    });
-  }
+  if (downBtns?.length) setDownloadButtonsBusy(downBtns, status);
 
   if (trimBtns?.length) {
     const isActive = status === "recording" || status === "progress";
@@ -76,11 +71,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
         ? message.replace("Recording ", "").replace("\u2026", "")
         : "";
     trimBtns.forEach((button) => {
-      if (
-        status === "complete" ||
-        status === "error" ||
-        status === "canceled"
-      ) {
+      if (status === "complete" || status === "error" || status === "canceled") {
         button.title = "Trim from current time";
         button.innerHTML = TRIM_ICON;
         button.dataset.recording = "false";
@@ -94,11 +85,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   updateBlobDownloadPanel(videoId, status, message, normalizedProgress);
 
   if (status === "complete") {
-    showToast(
-      blobJobIntent.get(videoId) === "trim"
-        ? "Trim saved."
-        : "Download complete.",
-    );
+    showToast(blobJobIntent.get(videoId) === "trim" ? "Trim saved." : "Download complete.");
   } else if (status === "error") {
     console.warn("[Media Downloader] Video job failed:", message);
     sendBlobStoreMessage({ action: "cancel", jobId: videoId });
@@ -110,11 +97,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
     showToast("Download canceled.");
   }
 
-  if (
-    status === "complete" ||
-    status === "error" ||
-    status === "canceled"
-  ) {
+  if (status === "complete" || status === "error" || status === "canceled") {
     finalizingBlobJobIds.delete(videoId);
     blobJobIntent.delete(videoId);
   }
@@ -123,15 +106,11 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
 
 function normalizeJobProgress(previous, status, progress) {
   if (status === "complete") return 100;
-  const current = Number.isFinite(progress)
-    ? Math.max(0, Math.min(100, progress))
-    : null;
+  const current = Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : null;
   if (!ACTIVE_DOWNLOAD_STATES.has(status)) return current;
   if (!ACTIVE_DOWNLOAD_STATES.has(previous?.status)) return current;
   if (!Number.isFinite(previous.progress)) return current;
-  return Number.isFinite(current)
-    ? Math.max(previous.progress, current)
-    : previous.progress;
+  return Number.isFinite(current) ? Math.max(previous.progress, current) : previous.progress;
 }
 
 window.addEventListener(BLOB_DATA_EVENT, async (event) => {
@@ -158,7 +137,7 @@ export function downloadBlobFile(blob, filename, folder, saveAs) {
   let downloadFilename = filename;
   let useSaveAs = saveAs;
   if (folder) {
-    const cleanFolder = folder.trim().replace(/^[\/\\]+|[\/\\]+$/g, "");
+    const cleanFolder = folder.trim().replace(/^[/\\]+|[/\\]+$/g, "");
     if (cleanFolder && !hasForbiddenFolder(cleanFolder)) {
       downloadFilename = `${cleanFolder}/${filename}`;
       useSaveAs = false;
@@ -174,19 +153,13 @@ export function downloadBlobFile(blob, filename, folder, saveAs) {
     if (!downloadOptions.saveAs) {
       downloadOptions.filename = downloadFilename;
     }
-    chrome.downloads.download(
-      downloadOptions,
-      () => {
-        if (chrome.runtime.lastError) {
-          console.warn(
-            "Blob download failed:",
-            chrome.runtime.lastError.message,
-          );
-          showToast(`Blob download failed: ${chrome.runtime.lastError.message}`);
-        }
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-      },
-    );
+    chrome.downloads.download(downloadOptions, () => {
+      if (chrome.runtime.lastError) {
+        console.warn("Blob download failed:", chrome.runtime.lastError.message);
+        showToast(`Blob download failed: ${chrome.runtime.lastError.message}`);
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    });
   } else {
     const a = document.createElement("a");
     a.href = blobUrl;
@@ -194,12 +167,6 @@ export function downloadBlobFile(blob, filename, folder, saveAs) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
   }
-}
-
-function hasForbiddenFolder(folder) {
-  return folder
-    .split(/[\/\\]+/)
-    .some((part) => part.toLowerCase() === "imgdownloader_files");
 }
 
 function updateBlobDownloadPanel(videoId, status, message, progress) {
@@ -223,24 +190,26 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
     ? Math.max(0, Math.min(100, Math.round(progress)))
     : null;
   const previousPercent = Number(panel.dataset.maxProgress);
-  const percent = rawPercent === null
-    ? (Number.isFinite(previousPercent) ? previousPercent : null)
-    : Math.max(Number.isFinite(previousPercent) ? previousPercent : 0, rawPercent);
+  const percent =
+    rawPercent === null
+      ? Number.isFinite(previousPercent)
+        ? previousPercent
+        : null
+      : Math.max(Number.isFinite(previousPercent) ? previousPercent : 0, rawPercent);
   if (percent !== null) panel.dataset.maxProgress = String(percent);
 
-  panel.querySelector(".imd-download-title").textContent =
-    isTrimJob ? "Trim video" : "Video download";
+  panel.querySelector(".imd-download-title").textContent = isTrimJob
+    ? "Trim video"
+    : "Video download";
   panel.querySelector(".imd-download-message").textContent =
     message || "Preparing video download\u2026";
   const fill = panel.querySelector(".imd-download-progress-fill");
   fill.style.width = `${percent ?? (isActive ? 15 : 100)}%`;
   fill.classList.toggle("imd-indeterminate", percent === null && isActive);
-  panel.querySelector(".imd-download-percent").textContent =
-    percent === null ? "" : `${percent}%`;
+  panel.querySelector(".imd-download-percent").textContent = percent === null ? "" : `${percent}%`;
   const saveButton = panel.querySelector(".imd-save-download");
   const canSaveCollectedDownload =
-    !isTrimJob &&
-    /(?:collecting segments|recording (?:video stream|\d))/i.test(message || "");
+    !isTrimJob && /(?:collecting segments|recording (?:video stream|\d))/i.test(message || "");
   saveButton.textContent = isTrimJob ? "Save Trim" : "Save Now";
   saveButton.hidden = !(
     isActive &&
@@ -264,10 +233,7 @@ function updateBlobDownloadPanel(videoId, status, message, progress) {
           currentPanel.remove();
           blobDownloadPanels.delete(videoId);
         }
-        if (
-          blobDownloadPanels.size === 0 &&
-          blobDownloadStack.matches(":popover-open")
-        ) {
+        if (blobDownloadPanels.size === 0 && blobDownloadStack.matches(":popover-open")) {
           blobDownloadStack.hidePopover();
         }
       },
@@ -316,7 +282,7 @@ function createBlobDownloadPanel(videoId) {
 
 function dispatchBlobControl(videoId, action) {
   window.dispatchEvent(
-    new CustomEvent("imd:control-blob-video", {
+    new CustomEvent(BLOB_CONTROL_EVENT, {
       detail: { videoId, action },
     }),
   );

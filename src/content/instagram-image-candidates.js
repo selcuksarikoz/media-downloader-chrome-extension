@@ -1,20 +1,13 @@
-import {
-  storeInstagramImageCandidate,
-  trimInstagramImageCandidates,
-} from "./state.js";
+import { storeInstagramImageCandidate, trimInstagramImageCandidates } from "./state.js";
 import { getInstagramImageAssetKeys } from "../shared/instagram-image.js";
 import {
   INSTAGRAM_IMAGE_CANDIDATES_EVENT,
   INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT,
 } from "./constants.js";
+import { toDimension } from "../shared/utils.js";
 
 const MAX_ASSETS = 500;
 const MAX_CANDIDATES_PER_ASSET = 20;
-
-function toDimension(value) {
-  const dimension = Number(value);
-  return Number.isFinite(dimension) && dimension > 0 ? dimension : 0;
-}
 
 function receiveCandidates(event) {
   const candidates = event.detail?.candidates;
@@ -27,13 +20,8 @@ function receiveCandidates(event) {
       width: toDimension(candidate.width),
       height: toDimension(candidate.height),
     };
-    getInstagramImageAssetKeys(candidate.url, document.baseURI).forEach(
-      (assetKey) =>
-        storeInstagramImageCandidate(
-          assetKey,
-          entry,
-          MAX_CANDIDATES_PER_ASSET,
-        ),
+    getInstagramImageAssetKeys(candidate.url, document.baseURI).forEach((assetKey) =>
+      storeInstagramImageCandidate(assetKey, entry, MAX_CANDIDATES_PER_ASSET),
     );
   }
 
@@ -41,12 +29,8 @@ function receiveCandidates(event) {
 }
 
 export function initInstagramImageCandidates() {
-  if (
-    location.hostname !== "instagram.com" &&
-    !location.hostname.endsWith(".instagram.com")
-  ) return;
+  if (location.hostname !== "instagram.com" && !location.hostname.endsWith(".instagram.com"))
+    return;
   window.addEventListener(INSTAGRAM_IMAGE_CANDIDATES_EVENT, receiveCandidates);
-  window.dispatchEvent(new CustomEvent(
-    INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT,
-  ));
+  window.dispatchEvent(new CustomEvent(INSTAGRAM_IMAGE_CANDIDATES_REQUEST_EVENT));
 }

@@ -6,13 +6,13 @@ import {
   activeDirectDownloadIds,
   pendingVideoActionIds,
   activeIndependentMuxes,
-} from './state.js';
-import { BLOB_STATUS_EVENT, BLOB_MUX_RESULT_EVENT } from './constants.js';
-import { releaseMuxUrl } from './blob-mux.js';
-import { processAllMedia } from './media-tracking.js';
-import { downloadMedia } from './media-download.js';
-import { refreshMediaActionState } from './action-ui.js';
-import { showToast } from './toast.js';
+} from "./state.js";
+import { BLOB_STATUS_EVENT } from "./constants.js";
+import { releaseMuxUrl } from "./blob-mux.js";
+import { processAllMedia } from "./media-tracking.js";
+import { downloadMedia } from "./media-download.js";
+import { refreshMediaActionState } from "./action-ui.js";
+import { showToast } from "./toast.js";
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.action === "independentMuxResult" && message.muxId) {
@@ -110,7 +110,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           error: error?.message || "Video download failed.",
-        })
+        }),
       );
     return true;
   }
@@ -147,10 +147,8 @@ export function getPopupMediaList() {
       duration: Number.isFinite(video.duration) ? video.duration : 0,
       width: video.videoWidth || 0,
       height: video.videoHeight || 0,
-      poster:
-        /^(?:https?:|data:image\/)/i.test(poster) ? poster : "",
-      active:
-        activeBlobJobIds.has(videoId) || activeDirectDownloadIds.has(videoId),
+      poster: /^(?:https?:|data:image\/)/i.test(poster) ? poster : "",
+      active: activeBlobJobIds.has(videoId) || activeDirectDownloadIds.has(videoId),
       playing: !video.paused && !video.ended,
       downloadStatus,
     });

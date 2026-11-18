@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS } from './constants.js';
+import { DEFAULT_SETTINGS } from "./constants.js";
 
 export let settings = { ...DEFAULT_SETTINGS };
 export let extensionActive = false;
@@ -69,39 +69,91 @@ export let contextMenuMedia = null;
 export let blobDownloadStack = null;
 export const blobDownloadPanels = new Map();
 
-export function setSettings(newSettings) { settings = newSettings; }
-export function setExtensionActive(value) { extensionActive = value; }
-export function setMediaMutationObserver(observer) { mediaMutationObserver = observer; }
-export function setFfmpegHostFrame(frame) { ffmpegHostFrame = frame; }
-export function setFfmpegHostPromise(promise) { ffmpegHostPromise = promise; }
-export function setMseCaptureSeq(value) { mseCaptureSeq = value; }
-export function allocateMseCaptureSeq() { return ++mseCaptureSeq; }
-export function setBlobStorePort(port) { blobStorePort = port; }
-export function setBlobStoreSeq(value) { blobStoreSeq = value; }
-export function allocateBlobStoreSeq() { return ++blobStoreSeq; }
-export function setToastEl(el) { toastEl = el; }
-export function setToastTimer(timer) { toastTimer = timer; }
-export function setLightboxOpen(value) { lightboxOpen = value; }
-export function setRepositionFrame(frame) { repositionFrame = frame; }
-export function setPointerFrame(frame) { pointerFrame = frame; }
-export function setLastPointerPosition(pos) { lastPointerPosition = pos; }
-export function setVisibilityStyleCacheFrame(frame) { visibilityStyleCacheFrame = frame; }
-export function setCachedModalsFrame(frame) { cachedModalsFrame = frame; }
-export function setCachedModals(modals) { cachedModals = modals; }
-export function setContextMenuEl(el) { contextMenuEl = el; }
-export function setContextMenuMedia(media) { contextMenuMedia = media; }
-export function setBlobDownloadStack(stack) { blobDownloadStack = stack; }
-export function setAutoPipVideo(video) { autoPipVideo = video; }
-export function setAutoPipOwned(value) { autoPipOwned = value; }
-export function setAutoPipRequest(promise) { autoPipRequest = promise; }
-export function setAutoPipConfiguredVideo(video) { autoPipConfiguredVideo = video; }
-export function setAutoPipInitialized(value) { autoPipInitialized = value; }
-export function setAutoPipRefreshFrame(frame) { autoPipRefreshFrame = frame; }
-export function setAutoPipMarkedVideo(
-  video,
-  wasNative = false,
-  wasDisabled = false,
-) {
+export function setSettings(newSettings) {
+  settings = newSettings;
+}
+export function setExtensionActive(value) {
+  extensionActive = value;
+}
+export function setMediaMutationObserver(observer) {
+  mediaMutationObserver = observer;
+}
+export function setFfmpegHostFrame(frame) {
+  ffmpegHostFrame = frame;
+}
+export function setFfmpegHostPromise(promise) {
+  ffmpegHostPromise = promise;
+}
+export function setMseCaptureSeq(value) {
+  mseCaptureSeq = value;
+}
+export function allocateMseCaptureSeq() {
+  return ++mseCaptureSeq;
+}
+export function setBlobStorePort(port) {
+  blobStorePort = port;
+}
+export function setBlobStoreSeq(value) {
+  blobStoreSeq = value;
+}
+export function allocateBlobStoreSeq() {
+  return ++blobStoreSeq;
+}
+export function setToastEl(el) {
+  toastEl = el;
+}
+export function setToastTimer(timer) {
+  toastTimer = timer;
+}
+export function setLightboxOpen(value) {
+  lightboxOpen = value;
+}
+export function setRepositionFrame(frame) {
+  repositionFrame = frame;
+}
+export function setPointerFrame(frame) {
+  pointerFrame = frame;
+}
+export function setLastPointerPosition(pos) {
+  lastPointerPosition = pos;
+}
+export function setVisibilityStyleCacheFrame(frame) {
+  visibilityStyleCacheFrame = frame;
+}
+export function setCachedModalsFrame(frame) {
+  cachedModalsFrame = frame;
+}
+export function setCachedModals(modals) {
+  cachedModals = modals;
+}
+export function setContextMenuEl(el) {
+  contextMenuEl = el;
+}
+export function setContextMenuMedia(media) {
+  contextMenuMedia = media;
+}
+export function setBlobDownloadStack(stack) {
+  blobDownloadStack = stack;
+}
+export function setAutoPipVideo(video) {
+  autoPipVideo = video;
+}
+export function setAutoPipOwned(value) {
+  autoPipOwned = value;
+}
+export function setAutoPipRequest(promise) {
+  autoPipRequest = promise;
+}
+export function setAutoPipConfiguredVideo(video) {
+  autoPipConfiguredVideo = video;
+}
+export function setAutoPipInitialized(value) {
+  autoPipInitialized = value;
+}
+export function setAutoPipRefreshFrame(frame) {
+  autoPipRefreshFrame = frame;
+}
+export function setAutoPipMarkedVideo(video, wasNative = false, wasDisabled = false) {
   autoPipMarkedVideo = video;
   autoPipMarkedVideoWasNative = wasNative;
   autoPipMarkedVideoWasDisabled = wasDisabled;
@@ -112,11 +164,7 @@ export function setAutoPipMutationObserver(observer) {
 export function setAutoPipResizeObserver(observer) {
   autoPipResizeObserver = observer;
 }
-export function storeInstagramImageCandidate(
-  assetKey,
-  candidate,
-  maxCandidates,
-) {
+export function storeInstagramImageCandidate(assetKey, candidate, maxCandidates) {
   let entries = instagramImageCandidatesByAsset.get(assetKey);
   if (!entries) {
     entries = new Map();
@@ -131,8 +179,6 @@ export function storeInstagramImageCandidate(
 }
 export function trimInstagramImageCandidates(maxAssets) {
   while (instagramImageCandidatesByAsset.size > maxAssets) {
-    instagramImageCandidatesByAsset.delete(
-      instagramImageCandidatesByAsset.keys().next().value,
-    );
+    instagramImageCandidatesByAsset.delete(instagramImageCandidatesByAsset.keys().next().value);
   }
 }

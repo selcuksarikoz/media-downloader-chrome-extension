@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "webextensions": true,
+    "serviceworker": true,
+    "worker": true
+  },
+  "ignorePatterns": ["dist/**", "*.map", "bun.lock", "package-lock.json"],
+  "overrides": [
+    {
+      "files": ["build.mjs", "vite.config.ts", "tests/**/*.mjs"],
+      "env": {
+        "node": true
+      }
+    }
+  ],
+  "rules": {}
+}

@@ -39,12 +39,15 @@ test("extracts signed Instagram image candidates and their dimensions", () => {
 });
 
 test("ignores videos and non-Instagram assets", () => {
-  assert.deepEqual(extractInstagramImageCandidates({
-    candidates: [
-      { url: "https://example.com/image.jpg", width: 4000 },
-      { url: "https://scontent.cdninstagram.com/video.mp4", width: 1920 },
-    ],
-  }), []);
+  assert.deepEqual(
+    extractInstagramImageCandidates({
+      candidates: [
+        { url: "https://example.com/image.jpg", width: 4000 },
+        { url: "https://scontent.cdninstagram.com/video.mp4", width: 1920 },
+      ],
+    }),
+    [],
+  );
 });
 
 test("reads the full-resolution variants embedded in the page JSON", () => {
@@ -55,24 +58,28 @@ test("reads the full-resolution variants embedded in the page JSON", () => {
     "https://scontent-fra5-1.cdninstagram.com/v/t51/photo_n.jpg?" +
     "stp=dst-jpg_e35_tt6&ig_cache_key=shared";
   const payload = {
-    require: [["ScheduledApplyEach", [], {
-      __bbox: {
-        result: {
-          data: {
-            image_versions2: {
-              candidates: [
-                { url: feed, width: 1080, height: 1350 },
-                { url: original, width: 3072, height: 3840 },
-              ],
+    require: [
+      [
+        "ScheduledApplyEach",
+        [],
+        {
+          __bbox: {
+            result: {
+              data: {
+                image_versions2: {
+                  candidates: [
+                    { url: feed, width: 1080, height: 1350 },
+                    { url: original, width: 3072, height: 3840 },
+                  ],
+                },
+              },
             },
           },
         },
-      },
-    }]],
+      ],
+    ],
   };
-  const script = JSON.stringify(payload)
-    .replaceAll("/", "\\/")
-    .replaceAll("&", "\\u0026");
+  const script = JSON.stringify(payload).replaceAll("/", "\\/").replaceAll("&", "\\u0026");
 
   const candidates = extractInstagramImageCandidatesFromScript(script);
 
@@ -98,8 +105,5 @@ test("falls back to raw URLs when the embedded data is not JSON", () => {
 });
 
 test("ignores inline scripts that cannot hold media", () => {
-  assert.deepEqual(
-    extractInstagramImageCandidatesFromScript('{"a":1}'),
-    [],
-  );
+  assert.deepEqual(extractInstagramImageCandidatesFromScript('{"a":1}'), []);
 });

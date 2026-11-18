@@ -9,12 +9,12 @@ copy, lightbox, and frame-capture controls directly to page media.
 Support depends on the media sources that each site exposes to the browser. Site
 updates can change which actions are available.
 
-| Site | Available actions | Notes |
-| --- | --- | --- |
-| Instagram | Download images and videos, trim videos, capture or copy the current frame, copy images, open the image lightbox, and use Picture-in-Picture. | Works with supported posts, Reels, and Stories when a direct CDN URL or captured MediaSource data is available. |
-| Telegram Web | Download images and videos, trim videos, capture or copy frames, copy images, open the image lightbox, and use Picture-in-Picture. | Progressive virtual video sources can be collected through ranged requests; Blob and MediaSource fallbacks are also supported. |
-| TikTok | Download visible images and videos, trim videos, capture or copy frames, copy images, open the image lightbox, and use Picture-in-Picture. | Availability depends on the direct, Blob, or MediaSource URL exposed by the current player. |
-| YouTube | Capture or copy the current frame and use Picture-in-Picture. Full download and trim are attempted for non-DRM progressive media or reusable captured MediaSource tracks. | Download and trim support is best effort. DRM-protected, encrypted, and some live or adaptive streams are not supported. |
+| Site         | Available actions                                                                                                                                                         | Notes                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Instagram    | Download images and videos, trim videos, capture or copy the current frame, copy images, open the image lightbox, and use Picture-in-Picture.                             | Works with supported posts, Reels, and Stories when a direct CDN URL or captured MediaSource data is available.                |
+| Telegram Web | Download images and videos, trim videos, capture or copy frames, copy images, open the image lightbox, and use Picture-in-Picture.                                        | Progressive virtual video sources can be collected through ranged requests; Blob and MediaSource fallbacks are also supported. |
+| TikTok       | Download visible images and videos, trim videos, capture or copy frames, copy images, open the image lightbox, and use Picture-in-Picture.                                | Availability depends on the direct, Blob, or MediaSource URL exposed by the current player.                                    |
+| YouTube      | Capture or copy the current frame and use Picture-in-Picture. Full download and trim are attempted for non-DRM progressive media or reusable captured MediaSource tracks. | Download and trim support is best effort. DRM-protected, encrypted, and some live or adaptive streams are not supported.       |
 
 Use the extension only for media that you own or have permission to save.
 

@@ -1,30 +1,18 @@
-import { settings } from './state.js';
+import { settings } from "./state.js";
+
+// These helpers are shared with the page bridge, the service worker and the
+// extension pages. Re-export them so existing content-script imports work.
+export {
+  hasForbiddenFolder,
+  replaceFileExtension,
+  createCaptureId,
+  isInstagramPage,
+  isInstagramDirectVideoUrl,
+  isTelegramProgressiveUrl,
+} from "../shared/utils.js";
 
 export function abortError() {
   return new DOMException("Mux canceled.", "AbortError");
-}
-
-export function replaceFileExtension(filename, extension) {
-  const base = (filename || `video-${Date.now()}`).replace(/\.[^.]+$/, "");
-  return `${base}.${extension}`;
-}
-
-export function hasForbiddenFolder(folder) {
-  return folder
-    .split(/[\/\\]+/)
-    .some((part) => part.toLowerCase() === "imgdownloader_files");
-}
-
-export function createCaptureId() {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
-  if (typeof globalThis.crypto?.getRandomValues === "function") {
-    const values = new Uint32Array(4);
-    globalThis.crypto.getRandomValues(values);
-    return `imd-${Array.from(values, (value) => value.toString(16)).join("-")}`;
-  }
-  return `imd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function getSuggestedVideoName(video) {
@@ -41,40 +29,6 @@ export function getSuggestedVideoName(video) {
 
 export function getTimestampedVideoName(extension = "mp4") {
   return `video-${Date.now()}.${extension}`;
-}
-
-export function isInstagramPage() {
-  return (
-    location.hostname === "instagram.com" ||
-    location.hostname.endsWith(".instagram.com")
-  );
-}
-
-export function isInstagramDirectVideoUrl(value) {
-  if (!isInstagramPage()) return false;
-  try {
-    const url = new URL(value, document.baseURI);
-    return (
-      url.protocol === "https:" &&
-      (url.hostname.endsWith(".fbcdn.net") ||
-        url.hostname.endsWith(".cdninstagram.com"))
-    );
-  } catch {
-    return false;
-  }
-}
-
-export function isTelegramProgressiveUrl(value) {
-  try {
-    const url = new URL(value, document.baseURI);
-    return (
-      url.protocol === "https:" &&
-      url.hostname === "web.telegram.org" &&
-      /\/progressive\//i.test(url.pathname)
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function getFrameCaptureFormat(captureType = settings.captureType) {

@@ -6,18 +6,16 @@ import {
   contextMenuMedia,
   setContextMenuEl,
   setContextMenuMedia,
-} from './state.js';
+} from "./state.js";
 import {
   buildMediaActionButtons,
   isolateActionGroupEvents,
   createActionButton,
-} from './action-ui.js';
-import {
-  OPEN_LINK_ICON, TRIM_ICON, STOP_ICON,
-  ACTIVE_DOWNLOAD_STATES, BLOB_STATUS_EVENT,
-} from './constants.js';
-import { getMediaAtPoint, attachMediaActionHandlers } from './media-tracking.js';
-import { showToast } from './toast.js';
+} from "./action-ui.js";
+import { OPEN_LINK_ICON, TRIM_ICON, STOP_ICON, BLOB_STATUS_EVENT } from "./constants.js";
+import { getMediaAtPoint, attachMediaActionHandlers } from "./media-tracking.js";
+import { showToast } from "./toast.js";
+import { setDownloadButtonsBusy } from "./blob-button-state.js";
 
 /** Close and remove the custom right-click menu if it is open. */
 export function closeContextMenu() {
@@ -46,20 +44,17 @@ export function openContextMenu(media, x, y, linkEl) {
     openLinkBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      chrome.runtime.sendMessage(
-        { action: "openTab", url: linkEl.href },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            showToast("Failed to open link.");
-            return;
-          }
-          if (response?.ok !== true) {
-            showToast(response?.error || "Failed to open link.");
-            return;
-          }
-          showToast("Link opened in a new tab.");
-        },
-      );
+      chrome.runtime.sendMessage({ action: "openTab", url: linkEl.href }, (response) => {
+        if (chrome.runtime.lastError) {
+          showToast("Failed to open link.");
+          return;
+        }
+        if (response?.ok !== true) {
+          showToast(response?.error || "Failed to open link.");
+          return;
+        }
+        showToast("Link opened in a new tab.");
+      });
       closeContextMenu();
     });
     menu.appendChild(openLinkBtn);
@@ -116,7 +111,10 @@ function handleContextMenuEvent(event) {
   let media = null;
 
   for (const el of path) {
-    if (trackedMedia.has(el)) { media = el; break; }
+    if (trackedMedia.has(el)) {
+      media = el;
+      break;
+    }
   }
 
   if (!media) media = getMediaAtPoint(event.clientX, event.clientY);
@@ -155,9 +153,8 @@ const dialogObserver = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node.nodeType !== 1) continue;
-      const dialogs = node.tagName === "DIALOG"
-        ? [node]
-        : [...(node.querySelectorAll?.("dialog") ?? [])];
+      const dialogs =
+        node.tagName === "DIALOG" ? [node] : [...(node.querySelectorAll?.("dialog") ?? [])];
       for (const dialog of dialogs) {
         if (!dialog.dataset.imdCtxMenu) {
           dialog.dataset.imdCtxMenu = "true";
@@ -194,13 +191,7 @@ window.addEventListener(BLOB_STATUS_EVENT, (event) => {
   if (contextMenuMedia.dataset.imdCaptureId !== videoId) return;
   const downBtns = contextMenuEl.querySelectorAll(".imd-down-btn");
   const trimBtns = contextMenuEl.querySelectorAll(".imd-trim-btn");
-  const isActive = ACTIVE_DOWNLOAD_STATES.has(status);
-  downBtns.forEach((button) => {
-    button.title = isActive ? "Video download in progress" : "Download Video";
-    button.setAttribute("aria-label", button.title);
-    button.classList.toggle("imd-recording", isActive);
-    button.disabled = isActive;
-  });
+  setDownloadButtonsBusy(downBtns, status);
   trimBtns.forEach((button) => {
     const recording = status === "recording" || status === "progress";
     if (status === "complete" || status === "error" || status === "canceled") {

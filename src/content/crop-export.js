@@ -1,4 +1,4 @@
-import { fetchImageBlob, fetchImageBlobViaBackground } from './media-fetch.js';
+import { fetchImageBlob, fetchImageBlobViaBackground } from "./media-fetch.js";
 
 /** Detect the best output format for a cropped image. Uses the option
  * format when set, otherwise mirrors the source image's format. */
@@ -15,9 +15,7 @@ export function getImageCropFormat(url, preferredFormat) {
     ext = (url.match(/^data:image\/([a-z0-9.+-]+)/i)?.[1] || "").toLowerCase();
   } else {
     try {
-      ext = (
-        new URL(url).pathname.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || ""
-      ).toLowerCase();
+      ext = (new URL(url).pathname.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1] || "").toLowerCase();
     } catch {}
   }
   if (ext === "png") return { mimeType: "image/png", extension: "png", quality: null };
@@ -64,24 +62,15 @@ export function getCropFilename(url, extension) {
  * background bypass) to obtain a clean copy.
  */
 export function buildCroppedImage(img, url, cropRect, preferredFormat, corsClean) {
-  const { mimeType, extension, quality } = getImageCropFormat(
-    url,
-    preferredFormat,
-  );
+  const { mimeType, extension, quality } = getImageCropFormat(url, preferredFormat);
 
   const render = (source) => {
     const width = Math.max(1, source.naturalWidth);
     const height = Math.max(1, source.naturalHeight);
     const x = Math.round(cropRect.x * width);
     const y = Math.round(cropRect.y * height);
-    const cropW = Math.max(
-      1,
-      Math.min(width - x, Math.round(cropRect.w * width)),
-    );
-    const cropH = Math.max(
-      1,
-      Math.min(height - y, Math.round(cropRect.h * height)),
-    );
+    const cropW = Math.max(1, Math.min(width - x, Math.round(cropRect.w * width)));
+    const cropH = Math.max(1, Math.min(height - y, Math.round(cropRect.h * height)));
 
     const canvas = document.createElement("canvas");
     canvas.width = cropW;
@@ -91,24 +80,24 @@ export function buildCroppedImage(img, url, cropRect, preferredFormat, corsClean
 
     return new Promise((resolve, reject) => {
       try {
-        canvas.toBlob((blob) => {
-          if (!blob) {
-            reject(new Error("Cropped image could not be encoded."));
-            return;
-          }
-          resolve({
-            blob,
-            filename: getCropFilename(url, extension),
-            width: cropW,
-            height: cropH,
-          });
-        }, mimeType, quality);
-      } catch (error) {
-        reject(
-          new Error(
-            "Protected (CORS) image cannot be re-read for cropping.",
-          ),
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error("Cropped image could not be encoded."));
+              return;
+            }
+            resolve({
+              blob,
+              filename: getCropFilename(url, extension),
+              width: cropW,
+              height: cropH,
+            });
+          },
+          mimeType,
+          quality,
         );
+      } catch {
+        reject(new Error("Protected (CORS) image cannot be re-read for cropping."));
       }
     });
   };

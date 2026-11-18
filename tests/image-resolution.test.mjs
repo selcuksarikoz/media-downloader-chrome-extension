@@ -3,13 +3,9 @@ import test from "node:test";
 
 globalThis.document = { baseURI: "https://www.instagram.com/p/example/" };
 
-const {
-  getHighestResolutionImageUrl,
-  resolveHighestResolutionImageUrl,
-} = await import("../src/content/image-resolution.js");
-const { instagramImageCandidatesByAsset } = await import(
-  "../src/content/state.js"
-);
+const { getHighestResolutionImageUrl, resolveHighestResolutionImageUrl } =
+  await import("../src/content/image-resolution.js");
+const { instagramImageCandidatesByAsset } = await import("../src/content/state.js");
 
 function createElement(attributes = {}) {
   return {
@@ -47,10 +43,7 @@ test("selects the largest width candidate instead of currentSrc", () => {
     },
   );
 
-  assert.equal(
-    getHighestResolutionImageUrl(image),
-    "https://cdn.example/image-1080.jpg",
-  );
+  assert.equal(getHighestResolutionImageUrl(image), "https://cdn.example/image-1080.jpg");
 });
 
 test("includes picture source and lazy srcset candidates", () => {
@@ -64,10 +57,7 @@ test("includes picture source and lazy srcset candidates", () => {
       return [source];
     },
   };
-  const image = createImage(
-    { srcset: "image-1080.jpg 1080w" },
-    { naturalWidth: 1080, picture },
-  );
+  const image = createImage({ srcset: "image-1080.jpg 1080w" }, { naturalWidth: 1080, picture });
 
   assert.equal(
     getHighestResolutionImageUrl(image),
@@ -76,9 +66,7 @@ test("includes picture source and lazy srcset candidates", () => {
 });
 
 test("probes an original URL that has no size descriptor", async () => {
-  const widths = new Map([
-    ["https://cdn.example/original.jpg", 2048],
-  ]);
+  const widths = new Map([["https://cdn.example/original.jpg", 2048]]);
   globalThis.Image = class {
     removeAttribute() {}
 
@@ -95,10 +83,7 @@ test("probes an original URL that has no size descriptor", async () => {
     { naturalWidth: 1080 },
   );
 
-  assert.equal(
-    await resolveHighestResolutionImageUrl(image),
-    "https://cdn.example/original.jpg",
-  );
+  assert.equal(await resolveHighestResolutionImageUrl(image), "https://cdn.example/original.jpg");
 });
 
 test("selects an early-captured Instagram candidate for the same asset", () => {
@@ -106,16 +91,19 @@ test("selects an early-captured Instagram candidate for the same asset", () => {
     "https://scontent.cdninstagram.com/v/image_n.jpg?" +
     "stp=dst-jpg_p1080x1080&ig_cache_key=shared";
   const originalUrl =
-    "https://scontent.cdninstagram.com/v/image_n.jpg?" +
-    "stp=dst-jpg&ig_cache_key=shared";
-  instagramImageCandidatesByAsset.set("cache:shared", new Map([
-    [originalUrl, { url: originalUrl, width: 2599, height: 3465 }],
-  ]));
-  const image = createImage({}, {
-    naturalWidth: 1080,
-    src: feedUrl,
-    currentSrc: feedUrl,
-  });
+    "https://scontent.cdninstagram.com/v/image_n.jpg?" + "stp=dst-jpg&ig_cache_key=shared";
+  instagramImageCandidatesByAsset.set(
+    "cache:shared",
+    new Map([[originalUrl, { url: originalUrl, width: 2599, height: 3465 }]]),
+  );
+  const image = createImage(
+    {},
+    {
+      naturalWidth: 1080,
+      src: feedUrl,
+      currentSrc: feedUrl,
+    },
+  );
 
   assert.equal(getHighestResolutionImageUrl(image), originalUrl);
   instagramImageCandidatesByAsset.clear();
@@ -123,43 +111,49 @@ test("selects an early-captured Instagram candidate for the same asset", () => {
 
 test("matches a captured candidate by filename when cache keys differ", () => {
   const feedUrl =
-    "https://scontent.cdninstagram.com/v/image_n.jpg?" +
-    "stp=dst-jpg_p1080x1080&ig_cache_key=feed";
-  const originalUrl =
-    "https://scontent.fra5-1.fna.fbcdn.net/v/image_n.jpg?stp=dst-jpg&oh=signed";
-  instagramImageCandidatesByAsset.set("file:image_n.jpg", new Map([
-    [originalUrl, { url: originalUrl, width: 3072, height: 3840 }],
-  ]));
-  const image = createImage({}, {
-    naturalWidth: 1080,
-    src: feedUrl,
-    currentSrc: feedUrl,
-  });
+    "https://scontent.cdninstagram.com/v/image_n.jpg?" + "stp=dst-jpg_p1080x1080&ig_cache_key=feed";
+  const originalUrl = "https://scontent.fra5-1.fna.fbcdn.net/v/image_n.jpg?stp=dst-jpg&oh=signed";
+  instagramImageCandidatesByAsset.set(
+    "file:image_n.jpg",
+    new Map([[originalUrl, { url: originalUrl, width: 3072, height: 3840 }]]),
+  );
+  const image = createImage(
+    {},
+    {
+      naturalWidth: 1080,
+      src: feedUrl,
+      currentSrc: feedUrl,
+    },
+  );
 
   assert.equal(getHighestResolutionImageUrl(image), originalUrl);
   instagramImageCandidatesByAsset.clear();
 });
 
 test("does not downgrade a stored candidate that already has a width", async () => {
-  const { storeInstagramImageCandidate } = await import(
-    "../src/content/state.js"
+  const { storeInstagramImageCandidate } = await import("../src/content/state.js");
+  const originalUrl = "https://scontent.cdninstagram.com/v/image_n.jpg?stp=dst-jpg&oh=signed";
+  storeInstagramImageCandidate(
+    "file:image_n.jpg",
+    {
+      url: originalUrl,
+      width: 3072,
+      height: 3840,
+    },
+    20,
   );
-  const originalUrl =
-    "https://scontent.cdninstagram.com/v/image_n.jpg?stp=dst-jpg&oh=signed";
-  storeInstagramImageCandidate("file:image_n.jpg", {
-    url: originalUrl,
-    width: 3072,
-    height: 3840,
-  }, 20);
-  storeInstagramImageCandidate("file:image_n.jpg", {
-    url: originalUrl,
-    width: 0,
-    height: 0,
-  }, 20);
+  storeInstagramImageCandidate(
+    "file:image_n.jpg",
+    {
+      url: originalUrl,
+      width: 0,
+      height: 0,
+    },
+    20,
+  );
 
   assert.equal(
-    instagramImageCandidatesByAsset.get("file:image_n.jpg").get(originalUrl)
-      .width,
+    instagramImageCandidatesByAsset.get("file:image_n.jpg").get(originalUrl).width,
     3072,
   );
   instagramImageCandidatesByAsset.clear();

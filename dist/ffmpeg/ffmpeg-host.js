@@ -4,13 +4,16 @@ let preloadedWorker = createMuxWorker();
 preloadedWorker.postMessage({ action: "warmup" });
 
 function createMuxWorker() {
-  const worker = new Worker(
-    chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"),
-    { type: "module" },
+  const worker = new Worker(chrome.runtime.getURL("ffmpeg/ffmpeg-mux-worker.js"), {
+    type: "module",
+  });
+  worker.addEventListener(
+    "error",
+    () => {
+      if (preloadedWorker === worker) preloadedWorker = null;
+    },
+    { once: true },
   );
-  worker.addEventListener("error", () => {
-    if (preloadedWorker === worker) preloadedWorker = null;
-  }, { once: true });
   return worker;
 }
 
@@ -25,12 +28,7 @@ window.addEventListener("message", (event) => {
   const { action, muxId } = event.data;
 
   if (action === "mux" && muxId && event.data.tracks?.length) {
-    startMux(
-      muxId,
-      event.data.tracks,
-      event.data.startTime,
-      event.data.duration,
-    );
+    startMux(muxId, event.data.tracks, event.data.startTime, event.data.duration);
     return;
   }
 
