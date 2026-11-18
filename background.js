@@ -441,14 +441,7 @@ function createDownloadableUrl(blob) {
       ),
     );
   }
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () =>
-      resolve({ url: reader.result, isObjectUrl: false });
-    reader.onerror = () =>
-      reject(new Error("Blob could not be encoded for download."));
-    reader.readAsDataURL(blob);
-  });
+  return blobToDataUrl(blob).then(({ url }) => ({ url, isObjectUrl: false }));
 }
 
 chrome.downloads.onChanged.addListener((delta) => {

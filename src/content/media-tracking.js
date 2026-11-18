@@ -6,16 +6,17 @@ import {
 } from './state.js';
 import { createCaptureId } from './utils.js';
 import { buildMediaActionButtons, attachActionGroup, hideActionGroup,
-  isolateActionGroupEvents, getMediaHoverTargets, showActionGroup,
-  setButtonLabel,
+  isolateActionGroupEvents, showActionGroup, setButtonLabel,
 } from './action-ui.js';
+import { getMediaHoverTargets } from './action-visibility.js';
 import { isInstagramVideoPlayerMedia, syncInstagramNativeVideoControls,
   removeInstagramNativeVideoControls, applyStoryVideoFix, removeStoryVideoFix,
 } from './instagram.js';
 import { TRIM_ICON } from './constants.js';
-import { downloadMedia, previewMedia, togglePictureInPicture,
-  triggerTrim,
+import {
+  downloadMedia, previewMedia, togglePictureInPicture,
 } from './media-download.js';
+import { triggerTrim } from './video-trim.js';
 import { captureVideoFrame } from './capture-core.js';
 import { copyImageToClipboard, copyVideoFrameToClipboard } from './clipboard.js';
 import { openLightbox } from './lightbox.js';

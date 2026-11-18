@@ -1,3 +1,7 @@
+import { videoResolutionCache } from './state.js';
+
+const MAX_CACHED_VIDEO_RESOLUTIONS = 200;
+
 /** Measure the pixel dimensions of a video by probing its metadata. */
 export function measureVideoDimensions(url) {
   return new Promise((resolve) => {
@@ -31,11 +35,31 @@ export function measureVideoDimensions(url) {
   });
 }
 
-/** Measure the pixel area of a video by probing its metadata. */
+/**
+ * Measure a source URL's pixel area, reusing a cached or in-flight probe.
+ * Failed probes are evicted so a later click can retry them. Caching is safe
+ * because a source URL's intrinsic dimensions never change.
+ */
 function measureVideoResolution(url) {
-  return measureVideoDimensions(url).then(
-    (dims) => (dims ? dims.width * dims.height : 0),
-  );
+  const cached = videoResolutionCache.get(url);
+  if (cached) return cached;
+
+  let pending;
+  pending = measureVideoDimensions(url)
+    .then((dims) => (dims ? dims.width * dims.height : 0))
+    .catch(() => 0)
+    .then((pixels) => {
+      if (pixels === 0 && videoResolutionCache.get(url) === pending) {
+        videoResolutionCache.delete(url);
+      }
+      return pixels;
+    });
+
+  videoResolutionCache.set(url, pending);
+  while (videoResolutionCache.size > MAX_CACHED_VIDEO_RESOLUTIONS) {
+    videoResolutionCache.delete(videoResolutionCache.keys().next().value);
+  }
+  return pending;
 }
 
 /** Get the currently active source URL from a video element. */

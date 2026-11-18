@@ -4,7 +4,7 @@ import { showToast } from './toast.js';
 import { downloadMedia, previewMedia } from './media-download.js';
 import { resolveHighestResolutionImageUrl } from './image-resolution.js';
 import { createLightboxCropController } from './crop-overlay.js';
-import { repositionOpenControls } from './action-ui.js';
+import { repositionOpenControls } from './action-visibility.js';
 import { copyImageToClipboard } from './clipboard.js';
 
 /**

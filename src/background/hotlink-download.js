@@ -22,6 +22,12 @@ const MEDIA_CONTENT_TYPE = /^(?:image|video|audio)\//i;
 
 let nextRuleId = 100000;
 
+const PROBE_CACHE_TTL_MS = 60_000;
+const MAX_CACHED_PROBES = 100;
+// URL -> { promise, expires }. Caching the in-flight promise also dedupes two
+// downloads of the same URL started in quick succession.
+const probeCache = new Map();
+
 function isHttpUrl(url) {
   return typeof url === "string" && /^https?:\/\//i.test(url);
 }
@@ -50,14 +56,8 @@ function parseContentLength(header) {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-/**
- * Cheap probe for hotlink protection. It reports a blocked URL only when the
- * server is known to answer with something that is not the media, and refuses
- * the buffered path for media too large to hold in the service worker.
- * Anything unknown (HEAD unsupported, network error) keeps the direct path.
- */
-export async function probeHotlinkProtection(url) {
-  if (!canFetchWithReferrer(url)) return { blocked: false, fetchable: false };
+/** Perform the actual network probe, or return null when the outcome is unknown. */
+async function probeNetwork(url) {
   // A `chrome.downloads` request carries no Origin, Referer or Sec-Fetch-*
   // headers, while a worker fetch always does and may be let through. Strip
   // them so the probe sees what the real download would get.
@@ -74,7 +74,7 @@ export async function probeHotlinkProtection(url) {
       fetch(url, { method: "HEAD", cache: "no-store", redirect: "follow" }),
     );
   } catch {
-    return { blocked: false, fetchable: false };
+    return null;
   }
   const contentType = response.headers.get("Content-Type") || "";
   const blocked =
@@ -86,6 +86,33 @@ export async function probeHotlinkProtection(url) {
     blocked,
     fetchable: length === 0 || length <= MAX_BLOB_DOWNLOAD_BYTES,
   };
+}
+
+/**
+ * Cheap, cached probe for hotlink protection. It reports a blocked URL only
+ * when the server is known to answer with something that is not the media, and
+ * refuses the buffered path for media too large to hold in the service worker.
+ * Anything unknown (HEAD unsupported, network error) keeps the direct path and
+ * is never cached, so a transient failure can be retried on the next download.
+ */
+export async function probeHotlinkProtection(url) {
+  if (!canFetchWithReferrer(url)) return { blocked: false, fetchable: false };
+  const cached = probeCache.get(url);
+  if (cached && cached.expires > Date.now()) return cached.promise;
+
+  let pending;
+  pending = probeNetwork(url).then((result) => {
+    if (result) return result;
+    // Unknown outcome: drop the entry so the next download probes again.
+    if (probeCache.get(url)?.promise === pending) probeCache.delete(url);
+    return { blocked: false, fetchable: false };
+  });
+
+  probeCache.set(url, { promise: pending, expires: Date.now() + PROBE_CACHE_TTL_MS });
+  while (probeCache.size > MAX_CACHED_PROBES) {
+    probeCache.delete(probeCache.keys().next().value);
+  }
+  return pending;
 }
 
 async function updateRule(id, rule) {

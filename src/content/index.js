@@ -20,6 +20,7 @@ import {
 } from './media-tracking.js';
 import { updateAllButtonPositions, updatePreviewButtonVisibility } from './action-ui.js';
 import { closeContextMenu } from './context-menu.js';
+import './action-visibility.js';
 import { initInstagramImageCandidates } from './instagram-image-candidates.js';
 import { initInstagramPostImageUpgrade } from './instagram-post-image.js';
 import {

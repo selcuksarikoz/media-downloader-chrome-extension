@@ -157,6 +157,7 @@ export function captureVideoFrameFromTab(video) {
           return;
         }
         if (isCanvasBlank(context, width, height)) {
+          restore();
           reject(new Error("Captured screen area is empty."));
           return;
         }

@@ -58,6 +58,7 @@ export let lastPointerPosition = null;
 
 export let visibilityStyleCacheFrame = -1;
 export const visibilityStyleCache = new Map();
+export const videoResolutionCache = new Map();
 
 export let cachedModalsFrame = -1;
 export let cachedModals = [];
