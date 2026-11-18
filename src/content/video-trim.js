@@ -12,6 +12,7 @@ import { isTelegramProgressiveUrl, getTimestampedVideoName } from "./utils.js";
 import { BLOB_TRIM_EVENT, BLOB_CONTROL_EVENT, TRIM_ICON, STOP_ICON } from "./constants.js";
 import { preloadFfmpeg } from "./blob-mux.js";
 import { downloadBlobFile } from "./blob-status.js";
+import { sendBlobStoreMessage } from "./blob-store.js";
 import { showToast } from "./toast.js";
 import { refreshMediaActionState, setButtonLabel } from "./action-ui.js";
 import { getVideoUrl } from "./video-resolution.js";

@@ -20,5 +20,7 @@
       }
     }
   ],
-  "rules": {}
+  "rules": {
+    "no-undef": "error"
+  }
 }
